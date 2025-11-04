@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply box-border;
+  }
+
+  html,
+  body,
+  #app {
+    @apply h-full w-full m-0 p-0 bg-dark text-text-soft;
+  }
+
+  body {
+    @apply font-sans antialiased;
+    background:
+      radial-gradient(120% 120% at 20% 0%, rgba(245, 158, 91, 0.03) 0%, rgba(19, 21, 26, 0) 55%),
+      radial-gradient(110% 110% at 100% 0%, rgba(245, 158, 91, 0.02) 0%, rgba(19, 21, 26, 0) 50%),
+      #13151a;
+    color-scheme: dark;
+  }
+
+  a {
+    @apply text-primary transition-colors;
+  }
+
+  a:hover {
+    @apply text-secondary;
+  }
+
+  ::selection {
+    background-color: rgba(245, 158, 91, 0.28);
+    color: #fff;
+  }
+}
+
+@layer components {
+  .safe-area-bottom {
+    @apply pb-safe-bottom;
+  }
+
+  .safe-area-top {
+    @apply pt-safe-top;
+  }
+
+  .surface-card {
+    @apply bg-dark-light border border-dark-border rounded-lg shadow-sm transition-colors duration-200 cursor-pointer;
+  }
+
+  .surface-card:hover {
+    @apply border-primary/50;
+  }
+
+  .surface-panel {
+    @apply bg-dark-lighter/80 border border-dark-border/70 backdrop-blur-xl rounded-lg shadow-sm;
+  }
+
+  .pill-tab {
+    @apply rounded-full border border-transparent bg-transparent px-4 py-2 text-sm font-medium text-text-muted transition-all duration-200 hover:text-text-soft;
+  }
+
+  .pill-tab-active {
+    @apply pill-tab bg-primary text-dark font-semibold;
+  }
+
+  .icon-button {
+    @apply flex h-10 w-10 items-center justify-center rounded-md text-text-muted transition-colors duration-200 hover:bg-dark-lighter/70 hover:text-text-soft;
+  }
+
+  .icon-button-active {
+    @apply icon-button bg-primary text-dark hover:bg-primary hover:text-dark;
+  }
+
+  .btn-primary {
+    @apply rounded-md bg-primary px-4 py-2 text-sm font-medium text-dark transition-colors duration-200 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2;
+  }
+
+  .btn-secondary {
+    @apply rounded-md border border-dark-border bg-dark-light px-4 py-2 text-sm font-medium text-text-soft transition-colors duration-200 hover:bg-primary hover:text-dark;
+  }
+
+  .badge-soft {
+    @apply rounded-full bg-primary/20 px-3 py-1 text-xs font-medium text-primary;
+  }
+}
+
+@layer utilities {
+  .glass {
+    backdrop-filter: blur(18px);
+    background-color: rgba(21, 29, 39, 0.72);
+  }
+}
+
+#app {
+  @apply flex flex-col bg-transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(166, 166, 166, 0.35);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(245, 158, 91, 0.45);
+}
