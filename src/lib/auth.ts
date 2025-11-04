@@ -5,7 +5,7 @@
 
 import { currentUser } from '$stores/auth'
 import { getSetting, saveSetting } from './db'
-import { getNDK, loginWithNIP07, logoutNDK, getCurrentNDKUser } from './ndk'
+import { loginWithNIP07, logoutNDK } from './ndk'
 import type { User } from '$types/user'
 import type { NDKUser } from '@nostr-dev-kit/ndk'
 

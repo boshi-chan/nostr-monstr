@@ -12,6 +12,8 @@ export interface ParsedContent {
   videos: string[]
   quotes: string[] // Event IDs
   embeds: string[] // URLs
+  repostId: string | null
+  nestedEvent: NostrEvent | null
 }
 
 export interface Mention {
@@ -29,24 +31,69 @@ export function parseContent(event: NostrEvent): ParsedContent {
   const quotes: string[] = []
   const embeds: string[] = []
   const mentions: Mention[] = []
+  let repostId: string | null = null
+  let nestedEvent: NostrEvent | null = null
+
+  let workingContent = event.content
+
+  try {
+    const parsed = JSON.parse(event.content)
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof parsed.content === 'string' &&
+      typeof parsed.pubkey === 'string' &&
+      typeof parsed.id === 'string'
+    ) {
+      nestedEvent = {
+        ...parsed,
+        tags: Array.isArray(parsed.tags) ? parsed.tags : [],
+      } as NostrEvent
+      workingContent = nestedEvent.content
+
+    }
+  } catch {
+    // ignore non-json payloads
+  }
 
   // Extract quoted note IDs from tags
-  for (const tag of event.tags) {
-    if (tag[0] === 'e' && tag[1]) {
-      quotes.push(tag[1])
-    }
-    if (tag[0] === 'p' && tag[1]) {
-      mentions.push({
-        pubkey: tag[1],
-        name: tag[2] || tag[1].slice(0, 8),
-        index: -1, // Will be updated when parsing content
-      })
+  const baseTags = Array.isArray(event.tags) ? (event.tags as string[][]) : []
+  const nestedTags = nestedEvent && Array.isArray(nestedEvent.tags) ? (nestedEvent.tags as string[][]) : []
+
+  const processTags = (tags: string[][], allowRepostCandidate: boolean) => {
+    for (const tag of tags) {
+      if (!Array.isArray(tag) || tag.length < 2) continue
+      const [type, value] = tag
+      if (!value) continue
+      if (type === 'e') {
+        const marker = tag[3] || tag[2] || ''
+        if (marker === 'mention' || marker === 'root' || marker === 'reply') {
+          quotes.push(value)
+        } else if (!marker) {
+          if (allowRepostCandidate && !repostId) {
+            repostId = value
+          } else {
+            quotes.push(value)
+          }
+        }
+      } else if (type === 'p') {
+        mentions.push({
+          pubkey: value,
+          name: tag[2] || value.slice(0, 8),
+          index: -1,
+        })
+      }
     }
   }
 
+  processTags(baseTags, true)
+  if (nestedTags.length > 0) {
+    processTags(nestedTags, false)
+  }
+
   // Parse content for URLs and mentions
-  let content = event.content
-  
+  const content = workingContent
+
   // Find image URLs
   const imageRegex = /https?:\/\/[^\s]+\.(jpg|jpeg|png|gif|webp)/gi
   let match
@@ -87,6 +134,8 @@ export function parseContent(event: NostrEvent): ParsedContent {
     videos,
     quotes,
     embeds,
+    repostId,
+    nestedEvent,
   }
 }
 

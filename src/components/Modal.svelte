@@ -12,9 +12,15 @@
 
 {#if isOpen}
   <div class="fixed inset-0 z-50 flex items-end md:items-center justify-center bg-black/50">
+    <button
+      type="button"
+      class="absolute inset-0 w-full h-full bg-transparent cursor-default"
+      aria-label="Close modal"
+      on:click={handleBackdropClick}
+    />
     <div
-      class="bg-dark rounded-t-2xl md:rounded-2xl w-full md:w-96 max-h-[90vh] overflow-y-auto shadow-2xl animate-slide-up"
-      on:click|stopPropagation
+      class="relative bg-dark rounded-t-2xl md:rounded-2xl w-full md:w-96 max-h-[90vh] overflow-y-auto shadow-2xl animate-slide-up"
+      on:pointerdown|stopPropagation
     >
       <!-- Header -->
       <div class="sticky top-0 flex items-center justify-between p-4 border-b border-dark-light bg-dark">

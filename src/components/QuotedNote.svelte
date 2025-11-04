@@ -1,11 +1,40 @@
 <script lang="ts">
   import { feedEvents } from '$stores/feed'
   import { formatDate } from '$lib/utils'
+  import { getNDK } from '$lib/ndk'
+  import type { NostrEvent } from '$types/nostr'
   import UserProfile from './UserProfile.svelte'
 
   export let eventId: string
 
-  $: quotedEvent = $feedEvents.find(e => e.id === eventId)
+  const ndk = getNDK()
+  let remoteEvent: NostrEvent | null = null
+  let loading = false
+
+  $: storeEvent = $feedEvents.find(e => e.id === eventId) ?? null
+  $: quotedEvent = storeEvent ?? remoteEvent
+  $: if (!quotedEvent && !loading) {
+    loading = true
+    void fetchQuotedEvent()
+  }
+
+  async function fetchQuotedEvent(): Promise<void> {
+    try {
+      const results = (await ndk.fetchEvents(
+        { ids: [eventId], limit: 1 },
+        { closeOnEose: true }
+      )) as Set<any>
+
+      for (const ndkEvent of results) {
+        remoteEvent = ndkEvent.rawEvent() as NostrEvent
+        break
+      }
+    } catch (err) {
+      console.warn('Failed to fetch quoted note', err)
+    } finally {
+      loading = false
+    }
+  }
 </script>
 
 {#if quotedEvent}

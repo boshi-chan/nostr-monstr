@@ -1,9 +1,12 @@
 <script lang="ts">
   import { activeTab } from '$stores/nav'
   import Navbar from './Navbar.svelte'
+  import Compose from './Compose.svelte'
   import Home from './pages/Home.svelte'
   import Messages from './pages/Messages.svelte'
+  import Notifications from './pages/Notifications.svelte'
   import Profile from './pages/Profile.svelte'
+  import Settings from './pages/Settings.svelte'
 </script>
 
 <div class="flex h-screen w-screen flex-col bg-dark md:flex-row">
@@ -18,15 +21,22 @@
       <Home />
     {:else if $activeTab === 'messages'}
       <Messages />
+    {:else if $activeTab === 'notifications'}
+      <Notifications />
     {:else if $activeTab === 'profile'}
       <Profile />
+    {:else if $activeTab === 'settings'}
+      <Settings />
     {/if}
   </main>
 
   <!-- Bottom navbar for mobile -->
-  <div class="fixed bottom-0 left-0 right-0 z-50 md:hidden">
+  <div class="fixed bottom-0 left-0 right-0 z-40 md:hidden">
     <Navbar />
   </div>
+
+  <!-- Compose modal -->
+  <Compose />
 </div>
 
 <style>

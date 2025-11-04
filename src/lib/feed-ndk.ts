@@ -1,579 +1,657 @@
 /**
- * Feed management using NDK with proper Svelte reactivity
- * FIXED for Svelte 4: Using array-based store instead of Map
+ * Feed management with NDK
+ * Handles following feed, global feed, and event subscriptions
  */
 
-import { writable, derived, get } from 'svelte/store'
-import { getNDK } from './ndk'
-import type { NDKEvent, NDKFilter, NDKSubscription } from '@nostr-dev-kit/ndk'
+import { get } from 'svelte/store'
+import { getNDK, getCurrentNDKUser } from './ndk'
+import {
+  feedEvents,
+  activeSubscriptions,
+  feedLoading,
+  feedError,
+  following,
+  circles,
+  longReadAuthors,
+  userEventIds,
+} from '$stores/feed'
+import { parseMetadataEvent, fetchUserMetadata } from './metadata'
+import { feedSource, type FeedSource } from '$stores/feedSource'
 import type { NostrEvent } from '$types/nostr'
+import { NDKEvent, type NDKSubscriptionOptions } from '@nostr-dev-kit/ndk'
 
-// Convert NDK event to our NostrEvent type
-function ndkEventToNostrEvent(ndkEvent: NDKEvent): NostrEvent {
-  return {
-    id: ndkEvent.id,
-    pubkey: ndkEvent.pubkey,
-    created_at: ndkEvent.created_at || 0,
-    kind: ndkEvent.kind || 0,
-    tags: ndkEvent.tags,
-    content: ndkEvent.content,
-    sig: ndkEvent.sig || '',
-  }
-}
+const subscriptionRefs = new Map<string, any>()
+const eventCache = new Map<string, NostrEvent>()
 
-// Fetch author profile in background
-async function fetchAuthorProfile(ndk: any, pubkey: string) {
-  try {
-    const author = ndk.getUser({ pubkey })
-    if (!author.profile) {
-      await author.fetchProfile()
-    }
-  } catch (err) {
-    // Silently fail - profile fetching is not critical
-  }
-}
+type FeedOrigin = FeedSource | 'local'
 
-// Feed events store - FIXED: Use array instead of Map for Svelte 4 reactivity
-const feedEventsArray = writable<NostrEvent[]>([])
-
-// Derived array for easy iteration with deduplication
-export const feedEvents = derived(feedEventsArray, $events => {
-  // Deduplicate by event ID
-  const seen = new Set<string>()
-  const unique = $events.filter(e => {
-    if (seen.has(e.id)) {
-      console.warn('⚠️ Duplicate event detected:', e.id)
-      return false
-    }
-    seen.add(e.id)
-    return true
-  })
-  return unique.sort((a, b) => b.created_at - a.created_at)
-})
-
-// Loading state
-export const isLoadingFeed = writable(false)
-
-// User contacts (following list)
-export const userContacts = writable<Set<string>>(new Set())
-
-// Contacts of contacts (circles)
-export const contactsOfContacts = writable<Set<string>>(new Set())
-
-// Active subscriptions
-let activeSubscriptions: Map<string, NDKSubscription> = new Map()
-let eventCache: Map<string, NostrEvent> = new Map() // Track events by ID
+// Debounce settings to prevent firehose
+const FEED_DEBOUNCE_MS = 100
+const MAX_FEED_SIZE = 120
+const BATCH_SIZE = 30
+let debounceTimeout: ReturnType<typeof setTimeout> | null = null
+let pendingEvents: Array<{ event: NostrEvent; origin: FeedOrigin }> = []
 
 /**
- * Subscribe to global feed
- * Shows all recent notes from all users
+ * Queue event for debounced feed update
  */
-export function subscribeToGlobalFeed() {
-  try {
-    const ndk = getNDK()
-
-    // Close existing global subscription
-    const existingSub = activeSubscriptions.get('global')
-    if (existingSub) {
-      console.log('⏹️ Stopping existing global subscription')
-      existingSub.stop()
-    }
-
-    isLoadingFeed.set(true)
-    console.log('🌍 Starting global feed subscription')
-    console.log('🌍 NDK instance:', ndk ? 'exists' : 'MISSING')
-
-    const filter: NDKFilter = {
-      kinds: [1], // Short text notes
-      limit: 100,
-    }
-
-    console.log('🌍 Subscribing with filter:', filter)
-    const subscription = ndk.subscribe(filter, { closeOnEose: false })
-    console.log('🌍 Subscription created:', subscription ? 'exists' : 'MISSING')
-
-    let eventCount = 0
-
-    subscription.on('event', (event: NDKEvent) => {
-      eventCount++
-      console.log(`📥 EVENT #${eventCount}: ${event.id.slice(0, 8)}`)
-      
-      const nostrEvent = ndkEventToNostrEvent(event)
-      
-      // FIXED: Check if already have this event
-      if (eventCache.has(nostrEvent.id)) {
-        console.log('📥 DUPLICATE - skipping')
-        return
-      }
-      
-      eventCache.set(nostrEvent.id, nostrEvent)
-      
-      // FIXED: Update array directly - triggers Svelte reactivity
-      feedEventsArray.update(events => {
-        // Create new array to trigger reactivity
-        const newArray = [...events, nostrEvent]
-        console.log(`📥 Array updated: ${events.length} → ${newArray.length} events`)
-        return newArray
-      })
-      
-      console.log('📥 Global event:', nostrEvent.id.slice(0, 8), '- Total:', eventCache.size)
-    })
-
-    subscription.on('eose', () => {
-      console.log('✓ Global feed EOSE - loaded', eventCache.size, 'events')
-      console.log('✓ Store check:', get(feedEventsArray).length, 'events in store')
-      isLoadingFeed.set(false)
-    })
-
-    subscription.on('error', (err: any) => {
-      console.error('❌ Global feed error:', err)
-      isLoadingFeed.set(false)
-    })
-
-    activeSubscriptions.set('global', subscription)
-    console.log('🌍 Global subscription registered')
-  } catch (err) {
-    console.error('❌ Failed to subscribe to global feed:', err)
-    isLoadingFeed.set(false)
+export function addEventToFeed(event: NostrEvent, origin: FeedOrigin = 'global'): void {
+  const currentFeed = get(feedSource)
+  if (!shouldIncludeEvent(origin, currentFeed)) {
+    return
   }
+
+  if (eventCache.has(event.id)) {
+    return
+  }
+
+  eventCache.set(event.id, event)
+  recordUserEvent(event)
+
+  if (event.kind === 0) {
+    parseMetadataEvent(event)
+  } else {
+    void fetchUserMetadata(event.pubkey)
+  }
+
+  pendingEvents.push({ event, origin })
+
+  if (!debounceTimeout) {
+    debounceTimeout = setTimeout(flushPendingEvents, FEED_DEBOUNCE_MS)
+  }
+}
+
+function shouldIncludeEvent(origin: FeedOrigin, currentFeed: FeedSource): boolean {
+  if (origin === 'local') {
+    return true
+  }
+
+  return origin === currentFeed
+}
+
+function flushPendingEvents(): void {
+  if (pendingEvents.length === 0) {
+    debounceTimeout = null
+    return
+  }
+
+  const currentFeed = get(feedSource)
+  const chunk = pendingEvents.splice(0, BATCH_SIZE)
+  const eventsToMerge: NostrEvent[] = []
+
+  for (const { event, origin } of chunk) {
+    if (shouldIncludeEvent(origin, currentFeed)) {
+      eventsToMerge.push(event)
+    } else {
+      eventCache.delete(event.id)
+    }
+  }
+
+  if (eventsToMerge.length > 0) {
+    feedEvents.update(existing => {
+      const combined = [...eventsToMerge, ...existing]
+      combined.sort((a, b) => b.created_at - a.created_at)
+
+      const seen = new Set<string>()
+      const next: NostrEvent[] = []
+
+      for (const ev of combined) {
+        if (seen.has(ev.id)) continue
+        seen.add(ev.id)
+        next.push(ev)
+        if (next.length >= MAX_FEED_SIZE) break
+      }
+
+      // Keep cache size under control
+      if (eventCache.size > MAX_FEED_SIZE * 2) {
+        const keep = new Set(next.map(ev => ev.id))
+        for (const key of eventCache.keys()) {
+          if (!keep.has(key)) {
+            eventCache.delete(key)
+          }
+        }
+      }
+
+      return next
+    })
+  }
+
+  if (pendingEvents.length > 0) {
+    debounceTimeout = setTimeout(flushPendingEvents, FEED_DEBOUNCE_MS)
+  } else {
+    debounceTimeout = null
+  }
+}
+
+/**
+ * Clear all feed events
+ */
+export function clearFeed(): void {
+  if (debounceTimeout) {
+    clearTimeout(debounceTimeout)
+    debounceTimeout = null
+  }
+  pendingEvents = []
+  feedEvents.set([])
+  eventCache.clear()
+}
+
+function recordUserEvent(event: NostrEvent): void {
+  const user = getCurrentNDKUser()
+  if (!user?.pubkey) return
+  if (event.pubkey !== user.pubkey) return
+
+  userEventIds.update(set => {
+    if (set.has(event.id)) return set
+    const next = new Set(set)
+    next.add(event.id)
+    return next
+  })
+}
+
+async function fetchFollowing(pubkey: string): Promise<Set<string>> {
+  const ndk = getNDK()
+  const follows = new Set<string>()
+
+  await new Promise<void>(resolve => {
+    const sub = ndk.subscribe(
+      { authors: [pubkey], kinds: [3], limit: 1 },
+      { closeOnEose: true } as NDKSubscriptionOptions,
+      undefined,
+      false
+    )
+
+    const finish = () => {
+      sub.stop()
+      resolve()
+    }
+
+    sub.on('event', (event: any) => {
+      for (const tag of event.tags) {
+        if (tag[0] === 'p' && tag[1]) {
+          follows.add(tag[1])
+        }
+      }
+    })
+
+    sub.on('eose', finish)
+    ;(sub as any).on?.('error', (err: unknown) => {
+      console.warn('Failed to fetch following list:', err)
+      finish()
+    })
+  })
+
+  return follows
+}
+
+async function fetchCirclesFromFollowing(follows: Set<string>): Promise<Set<string>> {
+  const ndk = getNDK()
+  const circleSet = new Set<string>()
+  const authors = Array.from(follows)
+
+  if (authors.length === 0) {
+    return circleSet
+  }
+
+  const chunkSize = 50
+
+  const fetchChunk = (chunk: string[]) =>
+    new Promise<void>(resolve => {
+      const sub = ndk.subscribe(
+        { authors: chunk, kinds: [3], limit: 1 },
+        { closeOnEose: true } as NDKSubscriptionOptions,
+        undefined,
+        false
+      )
+
+      const finish = () => {
+        sub.stop()
+        resolve()
+      }
+
+      sub.on('event', (event: any) => {
+        for (const tag of event.tags) {
+          if (tag[0] === 'p' && tag[1] && !follows.has(tag[1])) {
+            circleSet.add(tag[1])
+          }
+        }
+      })
+
+      sub.on('eose', finish)
+      ;(sub as any).on?.('error', (err: unknown) => {
+        console.warn('Failed to fetch circles for chunk:', err)
+        finish()
+      })
+    })
+
+  for (let i = 0; i < authors.length; i += chunkSize) {
+    const chunk = authors.slice(i, i + chunkSize)
+    await fetchChunk(chunk)
+  }
+
+  return circleSet
+}
+
+function registerSubscription(label: FeedSource, subscription: any): void {
+  const subId = `${label}:${Date.now()}`
+  subscriptionRefs.set(subId, subscription)
+  activeSubscriptions.update(subs => {
+    const next = new Set(subs)
+    next.add(subId)
+    return next
+  })
+}
+
+function subscribeWithFilter(
+  filter: Record<string, any>,
+  label: FeedSource,
+  options?: NDKSubscriptionOptions
+): void {
+  const ndk = getNDK()
+  const subscription = ndk.subscribe(filter, options ?? ({ closeOnEose: false } as NDKSubscriptionOptions), undefined, false)
+
+  registerSubscription(label, subscription)
+
+  subscription.on('event', (event: any) => {
+    addEventToFeed(event, label)
+  })
+
+  subscription.on('eose', () => {
+    feedLoading.set(false)
+  })
+
+  ;(subscription as any).on?.('error', (err: unknown) => {
+    console.error(`${label} feed error:`, err)
+    feedError.set(`Feed error: ${String(err)}`)
+    feedLoading.set(false)
+  })
+}
+
+async function ensureFollowing(pubkey: string): Promise<Set<string>> {
+  const existing = get(following)
+  if (existing.size > 0) {
+    return new Set(existing)
+  }
+  const fetched = await fetchFollowing(pubkey)
+  const next = new Set(fetched)
+  following.set(next)
+  return next
+}
+
+async function ensureCircles(follows: Set<string>): Promise<Set<string>> {
+  if (follows.size === 0) {
+    circles.set(new Set())
+    return new Set()
+  }
+  const existing = get(circles)
+  if (existing.size > 0) {
+    return new Set(existing)
+  }
+  const fetched = await fetchCirclesFromFollowing(follows)
+  circles.set(fetched)
+  return fetched
 }
 
 /**
  * Subscribe to following feed
- * Shows notes from users you follow
  */
-export function subscribeToFollowingFeed(pubkey: string) {
-  console.log('═══════════════════════════════════════')
-  console.log('📞 subscribeToFollowingFeed() CALLED')
-  console.log('pubkey:', pubkey ? pubkey.slice(0, 8) : 'EMPTY')
-  console.log('═══════════════════════════════════════')
-  
+export async function subscribeToFollowingFeed(): Promise<void> {
   try {
-    const ndk = getNDK()
-
-    if (!pubkey) {
-      console.warn('⚠️ subscribeToFollowingFeed called with empty pubkey')
-      subscribeToGlobalFeed()
+    const user = getCurrentNDKUser()
+    if (!user?.pubkey) {
+      feedError.set('Not authenticated')
+      feedLoading.set(false)
       return
     }
 
-    // Close existing following subscription
-    const existingSub = activeSubscriptions.get('following')
-    if (existingSub) {
-      console.log('⏹️ Stopping existing following subscription')
-      existingSub.stop()
+    feedLoading.set(true)
+    feedError.set(null)
+
+    const follows = await fetchFollowing(user.pubkey)
+    const followingSet = new Set(follows)
+    following.set(followingSet)
+
+    // refresh circles in background
+    void ensureCircles(followingSet)
+
+    const authors = Array.from(followingSet)
+    if (authors.length === 0) {
+      feedLoading.set(false)
+      feedError.set('Follow someone to see this feed')
+      return
     }
 
-    isLoadingFeed.set(true)
-    console.log('👥 Fetching contacts for:', pubkey.slice(0, 8))
-
-    // First, fetch the user's contact list
-    const contactListFilter: NDKFilter = {
-      kinds: [3], // Contact list
-      authors: [pubkey],
-      limit: 1,
-    }
-
-    const contactListSub = ndk.subscribe(contactListFilter, { closeOnEose: true })
-
-    contactListSub.on('event', (event: NDKEvent) => {
-      // Extract pubkeys from tags
-      const contacts = new Set<string>()
-      for (const tag of event.tags) {
-        if (tag[0] === 'p' && tag[1]) {
-          contacts.add(tag[1])
-        }
-      }
-
-      userContacts.set(contacts)
-      console.log(`📋 Loaded ${contacts.size} contacts`)
-
-      // Now subscribe to notes from these contacts
-      if (contacts.size > 0) {
-        const feedFilter: NDKFilter = {
-          kinds: [1, 6, 16], // Notes, reposts, generic reposts
-          authors: Array.from(contacts),
-          limit: 50,
-        }
-
-        const feedSub = ndk.subscribe(feedFilter, { closeOnEose: false })
-
-        feedSub.on('event', (event: NDKEvent) => {
-          const nostrEvent = ndkEventToNostrEvent(event)
-          
-          // FIXED: Check if already have this event
-          if (eventCache.has(nostrEvent.id)) {
-            return
-          }
-          
-          eventCache.set(nostrEvent.id, nostrEvent)
-          
-          // FIXED: Update array directly
-          feedEventsArray.update(events => {
-            return [...events, nostrEvent]
-          })
-          
-          console.log('📥 Following event:', nostrEvent.id.slice(0, 8), '- Total:', eventCache.size)
-        })
-
-        feedSub.on('eose', () => {
-          console.log('✓ Following feed EOSE - loaded', eventCache.size, 'events')
-          isLoadingFeed.set(false)
-        })
-
-        feedSub.on('error', (err: any) => {
-          console.error('❌ Following feed error:', err)
-          isLoadingFeed.set(false)
-        })
-
-        activeSubscriptions.set('following', feedSub)
-      } else {
-        console.log('⚠️ No contacts found')
-        isLoadingFeed.set(false)
-      }
-    })
-
-    contactListSub.on('eose', () => {
-      const contacts = get(userContacts)
-      if (contacts.size === 0) {
-        console.log('⚠️ No contacts found, showing global feed')
-        isLoadingFeed.set(false)
-      }
-    })
-
-    contactListSub.on('error', (err: any) => {
-      console.error('❌ Contact list fetch error:', err)
-      isLoadingFeed.set(false)
-    })
+    subscribeWithFilter(
+      {
+        authors,
+        kinds: [1, 6, 16],
+        limit: 150,
+        since: Math.floor(Date.now() / 1000) - 86400 * 3,
+      },
+      'following'
+    )
   } catch (err) {
-    console.error('❌ Failed to subscribe to following feed:', err)
-    isLoadingFeed.set(false)
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('Failed to subscribe to following feed:', err)
+    feedError.set(message)
+    feedLoading.set(false)
   }
 }
 
 /**
  * Subscribe to circles feed (contacts of contacts)
  */
-export function subscribeToCirclesFeed(pubkey: string) {
-  console.log('═══════════════════════════════════════')
-  console.log('📞 subscribeToCirclesFeed() CALLED')
-  console.log('pubkey:', pubkey ? pubkey.slice(0, 8) : 'EMPTY')
-  console.log('═══════════════════════════════════════')
-  
+export async function subscribeToCirclesFeed(): Promise<void> {
   try {
-    const ndk = getNDK()
-
-    if (!pubkey) {
-      console.warn('⚠️ subscribeToCirclesFeed called with empty pubkey')
-      subscribeToGlobalFeed()
+    const user = getCurrentNDKUser()
+    if (!user?.pubkey) {
+      feedError.set('Not authenticated')
+      feedLoading.set(false)
       return
     }
 
-    // Close existing circles subscription
-    const existingSub = activeSubscriptions.get('circles')
-    if (existingSub) {
-      console.log('⏹️ Stopping existing circles subscription')
-      existingSub.stop()
+    feedLoading.set(true)
+    feedError.set(null)
+
+    const followSet = await ensureFollowing(user.pubkey)
+    if (followSet.size === 0) {
+      feedLoading.set(false)
+      feedError.set('Follow someone to build your circles')
+      return
     }
 
-    isLoadingFeed.set(true)
-    console.log('🔄 Fetching circles for:', pubkey.slice(0, 8))
+    const circleSet = await ensureCircles(followSet)
 
-    // First fetch user's contact list if we don't have it
-    let contacts = get(userContacts)
-
-    if (contacts.size === 0) {
-      console.log('⚠️ No contacts in store, fetching...')
-      
-      // Fetch contacts first
-      const contactListFilter: NDKFilter = {
-        kinds: [3],
-        authors: [pubkey],
-        limit: 1,
-      }
-
-      const contactListSub = ndk.subscribe(contactListFilter, { closeOnEose: true })
-
-      contactListSub.on('event', (event: NDKEvent) => {
-        const newContacts = new Set<string>()
-        for (const tag of event.tags) {
-          if (tag[0] === 'p' && tag[1]) {
-            newContacts.add(tag[1])
-          }
-        }
-        userContacts.set(newContacts)
-        contacts = newContacts
-        console.log(`📋 Loaded ${newContacts.size} contacts for circles`)
-      })
-
-      contactListSub.on('eose', () => {
-        if (contacts.size === 0) {
-          console.log('⚠️ No contacts found for circles feed')
-          isLoadingFeed.set(false)
-          return
-        }
-        
-        fetchCirclesContent(ndk, contacts)
-      })
-
-      contactListSub.on('error', (err: any) => {
-        console.error('❌ Contact list fetch error:', err)
-        isLoadingFeed.set(false)
-      })
-    } else {
-      console.log(`📋 Using ${contacts.size} existing contacts for circles`)
-      fetchCirclesContent(ndk, contacts)
+    const authors = Array.from(circleSet)
+    if (authors.length === 0) {
+      feedLoading.set(false)
+      feedError.set('No second-degree contacts yet')
+      return
     }
+
+    subscribeWithFilter(
+      {
+        authors,
+        kinds: [1, 6, 16],
+        limit: 150,
+        since: Math.floor(Date.now() / 1000) - 86400 * 3,
+      },
+      'circles'
+    )
   } catch (err) {
-    console.error('❌ Failed to subscribe to circles feed:', err)
-    isLoadingFeed.set(false)
-  }
-}
-
-function fetchCirclesContent(ndk: any, contacts: Set<string>) {
-  try {
-    // Fetch contact lists of contacts
-    const contactListsFilter: NDKFilter = {
-      kinds: [3],
-      authors: Array.from(contacts),
-      limit: 50,
-    }
-
-    const circlesContacts = new Set<string>()
-    const contactListsSub = ndk.subscribe(contactListsFilter, { closeOnEose: true })
-
-    contactListsSub.on('event', (event: NDKEvent) => {
-      for (const tag of event.tags) {
-        if (tag[0] === 'p' && tag[1] && !contacts.has(tag[1])) {
-          circlesContacts.add(tag[1])
-        }
-      }
-    })
-
-    contactListsSub.on('eose', () => {
-      contactsOfContacts.set(circlesContacts)
-      console.log(`📋 Loaded ${circlesContacts.size} circles contacts`)
-
-      // Subscribe to their notes
-      if (circlesContacts.size > 0) {
-        const feedFilter: NDKFilter = {
-          kinds: [1, 6, 16],
-          authors: Array.from(circlesContacts).slice(0, 100), // Limit to avoid too many authors
-          limit: 50,
-        }
-
-        const feedSub = ndk.subscribe(feedFilter, { closeOnEose: false })
-
-        feedSub.on('event', (event: NDKEvent) => {
-          const nostrEvent = ndkEventToNostrEvent(event)
-          
-          // FIXED: Check if already have this event
-          if (eventCache.has(nostrEvent.id)) {
-            return
-          }
-          
-          eventCache.set(nostrEvent.id, nostrEvent)
-          
-          // FIXED: Update array directly
-          feedEventsArray.update(events => {
-            return [...events, nostrEvent]
-          })
-          
-          console.log('📥 Circles event:', nostrEvent.id.slice(0, 8), '- Total:', eventCache.size)
-        })
-
-        feedSub.on('eose', () => {
-          console.log('✓ Circles feed EOSE - loaded', eventCache.size, 'events')
-          isLoadingFeed.set(false)
-        })
-
-        feedSub.on('error', (err: any) => {
-          console.error('❌ Circles feed error:', err)
-          isLoadingFeed.set(false)
-        })
-
-        activeSubscriptions.set('circles', feedSub)
-      } else {
-        console.log('⚠️ No circles contacts found')
-        isLoadingFeed.set(false)
-      }
-    })
-
-    contactListsSub.on('error', (err: any) => {
-      console.error('❌ Circles contact lists fetch error:', err)
-      isLoadingFeed.set(false)
-    })
-  } catch (err) {
-    console.error('❌ Failed to fetch circles content:', err)
-    isLoadingFeed.set(false)
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('Failed to subscribe to circles feed:', err)
+    feedError.set(message)
+    feedLoading.set(false)
   }
 }
 
 /**
- * Subscribe to long-form content from your contacts
+ * Subscribe to long-form content (kind 30023)
  */
-export function subscribeToLongReads(pubkey?: string) {
-  console.log('═══════════════════════════════════════')
-  console.log('📞 subscribeToLongReads() CALLED')
-  console.log('pubkey:', pubkey ? pubkey.slice(0, 8) : 'undefined/global')
-  console.log('═══════════════════════════════════════')
-  
+export async function subscribeToLongReadsFeed(): Promise<void> {
   try {
-    const ndk = getNDK()
-
-    // Close existing long-reads subscription
-    const existingSub = activeSubscriptions.get('long-reads')
-    if (existingSub) {
-      console.log('⏹️ Stopping existing long-reads subscription')
-      existingSub.stop()
+    const user = getCurrentNDKUser()
+    if (!user?.pubkey) {
+      feedError.set('Not authenticated')
+      feedLoading.set(false)
+      return
     }
 
-    isLoadingFeed.set(true)
+    feedLoading.set(true)
+    feedError.set(null)
 
-    // If pubkey provided, only fetch from contacts
-    if (pubkey) {
-      console.log('📖 Fetching long-reads from contacts')
-      
-      const contacts = get(userContacts)
-      
-      if (contacts.size === 0) {
-        console.log('⚠️ No contacts found, fetching all long-reads')
-        subscribeToLongReadsGlobal()
-        return
-      }
-
-      const filter: NDKFilter = {
-        kinds: [30023], // Long-form content
-        authors: Array.from(contacts),
-        limit: 30,
-      }
-
-      const subscription = ndk.subscribe(filter, { closeOnEose: false })
-
-      subscription.on('event', (event: NDKEvent) => {
-        const nostrEvent = ndkEventToNostrEvent(event)
-        
-        // FIXED: Check if already have this event
-        if (eventCache.has(nostrEvent.id)) {
-          return
-        }
-        
-        eventCache.set(nostrEvent.id, nostrEvent)
-        
-        // FIXED: Update array directly
-        feedEventsArray.update(events => {
-          return [...events, nostrEvent]
-        })
-        
-        console.log('📥 Long-read event:', nostrEvent.id.slice(0, 8), '- Total:', eventCache.size)
-      })
-
-      subscription.on('eose', () => {
-        console.log('✓ Long-reads feed EOSE - loaded', eventCache.size, 'events')
-        isLoadingFeed.set(false)
-      })
-
-      subscription.on('error', (err: any) => {
-        console.error('❌ Long-reads feed error:', err)
-        isLoadingFeed.set(false)
-      })
-
-      activeSubscriptions.set('long-reads', subscription)
-    } else {
-      subscribeToLongReadsGlobal()
+    const followSet = await ensureFollowing(user.pubkey)
+    if (followSet.size === 0) {
+      feedLoading.set(false)
+      feedError.set('Follow someone to build your long read feed')
+      return
     }
+
+    await ensureCircles(followSet)
+
+    const authors = Array.from(get(longReadAuthors))
+    if (authors.length === 0) {
+      feedLoading.set(false)
+      feedError.set('No long-read authors discovered yet')
+      return
+    }
+
+    subscribeWithFilter(
+      {
+        authors,
+        kinds: [30023],
+        limit: 100,
+        since: Math.floor(Date.now() / 1000) - 86400 * 30,
+      },
+      'long-reads'
+    )
   } catch (err) {
-    console.error('❌ Failed to subscribe to long-reads:', err)
-    isLoadingFeed.set(false)
-  }
-}
-
-function subscribeToLongReadsGlobal() {
-  try {
-    const ndk = getNDK()
-    
-    const filter: NDKFilter = {
-      kinds: [30023], // Long-form content
-      limit: 30,
-    }
-
-    const subscription = ndk.subscribe(filter, { closeOnEose: false })
-
-    subscription.on('event', (event: NDKEvent) => {
-      const nostrEvent = ndkEventToNostrEvent(event)
-      
-      // FIXED: Check if already have this event
-      if (eventCache.has(nostrEvent.id)) {
-        return
-      }
-      
-      eventCache.set(nostrEvent.id, nostrEvent)
-      
-      // FIXED: Update array directly
-      feedEventsArray.update(events => {
-        return [...events, nostrEvent]
-      })
-      
-      console.log('📥 Long-read event (global):', nostrEvent.id.slice(0, 8), '- Total:', eventCache.size)
-    })
-
-    subscription.on('eose', () => {
-      console.log('✓ Long-reads feed EOSE (global) - loaded', eventCache.size, 'events')
-      isLoadingFeed.set(false)
-    })
-
-    subscription.on('error', (err: any) => {
-      console.error('❌ Long-reads feed error (global):', err)
-      isLoadingFeed.set(false)
-    })
-
-    activeSubscriptions.set('long-reads', subscription)
-  } catch (err) {
-    console.error('❌ Failed to subscribe to long-reads (global):', err)
-    isLoadingFeed.set(false)
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('Failed to subscribe to long reads:', err)
+    feedError.set(message)
+    feedLoading.set(false)
   }
 }
 
 /**
- * Clear feed events
+ * Subscribe to global feed
  */
-export function clearFeed() {
-  feedEventsArray.set([])
-  eventCache.clear()
-  console.log('🧹 Feed cleared')
+export async function subscribeToGlobalFeed(): Promise<void> {
+  try {
+    feedLoading.set(true)
+    feedError.set(null)
+
+    subscribeWithFilter(
+      {
+        kinds: [1],
+        limit: 100,
+        since: Math.floor(Date.now() / 1000) - 3600,
+      },
+      'global'
+    )
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('Failed to subscribe to global feed:', err)
+    feedError.set(message)
+    feedLoading.set(false)
+  }
+}
+
+/**
+ * Stop specific subscription
+ */
+export function stopSubscription(subId: string): void {
+  const sub = subscriptionRefs.get(subId)
+  if (sub) {
+    sub.stop()
+    subscriptionRefs.delete(subId)
+    activeSubscriptions.update(subs => {
+      const newSubs = new Set(subs)
+      newSubs.delete(subId)
+      return newSubs
+    })
+  }
 }
 
 /**
  * Stop all subscriptions
  */
-export function stopAllSubscriptions() {
-  for (const subscription of activeSubscriptions.values()) {
-    subscription.stop()
+export function stopAllSubscriptions(): void {
+  for (const sub of subscriptionRefs.values()) {
+    sub?.stop?.()
   }
-  activeSubscriptions.clear()
+  subscriptionRefs.clear()
+  activeSubscriptions.set(new Set())
 }
 
 /**
- * Build thread from event
+ * Get event by ID
+ */
+export function getEventById(id: string): NostrEvent | undefined {
+  return eventCache.get(id)
+}
+
+/**
+ * Get replies to an event
+ */
+export function getReplies(eventId: string, allEvents: NostrEvent[]): NostrEvent[] {
+  return allEvents.filter(event => {
+    // Check if event has 'e' tag referencing the parent
+    for (const tag of event.tags) {
+      if (tag[0] === 'e' && tag[1] === eventId) {
+        return true
+      }
+    }
+    return false
+  })
+}
+
+/**
+ * Build thread for an event (replies + parent)
  */
 export function buildThread(event: NostrEvent, allEvents: NostrEvent[]): NostrEvent[] {
   const thread: NostrEvent[] = [event]
 
-  // Find replies
-  const replies = allEvents.filter(e => {
-    return e.tags.some(tag => tag[0] === 'e' && tag[1] === event.id)
-  })
+  // Find parent events
+  let current = event
+  const visited = new Set<string>()
 
-  thread.push(...replies.sort((a, b) => a.created_at - b.created_at))
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id)
+
+    // Find parent
+    let parentId: string | null = null
+    for (const tag of current.tags) {
+      if (tag[0] === 'e' && tag[1]) {
+        parentId = tag[1]
+        break
+      }
+    }
+
+    if (!parentId) break
+
+    const parent = allEvents.find(e => e.id === parentId)
+    if (!parent) break
+
+    thread.unshift(parent)
+    current = parent
+  }
+
+  // Get replies
+  const replies = getReplies(event.id, allEvents)
+  thread.push(...replies)
 
   return thread
 }
 
 /**
- * Get replies for an event
+ * Publish a note
  */
-export function getReplies(eventId: string, allEvents: NostrEvent[]): NostrEvent[] {
-  return allEvents.filter(e => {
-    return e.tags.some(tag => tag[0] === 'e' && tag[1] === eventId)
-  })
+export async function publishNote(content: string, replyTo?: NostrEvent): Promise<NostrEvent> {
+  const ndk = getNDK()
+  const user = getCurrentNDKUser()
+
+  if (!user?.pubkey || !ndk.signer) {
+    throw new Error('Not authenticated')
+  }
+
+  const tags: string[][] = []
+
+  // Add reply tags if replying
+  if (replyTo) {
+    tags.push(['e', replyTo.id, '', 'reply'])
+    tags.push(['p', replyTo.pubkey])
+  }
+
+  // Create event
+  const ndkEvent = new NDKEvent(ndk)
+  ndkEvent.kind = 1
+  ndkEvent.content = content
+  ndkEvent.tags = tags
+  ndkEvent.created_at = Math.floor(Date.now() / 1000)
+
+  await ndkEvent.sign()
+  await ndkEvent.publish()
+
+  const raw = ndkEvent.rawEvent()
+  recordUserEvent(raw)
+  addEventToFeed(raw, 'local')
+
+  return raw
+}
+
+/**
+ * Publish a reaction (like/emoji)
+ */
+export async function publishReaction(eventId: string, emoji: string = '+'): Promise<void> {
+  const ndk = getNDK()
+  const user = getCurrentNDKUser()
+
+  if (!user?.pubkey || !ndk.signer) {
+    throw new Error('Not authenticated')
+  }
+
+  const ndkEvent = new NDKEvent(ndk)
+  ndkEvent.kind = 7
+  ndkEvent.content = emoji
+  ndkEvent.tags = [['e', eventId]]
+  ndkEvent.created_at = Math.floor(Date.now() / 1000)
+
+  await ndkEvent.sign()
+  await ndkEvent.publish()
+}
+
+/**
+ * Publish a repost
+ */
+export async function publishRepost(event: NostrEvent): Promise<void> {
+  const ndk = getNDK()
+  const user = getCurrentNDKUser()
+
+  if (!user?.pubkey || !ndk.signer) {
+    throw new Error('Not authenticated')
+  }
+
+  const ndkEvent = new NDKEvent(ndk)
+  ndkEvent.kind = 6
+  ndkEvent.content = JSON.stringify(event)
+  ndkEvent.tags = [
+    ['e', event.id],
+    ['p', event.pubkey],
+  ]
+  ndkEvent.created_at = Math.floor(Date.now() / 1000)
+
+  await ndkEvent.sign()
+  await ndkEvent.publish()
+}
+
+/**
+ * Publish a zap request (NIP-57)
+ */
+export async function publishZapRequest(
+  eventId: string,
+  amount: number,
+  relayUrl: string
+): Promise<void> {
+  const ndk = getNDK()
+  const user = getCurrentNDKUser()
+
+  if (!user?.pubkey || !ndk.signer) {
+    throw new Error('Not authenticated')
+  }
+
+  // This is a simplified version - full NIP-57 requires LNURL
+  const ndkEvent = new NDKEvent(ndk)
+  ndkEvent.kind = 9734
+  ndkEvent.content = ''
+  ndkEvent.tags = [
+    ['e', eventId],
+    ['relays', relayUrl],
+    ['amount', String(amount * 1000)],
+  ]
+  ndkEvent.created_at = Math.floor(Date.now() / 1000)
+
+  await ndkEvent.sign()
+  await ndkEvent.publish()
 }

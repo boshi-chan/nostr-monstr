@@ -1,6 +1,7 @@
 import { writable } from 'svelte/store'
-import type { DirectMessage } from '$types/dm'
+import type { NostrEvent } from '$types/nostr'
 
-export const conversations = writable<Map<string, DirectMessage[]>>(new Map())
+export const conversations = writable<Map<string, NostrEvent[]>>(new Map())
 export const activeConversation = writable<string | null>(null)
-export const isLoadingMessages = writable(false)
+export const messagesLoading = writable(false)
+export const messagesError = writable<string | null>(null)

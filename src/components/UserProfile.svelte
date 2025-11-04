@@ -8,7 +8,6 @@
   export let size: 'sm' | 'md' | 'lg' = 'md'
 
   let profile: NDKUserProfile | null = null
-  let loading = true
 
   onMount(async () => {
     try {
@@ -18,22 +17,26 @@
       // Try to get cached profile first
       if (user.profile) {
         profile = user.profile
-        loading = false
       }
 
       // Fetch fresh profile in background
       await user.fetchProfile()
-      profile = user.profile
-      loading = false
+      profile = user.profile ?? profile
     } catch (err) {
       console.warn('Failed to fetch profile for', pubkey.slice(0, 8))
-      loading = false
     }
   })
 
   $: displayName = profile?.name || profile?.displayName || pubkey.slice(0, 8)
   $: avatarUrl = profile?.image || profile?.picture || null
   $: nip05 = showNip05 ? profile?.nip05 : null
+
+  function handleImageError(event: Event) {
+    const target = event.currentTarget as HTMLImageElement | null
+    if (target) {
+      target.style.display = 'none'
+    }
+  }
 
   const sizeClasses = {
     sm: 'w-6 h-6 text-xs',
@@ -56,9 +59,7 @@
         src={avatarUrl}
         alt={displayName}
         class="{sizeClasses[size]} rounded-full object-cover"
-        on:error={(e) => {
-          e.target.style.display = 'none'
-        }}
+        on:error={handleImageError}
       />
     {:else}
       <div class="{sizeClasses[size]} rounded-full bg-primary/20 flex items-center justify-center flex-shrink-0">

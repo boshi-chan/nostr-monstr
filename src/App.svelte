@@ -1,39 +1,106 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { isAuthenticated } from '$stores/auth'
+  import { isAuthenticated, currentUser } from '$stores/auth'
+  import { isInitialized, initError } from '$stores/app'
   import { initDB } from '$lib/db'
   import { initNDK } from '$lib/ndk'
   import { restoreSession } from '$lib/auth'
+
+  import { feedSource } from '$stores/feedSource'
+  import { feedError, feedLoading, following, circles } from '$stores/feed'
+  import {
+    stopAllSubscriptions,
+    clearFeed,
+    subscribeToGlobalFeed,
+    subscribeToFollowingFeed,
+    subscribeToCirclesFeed,
+    subscribeToLongReadsFeed,
+  } from '$lib/feed-ndk'
+  import { startNotificationListener, stopNotificationListener } from '$lib/notifications'
+
+  // force reactivity for feedSource
+  $: $feedSource
+
   import Layout from './components/Layout.svelte'
   import Login from './components/pages/Login.svelte'
 
-  let isInitialized = false
-  let error = ''
-
   onMount(async () => {
-    const initTimeout = setTimeout(() => {
-      if (!isInitialized) {
-        console.warn('Initialization timeout - forcing display')
-        isInitialized = true
-      }
-    }, 5000)
-
     try {
       await initDB()
       await initNDK()
       await restoreSession()
-      isInitialized = true
-      clearTimeout(initTimeout)
+
+      // default feed: global on startup
+      await subscribeToGlobalFeed()
+
+      isInitialized.set(true)
     } catch (err) {
       console.error('App initialization error:', err)
-      error = String(err)
-      isInitialized = true
-      clearTimeout(initTimeout)
+      initError.set(String(err))
+      isInitialized.set(true)
     }
   })
+
+  // switching tabs changes subscription here
+  $: if ($isInitialized) {
+    const targetFeed = $feedSource
+    const authed = $isAuthenticated
+    const pubkey = $currentUser?.pubkey ?? null
+
+    ;(async () => {
+      stopAllSubscriptions()
+      clearFeed()
+
+      if (targetFeed === 'global') {
+        await subscribeToGlobalFeed()
+        return
+      }
+
+      if (!authed || !pubkey) {
+        feedError.set('Log in to view this feed')
+        feedLoading.set(false)
+        return
+      }
+
+      if (targetFeed === 'following') {
+        await subscribeToFollowingFeed()
+        return
+      }
+
+      if (targetFeed === 'circles') {
+        await subscribeToCirclesFeed()
+        return
+      }
+
+      if (targetFeed === 'long-reads') {
+        await subscribeToLongReadsFeed()
+        return
+      }
+    })().catch(err => {
+      console.error('Subscription error:', err)
+      feedError.set(String(err))
+      feedLoading.set(false)
+    })
+  }
+
+  // manage notifications and cleanup on logout
+  $: if ($isAuthenticated && $currentUser?.pubkey) {
+    startNotificationListener($currentUser.pubkey)
+  } else {
+    stopNotificationListener()
+    stopAllSubscriptions()
+    clearFeed()
+    following.set(new Set())
+    circles.set(new Set())
+  }
 </script>
 
-{#if isInitialized}
+{#if $isInitialized}
+  {#if $initError}
+    <div class="bg-red-600/10 border border-red-500/40 text-red-300 text-sm px-4 py-3 text-center">
+      Initialization issue: {$initError}
+    </div>
+  {/if}
   {#if $isAuthenticated}
     <Layout />
   {:else}
@@ -55,12 +122,8 @@
   }
 
   @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
   }
 
   :global(.animate-spin) {

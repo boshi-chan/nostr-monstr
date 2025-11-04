@@ -4,7 +4,7 @@
  */
 
 import { metadataCache as metadataCacheStore } from '$stores/feed'
-import { subscribe } from './nostr'
+import { getNDK } from './ndk'
 import type { NostrEvent } from '$types/nostr'
 import type { UserMetadata } from '$types/user'
 
@@ -28,7 +28,7 @@ export function getUserMetadata(pubkey: string): UserMetadata | null {
 /**
  * Fetch user metadata from events
  */
-export function fetchUserMetadata(pubkey: string): void {
+export async function fetchUserMetadata(pubkey: string): Promise<void> {
   // Check if already cached
   const cached = metadataCache.get(pubkey)
   if (cached && Date.now() - cached.fetched < CACHE_TTL) {
@@ -43,17 +43,27 @@ export function fetchUserMetadata(pubkey: string): void {
   // Mark as pending
   pendingFetches.add(pubkey)
 
-  // Subscribe to user's metadata events
-  const filter = {
-    authors: [pubkey],
-    kinds: [0], // Metadata kind
-    limit: 1,
+  try {
+    const ndk = getNDK()
+    
+    // Subscribe to user's metadata events
+    const filter = {
+      authors: [pubkey],
+      kinds: [0], // Metadata kind
+      limit: 1,
+    }
+
+    const sub = ndk.subscribe(filter, { closeOnEose: true }, undefined, false)
+
+    sub.on('event', (event: any) => {
+      parseMetadataEvent(event)
+    })
+  } catch (err) {
+    console.warn('Failed to fetch metadata for', pubkey.slice(0, 8), err)
+  } finally {
+    // Clear pending after a short delay
+    setTimeout(() => pendingFetches.delete(pubkey), 1000)
   }
-
-  subscribe(`metadata:${pubkey}`, filter)
-
-  // Clear pending after a short delay (subscription is fire-and-forget)
-  setTimeout(() => pendingFetches.delete(pubkey), 1000)
 }
 
 /**

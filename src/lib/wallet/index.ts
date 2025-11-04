@@ -42,10 +42,7 @@ async function loadWalletModule(): Promise<any> {
 export async function initWallet(pin: string, seed?: string): Promise<WalletInfo> {
   const module = await loadWalletModule()
 
-  let walletSeed = seed
-  if (!walletSeed) {
-    walletSeed = module.generateSeed()
-  }
+  const walletSeed = seed ?? module.generateSeed()
 
   const address = module.createAddress(walletSeed)
 
@@ -75,7 +72,7 @@ export async function unlockWallet(pin: string): Promise<boolean> {
     const encrypted = await getSetting('walletEncrypted')
     if (!encrypted) return false
 
-    const seed = await decryptWalletData(
+    await decryptWalletData(
       encrypted.encryptedData,
       encrypted.iv,
       encrypted.salt,
@@ -121,7 +118,9 @@ function generateMnemonicSeed(): string {
  */
 function deriveAddressFromSeed(seed: string): string {
   // In production, use proper Monero derivation
-  return '4' + Array(94).fill(0).map(() => 'A').join('')
+  const normalized = seed.replace(/[^a-f0-9]/gi, '').toLowerCase()
+  const padded = (normalized + 'a'.repeat(94)).slice(0, 94)
+  return `4${padded}`
 }
 
 /**
@@ -135,6 +134,8 @@ export async function sendMonero(
   if (!(await unlockWallet(pin))) {
     throw new Error('Invalid PIN')
   }
+
+  console.info('[wallet] sendMonero stub', { address, amount })
 
   // In production, create actual transaction
   const txHash = 'tx_' + Math.random().toString(36).substring(7)

@@ -4,6 +4,7 @@
   export let disabled = false
   export let loading = false
   export let type: 'button' | 'submit' | 'reset' = 'button'
+  export let className = ''
 
   const variantClasses = {
     primary:
@@ -24,7 +25,7 @@
   {type}
   {disabled}
   class="inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-all duration-200 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50
-    {variantClasses[variant]} {sizeClasses[size]}"
+    {variantClasses[variant]} {sizeClasses[size]} {className}"
   on:click
 >
   {#if loading}

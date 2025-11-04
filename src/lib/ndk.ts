@@ -3,8 +3,8 @@
  * Provides a clean interface to NDK with proper reactivity
  */
 
-import NDK, { NDKEvent, NDKUser, NDKNip07Signer, NDKPrivateKeySigner } from '@nostr-dev-kit/ndk'
-import { writable, derived, type Readable } from 'svelte/store'
+import NDK, { NDKUser, NDKNip07Signer, NDKPrivateKeySigner } from '@nostr-dev-kit/ndk'
+import { writable } from 'svelte/store'
 
 // Default relays - can be customized later
 const DEFAULT_RELAYS = [
@@ -36,10 +36,10 @@ export async function initNDK(relays: string[] = DEFAULT_RELAYS): Promise<NDK> {
 
     ndkInstance = new NDK({
       explicitRelayUrls: relays,
-      enableOutboxModel: true, // NIP-65 support
-      autoConnectUserRelays: true,
+      enableOutboxModel: false,
+      autoConnectUserRelays: false,
     })
-
+    
     // Track connection state BEFORE connecting
     ndkInstance.pool.on('relay:connect', () => {
       console.log('✓ NDK relay connected')

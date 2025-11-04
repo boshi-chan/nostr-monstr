@@ -16,7 +16,7 @@
 <!-- Images -->
 {#if images.length > 0}
   <div class="mt-4 grid grid-cols-2 gap-3">
-    {#each images as image (image)}
+    {#each images as image, index (index)}
       <div class="relative overflow-hidden rounded-2xl border border-dark-border bg-dark-lighter">
         <button
           type="button"
@@ -38,7 +38,7 @@
 <!-- Videos -->
 {#if videos.length > 0}
   <div class="mt-4 space-y-3">
-    {#each videos as video (video)}
+    {#each videos as video, index (index)}
       <div class="relative aspect-video overflow-hidden rounded-2xl border border-dark-border bg-dark-lighter">
         <!-- svelte-ignore a11y-media-has-caption -->
         <video src={video} controls class="h-full w-full object-cover" />
@@ -50,7 +50,7 @@
 <!-- Embeds/Links -->
 {#if embeds.length > 0}
   <div class="mt-4 space-y-3">
-    {#each embeds as embed (embed)}
+    {#each embeds as embed, index (index)}
       <a
         href={embed}
         target="_blank"

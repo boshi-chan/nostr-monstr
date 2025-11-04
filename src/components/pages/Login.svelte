@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { currentUser } from '$stores/auth'
   import { loginWithNostrConnect, loginWithExtension, hasNostrExtension } from '$lib/auth'
   import Button from '../Button.svelte'
 
@@ -87,7 +86,7 @@
                 size="lg"
                 loading={isLoading}
                 on:click={handleExtensionLogin}
-                class="w-full"
+                className="w-full"
               >
                 {isLoading ? 'Connecting...' : 'Sign with Extension'}
               </Button>
@@ -105,7 +104,7 @@
               size="lg"
               loading={isLoading}
               on:click={handleNostrConnect}
-              class="w-full"
+              className="w-full"
             >
               {isLoading ? 'Generating...' : 'Connect Wallet'}
             </Button>
@@ -146,7 +145,7 @@
               variant="primary"
               size="lg"
               on:click={handleCopyUrl}
-              class="w-full"
+              className="w-full"
             >
               Copy Connection URL
             </Button>
@@ -155,7 +154,7 @@
               variant="secondary"
               size="lg"
               on:click={() => (showQR = false)}
-              class="w-full"
+              className="w-full"
             >
               Back
             </Button>

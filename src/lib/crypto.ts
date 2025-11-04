@@ -14,7 +14,7 @@ export async function deriveKeyFromPin(pin: string, salt: Uint8Array): Promise<C
   return crypto.subtle.deriveKey(
     {
       name: 'PBKDF2',
-      salt,
+      salt: salt.buffer.slice(0) as ArrayBuffer,
       iterations: 100000,
       hash: 'SHA-256',
     },
@@ -38,7 +38,7 @@ export async function encryptWalletData(data: string, pin: string): Promise<{
   const dataBuffer = encoder.encode(data)
 
   const encryptedBuffer = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
+    { name: 'AES-GCM', iv: iv.buffer.slice(0) as ArrayBuffer },
     key,
     dataBuffer
   )
@@ -58,14 +58,14 @@ export async function decryptWalletData(
 ): Promise<string> {
   const saltBuffer = hexToBuffer(salt)
   const ivBuffer = hexToBuffer(iv)
-  const encryptedBuffer = hexToBuffer(encryptedData)
+  const encryptedBytes = hexToBuffer(encryptedData)
 
   const key = await deriveKeyFromPin(pin, saltBuffer)
 
   const decryptedBuffer = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: ivBuffer },
+    { name: 'AES-GCM', iv: ivBuffer.buffer.slice(0) as ArrayBuffer },
     key,
-    encryptedBuffer
+    encryptedBytes.buffer.slice(0) as ArrayBuffer
   )
 
   const decoder = new TextDecoder()
