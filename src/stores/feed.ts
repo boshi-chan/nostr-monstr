@@ -7,9 +7,6 @@ export type FeedTab = 'following' | 'circles' | 'global' | 'long-reads'
 // Feed events (single timeline for the currently active feed)
 export const feedEvents = writable<NostrEvent[]>([])
 
-// Active feed tab
-export const activeFeedTab = writable<FeedTab>('global')
-
 // Loading / error state for the active feed
 export const feedLoading = writable(false)
 export const feedError = writable<string | null>(null)

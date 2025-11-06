@@ -4,22 +4,31 @@
   import { getDisplayName, getAvatarUrl, getNip05Display, fetchUserMetadata } from '$lib/metadata'
   import { getNDK } from '$lib/ndk'
   import Post from '../Post.svelte'
+  import FollowButton from '../FollowButton.svelte'
   import Skeleton from '../Skeleton.svelte'
   import type { NostrEvent } from '$types/nostr'
   import type { User } from '$types/user'
   import type { UserMetadata } from '$types/user'
+  import { activeRoute, openPost, openProfile } from '$stores/router'
+  import type { NavTab } from '$stores/nav'
+
+  export let pubkey: string | null = null
+  export let originTab: NavTab = 'home'
 
   const ndk = getNDK()
   const metadataRequested = new Set<string>()
   const linkRegex = /(https?:\/\/[^\s]+)/gi
 
   let authUser: User | null = null
+  let targetPubkey: string | null = null
+  let resolvedPubkey = ''
   let metadata: UserMetadata | undefined
   let displayName = 'Anon'
   let avatarUrl: string | null = null
   let bannerUrl: string | null = null
   let nip05: string | null = null
   let bioLines: string[] = []
+  let isOwnProfile = false
 
   let loadingStats = false
   let loadingPosts = false
@@ -30,40 +39,43 @@
   let lastLoadedPubkey: string | null = null
 
   $: authUser = $currentUser
-  $: metadata = authUser ? $metadataCache.get(authUser.pubkey) : undefined
-  $: avatarUrl = getAvatarUrl(metadata) ?? authUser?.picture ?? null
+  $: targetPubkey = pubkey ?? authUser?.pubkey ?? null
+  $: isOwnProfile = !!authUser?.pubkey && targetPubkey === authUser.pubkey
+  $: resolvedPubkey = targetPubkey ?? ''
+  $: metadata = targetPubkey ? $metadataCache.get(targetPubkey) : undefined
+  $: avatarUrl = getAvatarUrl(metadata) ?? (isOwnProfile ? authUser?.picture ?? null : null)
   $: bannerUrl = metadata?.banner || metadata?.cover || metadata?.picture_header || null
-  $: nip05 = getNip05Display(metadata?.nip05) || authUser?.nip05 || null
+  $: nip05 = getNip05Display(metadata?.nip05) || (isOwnProfile ? authUser?.nip05 ?? null : null)
   $: displayName =
-    authUser?.pubkey
-      ? getDisplayName(authUser.pubkey, metadata) ||
-        authUser.name ||
+    targetPubkey
+      ? getDisplayName(targetPubkey, metadata) ||
+        (isOwnProfile ? authUser?.name ?? null : null) ||
         nip05 ||
-        authUser.pubkey.slice(0, 8)
+        targetPubkey.slice(0, 8)
       : 'Anon'
   $: bioLines = (() => {
-    const bio = metadata?.about || authUser?.about || ''
+    const bio = metadata?.about || (isOwnProfile ? authUser?.about ?? '' : '')
     const lines = bio.split('\n')
     return lines.length === 1 && lines[0].trim().length === 0 ? [] : lines
   })()
 
   $: {
-    const pubkey = authUser?.pubkey ?? null
+    const target = targetPubkey
 
-    if (!pubkey) {
+    if (!target) {
       resetState(false)
       lastLoadedPubkey = null
     } else {
-      if (!metadata && !metadataRequested.has(pubkey)) {
-        metadataRequested.add(pubkey)
-        void fetchUserMetadata(pubkey)
+      if (!metadata && !metadataRequested.has(target)) {
+        metadataRequested.add(target)
+        void fetchUserMetadata(target)
       }
 
-      if (lastLoadedPubkey !== pubkey) {
-        lastLoadedPubkey = pubkey
+      if (lastLoadedPubkey !== target) {
+        lastLoadedPubkey = target
         resetState(true)
-        void loadStats(pubkey)
-        void loadPosts(pubkey)
+        void loadStats(target)
+        void loadPosts(target)
       }
     }
   }
@@ -181,9 +193,29 @@
       ;(subscription as any).on?.('error', finish)
     })
   }
+
+  function getOriginTab(): NavTab {
+    const route = $activeRoute
+    if (route.type === 'page') {
+      return route.tab
+    }
+    if (route.type === 'post' || route.type === 'profile') {
+      return route.originTab
+    }
+    return 'profile'
+  }
+
+  function handlePostSelect(post: NostrEvent): void {
+    openPost(post, getOriginTab())
+  }
+
+  function handleProfileSelect(pubkey: string): void {
+    if (!pubkey) return
+    openProfile(pubkey, getOriginTab())
+  }
 </script>
 
-{#if authUser}
+{#if targetPubkey}
   <div class="flex h-full flex-col bg-transparent pb-24 md:pb-0">
     <section class="mx-auto w-full max-w-3xl px-4 pt-6 md:px-0 md:pt-8">
       <div class="relative overflow-hidden rounded-3xl border border-dark-border/60 bg-dark-light shadow-xl">
@@ -203,7 +235,7 @@
                   <img src={avatarUrl} alt={displayName} class="h-full w-full object-cover" />
                 {:else}
                   <div class="flex h-full w-full items-center justify-center bg-primary/20 text-3xl font-bold text-primary">
-                    {authUser.pubkey.slice(0, 2).toUpperCase()}
+                    {targetPubkey.slice(0, 2).toUpperCase()}
                   </div>
                 {/if}
               </div>
@@ -211,35 +243,42 @@
               <div class="pb-2">
                 <div class="flex flex-wrap items-center gap-3">
                   <h1 class="text-2xl font-semibold text-white md:text-3xl">{displayName}</h1>
-                  <button
-                    type="button"
-                    class="rounded-full border border-dark-border/70 bg-dark px-4 py-2 text-sm font-medium text-text-soft transition-colors duration-200 hover:border-primary/60 hover:text-white"
-                  >
-                    Edit Profile
-                  </button>
+                  {#if isOwnProfile}
+                    <button
+                      type="button"
+                      class="rounded-full border border-dark-border/70 bg-dark px-4 py-2 text-sm font-medium text-text-soft transition-colors duration-200 hover:border-primary/60 hover:text-white"
+                    >
+                      Edit Profile
+                    </button>
+                  {/if}
                 </div>
-                <p class="mt-2 text-sm text-text-muted/80">{nip05 || authUser.pubkey.slice(0, 12)}</p>
+                <p class="mt-2 text-sm text-text-muted/80">{nip05 || targetPubkey.slice(0, 12)}</p>
               </div>
             </div>
 
-            <div class="flex items-center gap-6 rounded-2xl border border-dark-border/70 bg-dark px-6 py-4 shadow-md">
-              <div>
-                <p class="text-xs uppercase tracking-[0.3em] text-text-muted">Following</p>
-                <p class="mt-1 text-lg font-semibold text-white">
-                  {loadingStats ? '—' : followingCount}
-                </p>
-              </div>
-              <div>
-                <p class="text-xs uppercase tracking-[0.3em] text-text-muted">Followers</p>
-                <p class="mt-1 text-lg font-semibold text-white">
-                  {loadingStats ? '—' : followersCount}
-                </p>
-              </div>
-              <div>
-                <p class="text-xs uppercase tracking-[0.3em] text-text-muted">Posts</p>
-                <p class="mt-1 text-lg font-semibold text-white">
-                  {loadingPosts ? '—' : posts.length}
-                </p>
+            <div class="flex flex-col gap-3 md:items-end">
+              {#if !isOwnProfile && resolvedPubkey}
+                <FollowButton pubkey={resolvedPubkey} size="md" />
+              {/if}
+              <div class="flex items-center gap-6 rounded-2xl border border-dark-border/70 bg-dark px-6 py-4 shadow-md">
+                <div>
+                  <p class="text-xs uppercase tracking-[0.3em] text-text-muted">Following</p>
+                  <p class="mt-1 text-lg font-semibold text-white">
+                    {loadingStats ? '...' : followingCount}
+                  </p>
+                </div>
+                <div>
+                  <p class="text-xs uppercase tracking-[0.3em] text-text-muted">Followers</p>
+                  <p class="mt-1 text-lg font-semibold text-white">
+                    {loadingStats ? '...' : followersCount}
+                  </p>
+                </div>
+                <div>
+                  <p class="text-xs uppercase tracking-[0.3em] text-text-muted">Posts</p>
+                  <p class="mt-1 text-lg font-semibold text-white">
+                    {loadingPosts ? '...' : posts.length}
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -263,42 +302,49 @@
 
     <section class="mx-auto mt-6 w-full max-w-3xl px-4 md:px-0 md:mt-8 flex-1">
       <div class="flex items-center justify-between px-2 md:px-1">
-        <h2 class="text-lg font-semibold text-white md:text-xl">Your Posts</h2>
+        <h2 class="text-lg font-semibold text-white md:text-xl">
+          {isOwnProfile ? 'Your Posts' : `${displayName}'s Posts`}
+        </h2>
         <span class="text-xs uppercase tracking-[0.2em] text-text-muted">
           {loadingPosts ? 'Loading' : `${posts.length} total`}
         </span>
       </div>
 
-      {#if loadingPosts}
-        <div class="mt-4 space-y-3">
+      <div class="mt-4 flex flex-col gap-3">
+        {#if loadingPosts}
           {#each Array(4) as _}
-            <Skeleton />
+            <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-5">
+              <Skeleton count={4} height="h-4" />
+            </div>
           {/each}
-        </div>
-      {:else if error}
-        <div class="mt-4 rounded-2xl border border-dark-border/60 bg-dark/60 px-4 py-12 text-center text-text-muted">
-          {error}
-        </div>
-      {:else if posts.length === 0}
-        <div class="mt-4 rounded-2xl border border-dark-border/60 bg-dark/60 px-4 py-12 text-center text-text-muted">
-          You haven't posted anything yet.
-        </div>
-      {:else}
-        <div class="mt-4 rounded-2xl border border-dark-border/60 bg-dark/60">
-          <div class="divide-y divide-dark-border/70">
-            {#each posts as post (post.id)}
-              <Post event={post} showActions />
-            {/each}
+        {:else if error}
+          <div class="rounded-2xl border border-rose-500/40 bg-rose-500/10 p-6 text-center text-sm text-rose-200/80">
+            {error}
           </div>
-        </div>
-      {/if}
+        {:else if posts.length === 0}
+          <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-6 text-center text-sm text-text-muted">
+            {isOwnProfile ? "You haven't posted anything yet." : 'No posts yet.'}
+          </div>
+        {:else}
+          {#each posts as post (post.id)}
+            <Post
+              event={post}
+              showActions
+              onSelect={handlePostSelect}
+              onProfileSelect={handleProfileSelect}
+            />
+          {/each}
+        {/if}
+      </div>
     </section>
   </div>
 {:else}
   <div class="flex h-full items-center justify-center text-text-muted">
     <div class="space-y-2 text-center">
-      <p class="text-lg font-semibold text-text-soft">Not logged in</p>
-      <p class="text-sm">Connect your Nostr key to continue</p>
+      <p class="text-lg font-semibold text-text-soft">Profile unavailable</p>
+      <p class="text-sm">Select or follow someone to view their posts.</p>
     </div>
   </div>
 {/if}
+
+

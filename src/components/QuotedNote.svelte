@@ -5,23 +5,26 @@
   import type { NostrEvent } from '$types/nostr'
   import UserProfile from './UserProfile.svelte'
 
-  export let eventId: string
+  export let eventId: string | null = null
+  export let eventData: NostrEvent | null = null
+  export let onSelect: ((event: NostrEvent) => void) | undefined = undefined
+  export let onOpen: ((eventId: string) => void) | undefined = undefined
 
   const ndk = getNDK()
   let remoteEvent: NostrEvent | null = null
   let loading = false
 
-  $: storeEvent = $feedEvents.find(e => e.id === eventId) ?? null
-  $: quotedEvent = storeEvent ?? remoteEvent
-  $: if (!quotedEvent && !loading) {
+  $: storeEvent = eventId ? $feedEvents.find(e => e.id === eventId) ?? null : null
+  $: quotedEvent = eventData ?? storeEvent ?? remoteEvent
+  $: if (!quotedEvent && !loading && eventId) {
     loading = true
-    void fetchQuotedEvent()
+    void fetchQuotedEvent(eventId)
   }
 
-  async function fetchQuotedEvent(): Promise<void> {
+  async function fetchQuotedEvent(id: string): Promise<void> {
     try {
       const results = (await ndk.fetchEvents(
-        { ids: [eventId], limit: 1 },
+        { ids: [id], limit: 1 },
         { closeOnEose: true }
       )) as Set<any>
 
@@ -35,31 +38,55 @@
       loading = false
     }
   }
+
+  function handleSelect(domEvent: MouseEvent | KeyboardEvent) {
+    domEvent.stopPropagation()
+    if (quotedEvent) {
+      onSelect?.(quotedEvent)
+      onOpen?.(quotedEvent.id)
+      return
+    }
+
+    if (eventId) {
+      onOpen?.(eventId)
+    }
+  }
 </script>
 
 {#if quotedEvent}
-  <div class="mt-3 cursor-pointer rounded-2xl border border-dark-border bg-dark-lighter/70 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/60">
+  <div
+    role="button"
+    tabindex="0"
+    class="mt-3 rounded-2xl border border-dark-border bg-dark-lighter/70 p-4 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/60 hover:bg-dark-lighter/60 focus:outline-none focus:ring-2 focus:ring-primary/40"
+    on:click={handleSelect}
+    on:keydown={(event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        handleSelect(event)
+      }
+    }}
+  >
+    <p class="mb-3 text-[11px] font-medium uppercase tracking-[0.25em] text-text-tertiary/80">
+      Quoted Note
+    </p>
     <div class="flex items-start gap-3">
-      <div class="flex-1 min-w-0">
-        <!-- Author -->
-        <div class="mb-2">
-          <UserProfile pubkey={quotedEvent.pubkey} size="sm" />
-        </div>
-
-        <!-- Content -->
+      <div class="flex-1 min-w-0 space-y-2">
+        <UserProfile pubkey={quotedEvent.pubkey} size="sm" />
         <p class="line-clamp-2 break-words text-sm text-text-soft/90">
           {quotedEvent.content}
         </p>
-
-        <!-- Time -->
-        <p class="mt-2 text-xs text-text-muted">
+        <p class="text-xs text-text-muted">
           {formatDate(quotedEvent.created_at)}
         </p>
       </div>
     </div>
   </div>
+{:else if loading}
+  <div class="mt-3 rounded-2xl border border-dark-border/60 bg-dark-lighter/60 p-4 text-sm text-text-muted/70">
+    Loading quote...
+  </div>
 {:else}
-  <div class="mt-3 rounded-2xl border border-dark-border bg-dark-lighter/70 p-4 text-sm text-text-muted">
+  <div class="mt-3 rounded-2xl border border-dark-border/60 bg-dark-lighter/60 p-4 text-sm text-text-muted">
     Quote not found
   </div>
 {/if}
@@ -73,3 +100,4 @@
     overflow: hidden;
   }
 </style>
+

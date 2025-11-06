@@ -10,14 +10,19 @@
   let content = ''
   let loading = false
   let error = ''
+  let charCount = 0
+  const MAX_CHARS = 5000
 
   $: replyTo = $composeReplyTo
   $: metadata = $metadataCache.get($currentUser?.pubkey || '')
   $: displayName = getDisplayName($currentUser?.pubkey || '', metadata)
   $: avatarUrl = getAvatarUrl(metadata)
+  $: charCount = content.length
+  $: isOverLimit = charCount > MAX_CHARS
+  $: isNearLimit = charCount > MAX_CHARS * 0.9
 
   async function handleSubmit() {
-    if (!content.trim() || loading) return
+    if (!content.trim() || loading || isOverLimit) return
 
     try {
       loading = true
@@ -127,6 +132,17 @@
           rows="6"
         />
 
+        <!-- Character counter -->
+        <div class="mt-2 text-xs text-text-muted">
+          {charCount} / {MAX_CHARS}
+          {#if isNearLimit && !isOverLimit}
+            <span class="text-orange-400 ml-2">(⚠️ Getting close to limit)</span>
+          {/if}
+          {#if isOverLimit}
+            <span class="text-red-400 ml-2">(❌ Exceeds limit)</span>
+          {/if}
+        </div>
+
         <!-- Error message -->
         {#if error}
           <div class="mt-3 rounded-lg bg-red-500/20 px-3 py-2 text-sm text-red-300">
@@ -146,7 +162,7 @@
         </button>
         <button
           on:click={handleSubmit}
-          disabled={!content.trim() || loading}
+          disabled={!content.trim() || loading || isOverLimit}
           class="btn-primary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <SendIcon size={18} color="currentColor" strokeWidth={2} />
@@ -166,4 +182,3 @@
     color: rgba(166, 166, 166, 0.5);
   }
 </style>
-

@@ -155,6 +155,39 @@ export async function logout(): Promise<void> {
   stopAllSubscriptions()
   clearFeed()
 
+  // Clear all feed state stores
+  console.log('🚪 Clearing all feed state')
+  try {
+    const {
+      likedEvents,
+      repostedEvents,
+      zappedEvents,
+      metadataCache,
+      userEventIds,
+      following,
+      circles,
+    } = await import('$stores/feed')
+
+    likedEvents.set(new Set())
+    repostedEvents.set(new Set())
+    zappedEvents.set(new Map())
+    metadataCache.set(new Map())
+    userEventIds.set(new Set())
+    following.set(new Set())
+    circles.set(new Set())
+  } catch (err) {
+    console.warn('Failed to clear feed stores:', err)
+  }
+
+  // Stop notifications
+  console.log('🚪 Stopping notifications')
+  try {
+    const { stopNotificationListener } = await import('$lib/notifications')
+    stopNotificationListener()
+  } catch (err) {
+    console.warn('Failed to stop notifications:', err)
+  }
+
   // Clear storage
   console.log('🚪 Clearing storage')
   await saveSetting('currentUser', null)

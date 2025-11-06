@@ -1,140 +1,128 @@
 <script lang="ts">
   import {
-    activeFeedTab,
     feedEvents,
     feedLoading,
     feedError,
-    type FeedTab,
   } from '$stores/feed'
 
-  import { feedSource } from '$stores/feedSource'
+  import { feedSource, type FeedSource } from '$stores/feedSource'
+  import { showSearch } from '$stores/search'
 
   import type { NostrEvent } from '$types/nostr'
-  import ThreadDetail from '../ThreadDetail.svelte'
   import Post from '../Post.svelte'
   import Skeleton from '../Skeleton.svelte'
   import UsersIcon from '../icons/UsersIcon.svelte'
   import CircleIcon from '../icons/CircleIcon.svelte'
   import GlobeIcon from '../icons/GlobeIcon.svelte'
-  import BookOpenIcon from '../icons/BookOpenIcon.svelte'
+  import SearchIcon from '../icons/SearchIcon.svelte'
+  import { openPost, openProfile } from '$stores/router'
 
-  const feedTabs: { id: FeedTab; label: string; icon: typeof UsersIcon }[] = [
+  const feedTabs: { id: FeedSource; label: string; icon: typeof UsersIcon }[] = [
     { id: 'following', label: 'Following', icon: UsersIcon },
     { id: 'circles', label: 'Circles', icon: CircleIcon },
     { id: 'global', label: 'Global', icon: GlobeIcon },
-    { id: 'long-reads', label: 'Long Reads', icon: BookOpenIcon },
   ]
 
-  let activeFeed: FeedTab = 'global'
-  let selectedEvent: NostrEvent | null = null
-  let selectedThread: NostrEvent[] = []
-  let showThreadDetail = false
-  $: activeFeed = $activeFeedTab
+  let activeFeed: FeedSource = 'global'
+  $: activeFeed = $feedSource
 
-  function setActiveFeed(tab: FeedTab) {
-    activeFeedTab.set(tab)
-
-    if (tab === 'global') feedSource.set('global')
-    if (tab === 'following') feedSource.set('following')
-    if (tab === 'circles') feedSource.set('circles')
-    if (tab === 'long-reads') feedSource.set('long-reads')
-
-    selectedEvent = null
-    selectedThread = []
-    showThreadDetail = false
+  function setActiveFeed(tab: FeedSource) {
+    feedSource.set(tab)
   }
 
-  import { buildThread, getReplies } from '$lib/feed-ndk'
+  import { getReplies } from '$lib/feed-ndk'
 
   function handleEventSelect(event: NostrEvent) {
-    selectedEvent = event
-    selectedThread = buildThread(event, $feedEvents)
-    showThreadDetail = true
-  }
-
-  function handleCloseThread() {
-    showThreadDetail = false
-    selectedEvent = null
-    selectedThread = []
+    openPost(event, 'home')
   }
 
   function handleGetReplyCount(eventId: string): number {
     return getReplies(eventId, $feedEvents).length
   }
+
+  function handleProfileSelect(pubkey: string) {
+    openProfile(pubkey, 'home')
+  }
 </script>
 
 <div class="w-full pb-24 md:pb-0">
-  <div class="sticky top-0 z-20 border-b border-dark-border bg-dark-light backdrop-blur-xl">
-    <div class="flex h-16 md:h-20 w-full items-stretch gap-0 overflow-x-auto">
-      {#each feedTabs as tab (tab.id)}
-        {@const isActive = activeFeed === tab.id}
-        <button
-          type="button"
-          style="flex: 1;"
-          class="flex-1 h-full flex items-center justify-center gap-2 whitespace-nowrap px-4 py-3 text-sm font-medium transition-colors border-b-2 {isActive ? 'border-primary text-primary bg-primary/5' : 'border-transparent text-text-muted hover:text-text-soft hover:bg-dark-lighter/50'}"
-          on:click={() => setActiveFeed(tab.id)}
-        >
-          <svelte:component this={tab.icon} size={16} />
-          <span class="hidden md:inline">{tab.label}</span>
-        </button>
-      {/each}
+  <div class="sticky top-0 z-20 border-b border-dark-border/60 bg-dark/50 backdrop-blur-2xl backdrop-saturate-150 supports-[backdrop-filter]:bg-dark/30">
+    <div class="flex h-14 md:h-16 w-full items-center justify-between px-3 md:px-6 gap-2">
+      <!-- Feed tabs (centered, flex-1) -->
+      <div class="flex flex-1 w-full items-center gap-3 overflow-x-auto">
+        {#each feedTabs as tab (tab.id)}
+          {@const isActive = activeFeed === tab.id}
+          <button
+            type="button"
+            class={`flex flex-1 min-w-[120px] items-center justify-center gap-2 whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold transition-colors duration-200 ${
+              isActive
+                ? 'bg-primary text-dark shadow-md shadow-primary/20'
+                : 'text-text-muted hover:text-text-soft hover:bg-dark/30'
+            }`}
+            on:click={() => setActiveFeed(tab.id)}
+          >
+            <svelte:component this={tab.icon} size={16} />
+            <span>{tab.label}</span>
+          </button>
+        {/each}
+      </div>
+
+      <!-- Search button (desktop only, right side) -->
+      <button
+        type="button"
+        on:click={() => showSearch.set(true)}
+        class="hidden md:flex h-10 w-10 items-center justify-center rounded-xl text-text-muted hover:text-text-soft hover:bg-dark/30 transition-colors duration-200 flex-shrink-0"
+        title="Search"
+      >
+        <SearchIcon size={18} color="currentColor" strokeWidth={1.6} />
+      </button>
     </div>
   </div>
 
   <div class="mx-auto w-full max-w-3xl px-3 md:px-6">
-    <div class="rounded-2xl border border-dark-border/60 bg-dark/60 overflow-hidden">
+    <div class="flex flex-col gap-3 pt-3">
       {#if $feedLoading && $feedEvents.length === 0}
-        <div class="divide-y divide-dark-border">
-          {#each Array(5) as _}
-            <Skeleton />
-          {/each}
-        </div>
-      {:else if $feedError && $feedEvents.length === 0}
-        <div class="flex items-center justify-center py-12 px-4 text-center">
-          <div>
-            <p class="text-lg font-semibold text-text-soft">Feed unavailable</p>
-            <p class="mt-2 text-sm text-text-muted">{$feedError}</p>
+        {#each Array(5) as _}
+          <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-5">
+            <Skeleton count={4} height="h-4" />
           </div>
+        {/each}
+      {:else if $feedError && $feedEvents.length === 0}
+        <div class="rounded-2xl border border-rose-500/40 bg-rose-500/10 p-6 text-center">
+          <p class="text-lg font-semibold text-rose-100">Feed unavailable</p>
+          <p class="mt-2 text-sm text-rose-200/80">{$feedError}</p>
         </div>
       {:else if $feedEvents.length === 0}
-        <div class="flex items-center justify-center py-12 px-4 text-center">
-          <div>
-            <p class="text-lg font-semibold text-text-soft">No posts yet</p>
-            <p class="mt-2 text-sm text-text-muted">
-              {activeFeed === 'following'
-                ? 'Follow someone to see their posts'
-                : 'Check back in a moment'}
-            </p>
-          </div>
+        <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-6 text-center">
+          <p class="text-lg font-semibold text-text-soft">No posts yet</p>
+          <p class="mt-2 text-sm text-text-muted">
+            {activeFeed === 'following'
+              ? 'Follow someone to see their posts'
+              : 'Check back in a moment'}
+          </p>
         </div>
       {:else}
-        <div class="divide-y divide-dark-border">
-          {#each $feedEvents as event (event.id)}
-            <Post
-              {event}
-              onSelect={handleEventSelect}
-              replyCount={handleGetReplyCount(event.id)}
-            />
-          {/each}
+        {#each $feedEvents as event (event.id)}
+          <Post
+            {event}
+            onSelect={handleEventSelect}
+            onProfileSelect={handleProfileSelect}
+            replyCount={handleGetReplyCount(event.id)}
+          />
+        {/each}
 
-          {#if $feedLoading}
-            <div class="flex items-center justify-center py-4">
-              <div class="text-sm text-text-muted">Loading more...</div>
-            </div>
-          {/if}
-        </div>
+        {#if $feedLoading}
+          <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-4 text-center text-sm text-text-muted">
+            Loading more...
+          </div>
+        {/if}
       {/if}
     </div>
   </div>
 </div>
-
-{#if showThreadDetail && selectedEvent}
-  <ThreadDetail event={selectedEvent} thread={selectedThread} on:close={handleCloseThread} />
-{/if}
 
 <style>
   :global(main) {
     padding-bottom: 0;
   }
 </style>
-

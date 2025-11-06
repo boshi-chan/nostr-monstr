@@ -14,6 +14,8 @@ export interface ParsedContent {
   embeds: string[] // URLs
   repostId: string | null
   nestedEvent: NostrEvent | null
+  replyToId: string | null
+  rootId: string | null
 }
 
 export interface Mention {
@@ -33,6 +35,8 @@ export function parseContent(event: NostrEvent): ParsedContent {
   const mentions: Mention[] = []
   let repostId: string | null = null
   let nestedEvent: NostrEvent | null = null
+  let replyToId: string | null = null
+  let rootId: string | null = null
 
   let workingContent = event.content
 
@@ -60,16 +64,39 @@ export function parseContent(event: NostrEvent): ParsedContent {
   const baseTags = Array.isArray(event.tags) ? (event.tags as string[][]) : []
   const nestedTags = nestedEvent && Array.isArray(nestedEvent.tags) ? (nestedEvent.tags as string[][]) : []
 
+  let lastReferenceId: string | null = null
+
   const processTags = (tags: string[][], allowRepostCandidate: boolean) => {
     for (const tag of tags) {
       if (!Array.isArray(tag) || tag.length < 2) continue
       const [type, value] = tag
       if (!value) continue
       if (type === 'e') {
-        const marker = tag[3] || tag[2] || ''
-        if (marker === 'mention' || marker === 'root' || marker === 'reply') {
+        const markerRaw = tag[3] || tag[2] || ''
+        const marker = markerRaw.toLowerCase()
+
+        if (marker === 'root') {
+          if (!rootId) {
+            rootId = value
+          }
+          continue
+        }
+
+        if (marker === 'reply') {
+          if (!replyToId) {
+            replyToId = value
+          }
+          continue
+        }
+
+        if (marker === 'mention' || marker === 'quoted' || marker === 'quote') {
           quotes.push(value)
-        } else if (!marker) {
+          continue
+        }
+
+        lastReferenceId = value
+
+        if (!marker) {
           if (allowRepostCandidate && !repostId) {
             repostId = value
           } else {
@@ -89,6 +116,10 @@ export function parseContent(event: NostrEvent): ParsedContent {
   processTags(baseTags, true)
   if (nestedTags.length > 0) {
     processTags(nestedTags, false)
+  }
+
+  if (!replyToId && lastReferenceId && lastReferenceId !== rootId) {
+    replyToId = lastReferenceId
   }
 
   // Parse content for URLs and mentions
@@ -136,6 +167,8 @@ export function parseContent(event: NostrEvent): ParsedContent {
     embeds,
     repostId,
     nestedEvent,
+    replyToId,
+    rootId,
   }
 }
 

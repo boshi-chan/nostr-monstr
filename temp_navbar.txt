@@ -159,7 +159,7 @@
       </button>
 
       {#if desktopMenuOpen}
-        <div class="absolute left-full top-1/2 z-50 w-48 -translate-y-1/2 translate-x-4 rounded-2xl border border-dark-border/70 bg-dark-light/95 p-2 shadow-xl">
+        <div class="absolute bottom-14 left-1/2 z-50 w-44 -translate-x-1/2 rounded-2xl border border-dark-border/70 bg-dark-light/95 p-2 shadow-xl">
           <button
             class="w-full rounded-xl px-3 py-2 text-left text-sm text-text-soft hover:bg-dark-lighter/60"
             on:click={() => navigate('profile')}

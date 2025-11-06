@@ -27,6 +27,7 @@
     "@nostr-dev-kit/ndk-svelte": "^2.4.48",
     "@nostr-dev-kit/ndk-svelte-components": "^2.3.11",
     "idb": "^8.0.0",
+    "monero-ts": "^0.11.6",
     "nostr-tools": "^2.17.2",
     "qrcode.js": "^0.0.1"
   }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { activeTab } from '$stores/nav'
+  import { navigateToPage } from '$stores/router'
 </script>
 
 <div class="p-4 text-white">
@@ -17,19 +18,19 @@
     <div class="flex gap-2 mt-2">
       <button 
         class="px-3 py-1 bg-primary text-dark rounded hover:bg-secondary transition-colors"
-        on:click={() => activeTab.set('home')}
+        on:click={() => navigateToPage('home')}
       >
         Home
       </button>
       <button 
         class="px-3 py-1 bg-primary text-dark rounded hover:bg-secondary transition-colors"
-        on:click={() => activeTab.set('messages')}
+        on:click={() => navigateToPage('messages')}
       >
         Messages
       </button>
       <button 
         class="px-3 py-1 bg-primary text-dark rounded hover:bg-secondary transition-colors"
-        on:click={() => activeTab.set('profile')}
+        on:click={() => navigateToPage('profile')}
       >
         Profile
       </button>

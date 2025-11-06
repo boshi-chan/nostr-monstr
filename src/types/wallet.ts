@@ -4,6 +4,7 @@ export interface WalletState {
   balance: number
   address: string | null
   isLoading: boolean
+  selectedNode: string | null
 }
 
 export interface WalletConfig {

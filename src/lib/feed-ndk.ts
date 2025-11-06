@@ -19,6 +19,7 @@ import { parseMetadataEvent, fetchUserMetadata } from './metadata'
 import { feedSource, type FeedSource } from '$stores/feedSource'
 import type { NostrEvent } from '$types/nostr'
 import { NDKEvent, type NDKSubscriptionOptions } from '@nostr-dev-kit/ndk'
+import { parseContent } from './content'
 
 const subscriptionRefs = new Map<string, any>()
 const eventCache = new Map<string, NostrEvent>()
@@ -31,6 +32,11 @@ const MAX_FEED_SIZE = 120
 const BATCH_SIZE = 30
 let debounceTimeout: ReturnType<typeof setTimeout> | null = null
 let pendingEvents: Array<{ event: NostrEvent; origin: FeedOrigin }> = []
+
+// Subscription timeout and retry settings
+const SUBSCRIPTION_TIMEOUT = 8000 // 8 seconds
+const MAX_RETRIES = 2
+const RETRY_DELAY = 1000 // 1 second
 
 /**
  * Queue event for debounced feed update
@@ -293,9 +299,9 @@ async function ensureCircles(follows: Set<string>): Promise<Set<string>> {
 }
 
 /**
- * Subscribe to following feed
+ * Subscribe to following feed with timeout and retry
  */
-export async function subscribeToFollowingFeed(): Promise<void> {
+export async function subscribeToFollowingFeed(retryCount = 0): Promise<void> {
   try {
     const user = getCurrentNDKUser()
     if (!user?.pubkey) {
@@ -307,33 +313,65 @@ export async function subscribeToFollowingFeed(): Promise<void> {
     feedLoading.set(true)
     feedError.set(null)
 
-    const follows = await fetchFollowing(user.pubkey)
-    const followingSet = new Set(follows)
-    following.set(followingSet)
+    // Create timeout promise
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error('Following feed subscription timeout')),
+        SUBSCRIPTION_TIMEOUT
+      )
+    )
 
-    // refresh circles in background
-    void ensureCircles(followingSet)
+    // Create subscription promise
+    const subscriptionPromise = new Promise<void>(async (resolve, reject) => {
+      try {
+        const follows = await fetchFollowing(user.pubkey)
+        const followingSet = new Set(follows)
+        following.set(followingSet)
 
-    const authors = Array.from(followingSet)
-    if (authors.length === 0) {
-      feedLoading.set(false)
-      feedError.set('Follow someone to see this feed')
-      return
+        // refresh circles in background
+        void ensureCircles(followingSet)
+
+        const authors = Array.from(followingSet)
+        if (authors.length === 0) {
+          feedError.set('Follow someone to see this feed')
+          feedLoading.set(false)
+          resolve()
+          return
+        }
+
+        subscribeWithFilter(
+          {
+            authors,
+            kinds: [1, 6, 16],
+            limit: 150,
+            since: Math.floor(Date.now() / 1000) - 86400 * 3,
+          },
+          'following'
+        )
+        resolve()
+      } catch (err) {
+        reject(err)
+      }
+    })
+
+    // Race timeout vs subscription
+    await Promise.race([subscriptionPromise, timeoutPromise])
+
+  } catch (err) {
+    const errorMsg = String(err)
+    console.error(`✗ Following feed error (attempt ${retryCount + 1}):`, errorMsg)
+
+    // Retry logic
+    if (retryCount < MAX_RETRIES) {
+      console.log(`↻ Retrying following feed in ${RETRY_DELAY}ms...`)
+      feedError.set(`Retrying... (${retryCount + 1}/${MAX_RETRIES})`)
+      
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY))
+      return subscribeToFollowingFeed(retryCount + 1)
     }
 
-    subscribeWithFilter(
-      {
-        authors,
-        kinds: [1, 6, 16],
-        limit: 150,
-        since: Math.floor(Date.now() / 1000) - 86400 * 3,
-      },
-      'following'
-    )
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.error('Failed to subscribe to following feed:', err)
-    feedError.set(message)
+    // Final error
+    feedError.set(`Failed to load following feed: ${errorMsg}`)
     feedLoading.set(false)
   }
 }
@@ -435,25 +473,57 @@ export async function subscribeToLongReadsFeed(): Promise<void> {
 }
 
 /**
- * Subscribe to global feed
+ * Subscribe to global feed with timeout and retry
  */
-export async function subscribeToGlobalFeed(): Promise<void> {
+export async function subscribeToGlobalFeed(retryCount = 0): Promise<void> {
   try {
     feedLoading.set(true)
     feedError.set(null)
 
-    subscribeWithFilter(
-      {
-        kinds: [1],
-        limit: 100,
-        since: Math.floor(Date.now() / 1000) - 3600,
-      },
-      'global'
+    // Create a timeout promise
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error('Global feed subscription timeout')),
+        SUBSCRIPTION_TIMEOUT
+      )
     )
+
+    // Create subscription promise
+    const subscriptionPromise = new Promise<void>((resolve) => {
+      try {
+        subscribeWithFilter(
+          {
+            kinds: [1],
+            limit: 100,
+            since: Math.floor(Date.now() / 1000) - 3600,
+          },
+          'global'
+        )
+        // Resolve after subscription is set up (not waiting for events)
+        resolve()
+      } catch (err) {
+        throw err
+      }
+    })
+
+    // Race timeout vs subscription
+    await Promise.race([subscriptionPromise, timeoutPromise])
+
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.error('Failed to subscribe to global feed:', err)
-    feedError.set(message)
+    const errorMsg = String(err)
+    console.error(`✗ Global feed error (attempt ${retryCount + 1}):`, errorMsg)
+
+    // Retry logic
+    if (retryCount < MAX_RETRIES) {
+      console.log(`↻ Retrying global feed in ${RETRY_DELAY}ms...`)
+      feedError.set(`Retrying... (${retryCount + 1}/${MAX_RETRIES})`)
+      
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY))
+      return subscribeToGlobalFeed(retryCount + 1)
+    }
+
+    // Final error
+    feedError.set(`Failed to load global feed: ${errorMsg}`)
     feedLoading.set(false)
   }
 }
@@ -492,6 +562,30 @@ export function getEventById(id: string): NostrEvent | undefined {
   return eventCache.get(id)
 }
 
+export async function fetchEventById(id: string): Promise<NostrEvent | null> {
+  const cached = getEventById(id)
+  if (cached) {
+    return cached
+  }
+
+  const ndk = getNDK()
+
+  const event = await ndk.fetchEvent(
+    { ids: [id] },
+    { closeOnEose: true } as NDKSubscriptionOptions
+  )
+
+  if (!event) {
+    return null
+  }
+
+  const raw = (event as NDKEvent).rawEvent?.() ?? (event as unknown as NostrEvent)
+  eventCache.set(raw.id, raw)
+  void fetchUserMetadata(raw.pubkey)
+
+  return raw
+}
+
 /**
  * Get replies to an event
  */
@@ -520,14 +614,8 @@ export function buildThread(event: NostrEvent, allEvents: NostrEvent[]): NostrEv
   while (current && !visited.has(current.id)) {
     visited.add(current.id)
 
-    // Find parent
-    let parentId: string | null = null
-    for (const tag of current.tags) {
-      if (tag[0] === 'e' && tag[1]) {
-        parentId = tag[1]
-        break
-      }
-    }
+    const parsed = parseContent(current)
+    const parentId = parsed.replyToId ?? null
 
     if (!parentId) break
 
@@ -539,46 +627,100 @@ export function buildThread(event: NostrEvent, allEvents: NostrEvent[]): NostrEv
   }
 
   // Get replies
-  const replies = getReplies(event.id, allEvents)
+  const replies = getReplies(event.id, allEvents).sort((a, b) => a.created_at - b.created_at)
   thread.push(...replies)
 
   return thread
 }
 
 /**
- * Publish a note
+ * Validate post content before publishing
+ */
+function validatePostContent(content: string): void {
+  if (!content) {
+    throw new Error('Post cannot be empty')
+  }
+
+  const trimmed = content.trim()
+  if (trimmed.length === 0) {
+    throw new Error('Post cannot contain only whitespace')
+  }
+
+  if (trimmed.length > 5000) {
+    throw new Error(`Post exceeds 5000 character limit (${trimmed.length} chars)`)
+  }
+
+  // Check for excessive URLs (spam detection)
+  const urlCount = (trimmed.match(/https?:\/\//g) || []).length
+  if (urlCount > 10) {
+    throw new Error('Post contains too many URLs (max 10)')
+  }
+}
+
+/**
+ * Publish a note with validation
  */
 export async function publishNote(content: string, replyTo?: NostrEvent): Promise<NostrEvent> {
-  const ndk = getNDK()
-  const user = getCurrentNDKUser()
+  try {
+    // Validate input
+    validatePostContent(content)
 
-  if (!user?.pubkey || !ndk.signer) {
-    throw new Error('Not authenticated')
+    const ndk = getNDK()
+    const user = getCurrentNDKUser()
+
+    // Check authentication
+    if (!user?.pubkey) {
+      throw new Error('Not authenticated - please log in')
+    }
+
+    if (!ndk) {
+      throw new Error('NDK not initialized')
+    }
+
+    if (!ndk.signer) {
+      throw new Error('No signer available - please log in again')
+    }
+
+    // Validate reply target if provided
+    if (replyTo) {
+      if (!replyTo.id) {
+        throw new Error('Invalid reply target')
+      }
+      if (typeof replyTo.id !== 'string' || replyTo.id.length !== 64) {
+        throw new Error('Invalid event ID')
+      }
+    }
+
+    const tags: string[][] = []
+
+    // Add reply tags if replying
+    if (replyTo) {
+      tags.push(['e', replyTo.id, '', 'reply'])
+      tags.push(['p', replyTo.pubkey])
+    }
+
+    // Create event
+    const ndkEvent = new NDKEvent(ndk)
+    ndkEvent.kind = 1
+    ndkEvent.content = content.trim()
+    ndkEvent.tags = tags
+    ndkEvent.created_at = Math.floor(Date.now() / 1000)
+
+    await ndkEvent.sign()
+    await ndkEvent.publish()
+
+    console.log('✓ Post published:', ndkEvent.id)
+
+    const raw = ndkEvent.rawEvent()
+    recordUserEvent(raw)
+    addEventToFeed(raw, 'local')
+
+    return raw
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err)
+    console.error('✗ Publish failed:', errorMsg)
+    throw new Error(`Failed to publish post: ${errorMsg}`)
   }
-
-  const tags: string[][] = []
-
-  // Add reply tags if replying
-  if (replyTo) {
-    tags.push(['e', replyTo.id, '', 'reply'])
-    tags.push(['p', replyTo.pubkey])
-  }
-
-  // Create event
-  const ndkEvent = new NDKEvent(ndk)
-  ndkEvent.kind = 1
-  ndkEvent.content = content
-  ndkEvent.tags = tags
-  ndkEvent.created_at = Math.floor(Date.now() / 1000)
-
-  await ndkEvent.sign()
-  await ndkEvent.publish()
-
-  const raw = ndkEvent.rawEvent()
-  recordUserEvent(raw)
-  addEventToFeed(raw, 'local')
-
-  return raw
 }
 
 /**

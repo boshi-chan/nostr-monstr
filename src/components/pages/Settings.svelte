@@ -3,6 +3,7 @@
   import { walletState, showWallet } from '$stores/wallet'
   import { metadataCache } from '$stores/feed'
   import { getAvatarUrl, getNip05Display } from '$lib/metadata'
+  import RelaySettings from '../RelaySettings.svelte'
 </script>
 
 <div class="flex h-full flex-col bg-transparent pb-24 md:pb-0 md:px-10 md:py-8">
@@ -73,6 +74,10 @@
               </div>
             {/if}
           </div>
+        </section>
+
+        <section>
+          <RelaySettings />
         </section>
 
         <section class="space-y-3">

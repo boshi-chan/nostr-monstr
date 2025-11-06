@@ -7,6 +7,7 @@ const initialState: WalletState = {
   balance: 0,
   address: null,
   isLoading: false,
+  selectedNode: null,
 }
 
 export const walletState = writable<WalletState>(initialState)

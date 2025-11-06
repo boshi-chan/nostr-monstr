@@ -1,146 +1,245 @@
 /**
- * Monero Wallet Module
- * Lazy-loaded WASM module for client-side wallet management
- * Keys never leave the device
+ * Monero wallet integration powered by monero-ts.
+ * Keys are generated client-side and encrypted with a user-provided PIN.
  */
 
 import { walletState } from '$stores/wallet'
 import { encryptWalletData, decryptWalletData } from '$lib/crypto'
 import { getSetting, saveSetting } from '$lib/db'
+import type moneroTs from 'monero-ts'
+import type { MoneroNode } from './nodes'
+import { DEFAULT_NODES, getNodeById } from './nodes'
 
 export interface WalletInfo {
   seed: string
+  mnemonic: string
   address: string
   balance: number
 }
 
-let walletModule: any = null
+type StoredWalletSecrets = {
+  seed: string
+  mnemonic: string
+}
 
-/**
- * Lazy load wallet module
- */
-async function loadWalletModule(): Promise<any> {
-  if (walletModule) return walletModule
+type WalletMetaInfo = {
+  address: string
+  network: 'mainnet' | 'testnet' | 'stagenet'
+  createdAt: number
+}
 
-  try {
-    // In production, this would lazy-load a WASM module
-    // For now, we'll stub it
-    walletModule = {
-      generateSeed: () => generateMnemonicSeed(),
-      createAddress: (seed: string) => deriveAddressFromSeed(seed),
-    }
-    return walletModule
-  } catch (err) {
-    console.error('Failed to load wallet module:', err)
-    throw err
+const WALLET_SECRETS_KEY = 'walletEncrypted'
+const WALLET_META_KEY = 'walletMetaInfo'
+const WALLET_NODE_KEY = 'walletActiveNode'
+
+let monero: typeof moneroTs | null = null
+let cachedSecrets: StoredWalletSecrets | null = null
+let activeNode: MoneroNode = DEFAULT_NODES[0]
+
+function isBrowser(): boolean {
+  return typeof window !== 'undefined'
+}
+
+async function loadMonero(): Promise<typeof moneroTs> {
+  if (!isBrowser()) {
+    throw new Error('Monero wallet functionality is only available in the browser.')
   }
+
+  if (monero) return monero
+
+  const module = (await import('monero-ts')).default
+
+  // Configure worker loading so Vite bundles the worker asset correctly.
+  const workerUrl = new URL('monero-ts/dist/monero.worker.js', import.meta.url)
+  module.LibraryUtils.setWorkerLoader(() => new Worker(workerUrl, { name: 'monero-ts-worker' }))
+
+  await module.LibraryUtils.loadWasmModule()
+  monero = module
+  return module
+}
+
+async function persistSecrets(pin: string, secrets: StoredWalletSecrets): Promise<void> {
+  const encrypted = await encryptWalletData(JSON.stringify(secrets), pin)
+  await saveSetting(WALLET_SECRETS_KEY, encrypted)
+}
+
+async function loadEncryptedSecrets(): Promise<any> {
+  return await getSetting(WALLET_SECRETS_KEY)
+}
+
+async function persistMeta(meta: WalletMetaInfo): Promise<void> {
+  await saveSetting(WALLET_META_KEY, meta)
+}
+
+async function loadMeta(): Promise<WalletMetaInfo | null> {
+  return (await getSetting(WALLET_META_KEY)) ?? null
+}
+
+function setWalletState(partial: Partial<Parameters<typeof walletState.set>[0]>): void {
+  walletState.update(state => ({
+    ...state,
+    ...partial,
+  }))
+}
+
+export function getAvailableNodes(): MoneroNode[] {
+  return [...DEFAULT_NODES]
+}
+
+export function getActiveNode(): MoneroNode {
+  return activeNode
+}
+
+export async function setActiveNode(nodeId: string): Promise<void> {
+  const node = getNodeById(nodeId)
+  if (!node) {
+    throw new Error(`Unknown node id: ${nodeId}`)
+  }
+  activeNode = node
+  await saveSetting(WALLET_NODE_KEY, node.id)
+  setWalletState({ selectedNode: node.id })
 }
 
 /**
- * Initialize wallet (create new or restore)
+ * Hydrate the wallet store from persisted settings (to be called at app startup).
  */
-export async function initWallet(pin: string, seed?: string): Promise<WalletInfo> {
-  const module = await loadWalletModule()
+export async function hydrateWalletState(): Promise<void> {
+  const [encrypted, meta, savedNodeId] = await Promise.all([
+    loadEncryptedSecrets(),
+    loadMeta(),
+    getSetting(WALLET_NODE_KEY),
+  ])
 
-  const walletSeed = seed ?? module.generateSeed()
+  if (savedNodeId) {
+    const node = getNodeById(savedNodeId)
+    if (node) {
+      activeNode = node
+    }
+  }
 
-  const address = module.createAddress(walletSeed)
+  setWalletState({
+    hasWallet: Boolean(encrypted),
+    isLocked: Boolean(encrypted),
+    address: meta?.address ?? null,
+    selectedNode: activeNode.id,
+  })
+}
 
-  // Encrypt and store seed
-  const encrypted = await encryptWalletData(walletSeed, pin)
-  await saveSetting('walletEncrypted', encrypted)
+/**
+ * Create a new wallet or import from mnemonic seed.
+ */
+export async function initWallet(pin: string, mnemonic?: string): Promise<WalletInfo> {
+  if (!pin || pin.trim().length < 4) {
+    throw new Error('PIN must be at least 4 characters long.')
+  }
 
-  walletState.update((state) => ({
-    ...state,
-    hasWallet: true,
+  const moneroLib = await loadMonero()
+
+  const walletKeys = await moneroLib.createWalletKeys({
+    password: pin,
+    networkType: moneroLib.MoneroNetworkType.MAINNET,
+    seed: mnemonic,
+    language: 'English',
+    proxyToWorker: true,
+  })
+
+  const walletSeed = await walletKeys.getSeed()
+  const walletMnemonic = mnemonic ?? walletSeed
+  const address = await walletKeys.getPrimaryAddress()
+
+  await walletKeys.close()
+
+  cachedSecrets = {
+    seed: walletSeed,
+    mnemonic: walletMnemonic,
+  }
+
+  await persistSecrets(pin, cachedSecrets)
+  await persistMeta({
     address,
-    isLocked: true,
-  }))
+    network: 'mainnet',
+    createdAt: Date.now(),
+  })
+
+  setWalletState({
+    hasWallet: true,
+    isLocked: false,
+    address,
+    balance: 0,
+    selectedNode: activeNode.id,
+    isLoading: false,
+  })
 
   return {
     seed: walletSeed,
+    mnemonic: walletMnemonic,
     address,
     balance: 0,
   }
 }
 
 /**
- * Unlock wallet with PIN
+ * Unlock wallet secrets with the user's PIN.
  */
-export async function unlockWallet(pin: string): Promise<boolean> {
-  try {
-    const encrypted = await getSetting('walletEncrypted')
-    if (!encrypted) return false
+export async function unlockWallet(pin: string): Promise<WalletInfo | null> {
+  const encrypted = await loadEncryptedSecrets()
+  const meta = await loadMeta()
+  if (!encrypted || !meta) {
+    return null
+  }
 
-    await decryptWalletData(
+  try {
+    const serialized = await decryptWalletData(
       encrypted.encryptedData,
       encrypted.iv,
       encrypted.salt,
       pin
     )
 
-    walletState.update((state) => ({
-      ...state,
-      isLocked: false,
-    }))
+    const secrets = JSON.parse(serialized) as StoredWalletSecrets
+    cachedSecrets = secrets
 
-    return true
+    setWalletState({
+      hasWallet: true,
+      isLocked: false,
+      address: meta.address,
+      selectedNode: activeNode.id,
+    })
+
+    return {
+      seed: secrets.seed,
+      mnemonic: secrets.mnemonic,
+      address: meta.address,
+      balance: 0,
+    }
   } catch (err) {
     console.error('Failed to unlock wallet:', err)
-    return false
+    return null
   }
 }
 
-/**
- * Lock wallet (clear plaintext from memory)
- */
 export function lockWallet(): void {
-  walletState.update((state) => ({
-    ...state,
-    isLocked: true,
-  }))
+  cachedSecrets = null
+  setWalletState({ isLocked: true })
+}
+
+export async function hasStoredWallet(): Promise<boolean> {
+  const encrypted = await loadEncryptedSecrets()
+  return Boolean(encrypted)
+}
+
+export function getCachedMnemonic(): string | null {
+  return cachedSecrets?.mnemonic ?? null
+}
+
+export function getCachedSeed(): string | null {
+  return cachedSecrets?.seed ?? null
 }
 
 /**
- * Generate BIP39 mnemonic seed (stub)
+ * Placeholder for sending Monero tips.
+ * TODO: Implement MoneroWalletFull integration and transaction flow.
  */
-function generateMnemonicSeed(): string {
-  // In production, use proper BIP39 implementation
-  const words = [
-    'abandon', 'ability', 'able', 'about', 'above', 'absent', 'absorb', 'abstract',
-    'academy', 'accept', 'access', 'accident', 'account', 'accuse', 'achieve',
-  ]
-  return Array(12).fill(0).map(() => words[Math.floor(Math.random() * words.length)]).join(' ')
-}
-
-/**
- * Derive Monero address from seed (stub)
- */
-function deriveAddressFromSeed(seed: string): string {
-  // In production, use proper Monero derivation
-  const normalized = seed.replace(/[^a-f0-9]/gi, '').toLowerCase()
-  const padded = (normalized + 'a'.repeat(94)).slice(0, 94)
-  return `4${padded}`
-}
-
-/**
- * Send Monero (stub)
- */
-export async function sendMonero(
-  address: string,
-  amount: number,
-  pin: string
-): Promise<{ txHash: string }> {
-  if (!(await unlockWallet(pin))) {
-    throw new Error('Invalid PIN')
-  }
-
-  console.info('[wallet] sendMonero stub', { address, amount })
-
-  // In production, create actual transaction
-  const txHash = 'tx_' + Math.random().toString(36).substring(7)
-
-  lockWallet()
-
-  return { txHash }
+export async function sendMonero(): Promise<never> {
+  throw new Error('Monero tipping is not implemented yet.')
 }

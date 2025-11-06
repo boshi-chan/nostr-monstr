@@ -17,6 +17,7 @@
     subscribeToLongReadsFeed,
   } from '$lib/feed-ndk'
   import { startNotificationListener, stopNotificationListener } from '$lib/notifications'
+  import { hydrateWalletState } from '$lib/wallet'
 
   // force reactivity for feedSource
   $: $feedSource
@@ -29,6 +30,7 @@
       await initDB()
       await initNDK()
       await restoreSession()
+      await hydrateWalletState()
 
       // default feed: global on startup
       await subscribeToGlobalFeed()

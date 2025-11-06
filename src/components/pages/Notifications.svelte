@@ -7,6 +7,7 @@
     markAsRead,
     removeNotification,
   } from '$stores/notifications'
+  import { openPostById } from '$stores/router'
   import type { Notification } from '$stores/notifications'
   import LikeIcon from '../icons/LikeIcon.svelte'
   import CommentIcon from '../icons/CommentIcon.svelte'
@@ -77,7 +78,10 @@
 
   function handleNotificationClick(notification: Notification) {
     markAsRead(notification.id)
-    // Future enhancement: navigate to the relevant thread or note
+    if (notification.eventId) {
+      // Use the current active route as the origin tab
+      openPostById(notification.eventId, 'notifications')
+    }
   }
 
   function handleDismiss(notificationId: string, event: Event) {
