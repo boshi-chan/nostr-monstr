@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fade } from 'svelte/transition'
   import { walletState, showWallet } from '$stores/wallet'
+  import { currentUser } from '$stores/auth'
   import {
     initWallet,
     unlockWallet,
@@ -8,8 +9,13 @@
     getAvailableNodes,
     setActiveNode,
     getCachedMnemonic,
+    refreshWallet,
+    restoreWalletFromNostr,
+    sendMonero,
+    deleteWallet,
     type WalletInfo,
   } from '$lib/wallet'
+  import { toDataURL as qrToDataURL } from 'qrcode'
   import type { MoneroNode } from '$lib/wallet/nodes'
 
   const nodes: MoneroNode[] = getAvailableNodes()
@@ -19,11 +25,27 @@
   let unlockPin = ''
   let importSeed = ''
   let activeTab: 'create' | 'import' = 'create'
+  let activePanel: 'overview' | 'deposit' | 'withdraw' = 'overview'
   let error: string | null = null
   let loading = false
+  let restoreBusy = false
   let showSeedPhrase = false
   let recentWallet: WalletInfo | null = null
   let nodeBusy: string | null = null
+  let sendAddress = ''
+  let sendAmount = ''
+  let sendNote = ''
+  let sendRecipientPubkey = ''
+  let sendNoteId: string | null = null
+  let sendLoading = false
+  let sendError: string | null = null
+  let lastTxHash: string | null = null
+  let syncError: string | null = null
+  let depositQr: string | null = null
+  let qrError: string | null = null
+  let lastQrAddress: string | null = null
+  let deleteBusy = false
+  let restoreHeightOverride = ''
 
   $: isOpen = $showWallet
   $: walletMode = !$walletState.hasWallet ? 'setup' : $walletState.isLocked ? 'locked' : 'unlocked'
@@ -32,9 +54,20 @@
     walletMode === 'unlocked'
       ? recentWallet?.mnemonic ?? getCachedMnemonic()
       : recentWallet?.mnemonic ?? null
-
+  $: if (walletMode !== 'unlocked') {
+    activePanel = 'overview'
+  }
   $: if (!isOpen) {
     resetForm()
+  }
+
+  $: if (walletMode === 'unlocked' && $walletState.address) {
+    if ($walletState.address !== lastQrAddress) {
+      void generateDepositQr($walletState.address)
+    }
+  } else {
+    depositQr = null
+    lastQrAddress = null
   }
 
   function resetForm(): void {
@@ -43,11 +76,25 @@
     unlockPin = ''
     importSeed = ''
     activeTab = 'create'
+    activePanel = 'overview'
     error = null
     loading = false
+    restoreBusy = false
     showSeedPhrase = false
     recentWallet = null
     nodeBusy = null
+    sendAddress = ''
+    sendAmount = ''
+    sendNote = ''
+    sendRecipientPubkey = ''
+    sendNoteId = null
+    sendError = null
+    lastTxHash = null
+    syncError = null
+    depositQr = null
+    qrError = null
+    lastQrAddress = null
+    restoreHeightOverride = ''
   }
 
   function closeModal(): void {
@@ -61,12 +108,20 @@
     }
   }
 
-  function validateSetupForm(): string | null {
+  function validatePinOnly(): string | null {
     if (setupPin.trim().length < 4) {
       return 'PIN must be at least 4 characters.'
     }
     if (setupPin !== confirmPin) {
       return 'PINs do not match.'
+    }
+    return null
+  }
+
+  function validateSetupForm(): string | null {
+    const pinError = validatePinOnly()
+    if (pinError) {
+      return pinError
     }
     if (activeTab === 'import' && importSeed.trim().length === 0) {
       return 'Seed phrase is required to import a wallet.'
@@ -81,15 +136,30 @@
       return
     }
 
+    let parsedRestoreHeight: number | undefined
+    if (restoreHeightOverride.trim().length > 0) {
+      parsedRestoreHeight = Number(restoreHeightOverride.trim())
+      if (!Number.isFinite(parsedRestoreHeight) || parsedRestoreHeight <= 0) {
+        error = 'Restore height must be a positive number.'
+        return
+      }
+      parsedRestoreHeight = Math.floor(parsedRestoreHeight)
+    }
+
     loading = true
     error = null
     try {
-      const wallet = await initWallet(setupPin.trim(), activeTab === 'import' ? importSeed.trim() : undefined)
+      const wallet = await initWallet(
+        setupPin.trim(),
+        activeTab === 'import' ? importSeed.trim() : undefined,
+        parsedRestoreHeight ? { restoreHeight: parsedRestoreHeight } : undefined
+      )
       recentWallet = wallet
       showSeedPhrase = true
       setupPin = ''
       confirmPin = ''
       importSeed = ''
+      restoreHeightOverride = ''
     } catch (err) {
       console.error('Wallet setup failed', err)
       error = err instanceof Error ? err.message : 'Unable to set up wallet. Please try again.'
@@ -129,6 +199,39 @@
     showSeedPhrase = false
   }
 
+  async function handleRestoreViaNostr(): Promise<void> {
+    const pinError = validatePinOnly()
+    if (pinError) {
+      error = pinError
+      return
+    }
+    restoreBusy = true
+    error = null
+    try {
+      const wallet = await restoreWalletFromNostr(setupPin.trim())
+      recentWallet = wallet
+      showSeedPhrase = true
+      setupPin = ''
+      confirmPin = ''
+      importSeed = ''
+    } catch (err) {
+      console.error('Wallet restore failed', err)
+      error = err instanceof Error ? err.message : 'Unable to restore wallet. Please try again.'
+    } finally {
+      restoreBusy = false
+    }
+  }
+
+  async function handleRefresh(): Promise<void> {
+    syncError = null
+    try {
+      await refreshWallet()
+    } catch (err) {
+      console.error('Wallet sync failed', err)
+      syncError = err instanceof Error ? err.message : 'Unable to refresh balance.'
+    }
+  }
+
   async function handleNodeChange(nodeId: string): Promise<void> {
     if (nodeBusy || nodeId === selectedNodeId) return
     nodeBusy = nodeId
@@ -150,6 +253,91 @@
     } catch (err) {
       console.error('Clipboard copy failed', err)
       error = `Unable to copy ${label}.`
+    }
+  }
+
+  function useMaxBalance(): void {
+    sendAmount = $walletState.unlockedBalance.toFixed(6)
+  }
+
+  async function handleSend(): Promise<void> {
+    if ($walletState.isLocked) {
+      sendError = 'Unlock the wallet before sending.'
+      return
+    }
+    const amountValue = Number(sendAmount)
+    if (!Number.isFinite(amountValue) || amountValue <= 0) {
+      sendError = 'Enter a valid amount of XMR.'
+      return
+    }
+    if (!sendAddress.trim()) {
+      sendError = 'Recipient address is required.'
+      return
+    }
+
+    sendLoading = true
+    sendError = null
+    try {
+      const result = await sendMonero({
+        address: sendAddress.trim(),
+        amount: amountValue,
+        note: sendNote.trim() || undefined,
+        recipientPubkey: sendRecipientPubkey || undefined,
+        noteId: sendNoteId ?? undefined,
+      })
+      lastTxHash = result.txHash
+      sendAmount = ''
+      sendNote = ''
+      sendAddress = ''
+      sendRecipientPubkey = ''
+      sendNoteId = null
+    } catch (err) {
+      console.error('Failed to send Ember payment', err)
+      sendError = err instanceof Error ? err.message : 'Unable to send payment. Please try again.'
+    } finally {
+      sendLoading = false
+    }
+  }
+
+  function formatRelativeTime(timestamp: number | null): string {
+    if (!timestamp) return 'never'
+    const diff = Date.now() - timestamp
+    if (diff < 60_000) return 'just now'
+    if (diff < 3_600_000) return `${Math.floor(diff / 60000)}m ago`
+    if (diff < 86_400_000) return `${Math.floor(diff / 3600000)}h ago`
+    return new Date(timestamp).toLocaleDateString()
+  }
+
+  async function handleDeleteWallet(): Promise<void> {
+    if (deleteBusy) return
+    const confirmed =
+      typeof window === 'undefined'
+        ? true
+        : window.confirm(
+            'This will remove the wallet from this device. You must have your seed saved to restore later. Continue?'
+          )
+    if (!confirmed) return
+    deleteBusy = true
+    try {
+      await deleteWallet()
+      resetForm()
+      showWallet.set(false)
+    } catch (err) {
+      console.error('Failed to delete wallet', err)
+      error = 'Unable to delete wallet. Please try again.'
+    } finally {
+      deleteBusy = false
+    }
+  }
+  async function generateDepositQr(address: string): Promise<void> {
+    try {
+      qrError = null
+      lastQrAddress = address
+      depositQr = await qrToDataURL(address, { margin: 1, scale: 6 })
+    } catch (err) {
+      console.error('Failed to generate deposit QR', err)
+      qrError = 'Unable to generate QR code right now.'
+      depositQr = null
     }
   }
 </script>
@@ -217,6 +405,23 @@
                 placeholder="Enter your 25-word Monero seed phrase"
               />
             </div>
+            <div class="mt-3">
+              <label for="wallet-restore-height" class="text-xs uppercase tracking-[0.25em] text-text-muted">
+                Restore height (optional)
+              </label>
+              <input
+                id="wallet-restore-height"
+                type="text"
+                inputmode="numeric"
+                pattern="[0-9]*"
+                class="mt-2 w-full rounded-2xl border border-dark-border/60 bg-dark/70 px-3 py-2 text-sm text-text-soft focus:border-primary/60 focus:outline-none"
+                bind:value={restoreHeightOverride}
+                placeholder="Enter block height if known"
+              />
+              <p class="mt-1 text-xs text-text-muted">
+                Use the block height from your previous wallet (or a slightly earlier block) for faster sync.
+              </p>
+            </div>
           {/if}
 
           <div class="grid gap-3 md:grid-cols-2">
@@ -247,6 +452,24 @@
           <button class="btn-primary w-full justify-center" on:click={handleCreateOrImport} disabled={loading}>
             {loading ? 'Preparing wallet…' : activeTab === 'create' ? 'Create wallet' : 'Import wallet'}
           </button>
+
+          {#if $currentUser}
+            <button
+              class="mt-3 w-full rounded-2xl border border-primary/50 px-4 py-2 text-sm font-semibold text-primary transition hover:border-primary hover:bg-primary/10"
+              type="button"
+              on:click={handleRestoreViaNostr}
+              disabled={restoreBusy}
+            >
+              {restoreBusy ? 'Restoring…' : 'Restore from Nostr backup'}
+            </button>
+            <p class="mt-2 text-xs text-text-muted/80">
+              Enter a new PIN above, then pull your encrypted wallet backup via your Nostr login.
+            </p>
+          {:else}
+            <p class="mt-3 text-xs text-text-muted/75">
+              Log in with your Nostr key to sync a private wallet backup.
+            </p>
+          {/if}
         {:else if walletMode === 'locked'}
           <div>
             <label for="wallet-unlock-pin" class="text-xs uppercase tracking-[0.25em] text-text-muted">PIN</label>
@@ -263,103 +486,290 @@
             {loading ? 'Unlocking…' : 'Unlock wallet'}
           </button>
         {:else}
-          <div class="rounded-2xl border border-dark-border/60 bg-dark/50 p-4">
-            <div class="flex items-center justify-between">
-              <div>
-                <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Primary address</p>
-                <p class="mt-2 break-all text-sm text-text-soft/90">
-                  {$walletState.address ?? '—'}
-                </p>
-              </div>
-              <button
-                type="button"
-                class="rounded-full border border-dark-border/60 px-4 py-2 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white"
-                on:click={() => copyToClipboard($walletState.address, 'address')}
-              >
-                Copy address
-              </button>
-            </div>
+          <div class="flex gap-2 rounded-2xl border border-dark-border/60 bg-dark/60 p-1 text-sm font-semibold text-text-muted">
+            <button
+              type="button"
+              class={`flex-1 rounded-xl px-4 py-2 transition ${activePanel === 'overview' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
+              on:click={() => (activePanel = 'overview')}
+            >
+              Overview
+            </button>
+            <button
+              type="button"
+              class={`flex-1 rounded-xl px-4 py-2 transition ${activePanel === 'deposit' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
+              on:click={() => (activePanel = 'deposit')}
+            >
+              Deposit
+            </button>
+            <button
+              type="button"
+              class={`flex-1 rounded-xl px-4 py-2 transition ${activePanel === 'withdraw' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
+              on:click={() => (activePanel = 'withdraw')}
+            >
+              Withdraw
+            </button>
           </div>
 
-          <div class="space-y-2">
-            <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Balance</p>
-            <p class="text-3xl font-semibold text-primary">
-              {$walletState.balance.toFixed(6)} XMR
-            </p>
-          </div>
+          <p class="text-xs text-text-muted/80">
+            This on-device wallet is non-custodial and meant for quick Embers. For larger savings, withdraw to your long-term wallet.
+          </p>
 
-          <div class="space-y-3">
-            <div class="flex items-center justify-between">
-              <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Connected node</p>
-              {#if nodeBusy}
-                <span class="text-xs text-text-muted">Switching…</span>
-              {/if}
-            </div>
-            <div class="flex flex-wrap gap-2">
-              {#each nodes as node}
+          {#if activePanel === 'overview'}
+            <div class="rounded-2xl border border-dark-border/60 bg-dark/50 p-4">
+              <div class="flex items-center justify-between gap-4">
+                <div>
+                  <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Primary address</p>
+                  <p class="mt-2 break-all text-sm text-text-soft/90">
+                    {$walletState.address ?? '—'}
+                  </p>
+                </div>
                 <button
                   type="button"
-                  class={`rounded-full border px-3 py-1 text-sm transition ${
-                    selectedNodeId === node.id
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-dark-border/60 text-text-muted hover:text-text-soft'
-                  }`}
-                  on:click={() => handleNodeChange(node.id)}
-                  disabled={nodeBusy === node.id}
+                  class="rounded-full border border-dark-border/60 px-4 py-2 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white"
+                  on:click={() => copyToClipboard($walletState.address, 'address')}
                 >
-                  {node.label}
+                  Copy
                 </button>
-              {/each}
+              </div>
             </div>
-          </div>
 
-          <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4">
-            <div class="flex items-center justify-between">
-              <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Seed phrase</p>
-              <button
-                type="button"
-                class="text-xs font-semibold text-primary transition hover:text-primary/80"
-                on:click={() => (showSeedPhrase = !showSeedPhrase)}
-              >
-                {showSeedPhrase ? 'Hide' : 'Reveal'}
-              </button>
-            </div>
-            {#if showSeedPhrase && displayMnemonic}
-              <p class="mt-3 break-words text-sm leading-relaxed text-text-soft/90">{displayMnemonic}</p>
-              <button
-                type="button"
-                class="mt-3 rounded-full border border-dark-border/60 px-4 py-2 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white"
-                on:click={() => copyToClipboard(displayMnemonic, 'seed phrase')}
-              >
-                Copy seed
-              </button>
-            {:else}
-              <p class="mt-3 text-sm text-text-muted">
-                Keep this phrase private. You’ll need it if you ever reinstall Monstr or move wallets.
+            <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4">
+              <div class="flex items-center justify-between">
+                <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Balance</p>
+                <button
+                  type="button"
+                  class="rounded-full border border-dark-border/60 px-3 py-1 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white disabled:opacity-50"
+                  on:click={handleRefresh}
+                  disabled={$walletState.isSyncing}
+                >
+                  {$walletState.isSyncing ? 'Syncing…' : 'Refresh'}
+                </button>
+              </div>
+              <p class="mt-2 text-3xl font-semibold text-primary">
+                {$walletState.balance.toFixed(6)} XMR
               </p>
-            {/if}
-          </div>
+              <p class="text-sm text-text-muted">
+                Unlocked: {$walletState.unlockedBalance.toFixed(6)} XMR
+              </p>
+              <p class="mt-1 text-xs text-text-muted/80">
+                {$walletState.lastSyncedAt ? `Last synced ${formatRelativeTime($walletState.lastSyncedAt)}` : 'Not synced yet'}
+              </p>
+              {#if syncError}
+                <p class="mt-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">{syncError}</p>
+              {/if}
+            </div>
 
-          <div class="flex flex-col gap-2 md:flex-row md:gap-3">
-            <button
-              type="button"
-              class="rounded-full border border-dark-border/60 px-4 py-2 text-sm font-semibold text-text-muted transition hover:border-primary/60 hover:text-white"
-              on:click={handleLock}
-            >
-              Lock wallet
-            </button>
-            <button
-              type="button"
-              class="btn-primary flex-1 justify-center"
-              on:click={() => copyToClipboard($walletState.address, 'address')}
-            >
-              Share address
-            </button>
-          </div>
+            <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4">
+              <div class="flex items-center justify-between">
+                <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Connected node</p>
+                {#if nodeBusy}
+                  <span class="text-xs text-text-muted">Switching…</span>
+                {/if}
+              </div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                {#each nodes as node}
+                  <button
+                    type="button"
+                    class={`rounded-full border px-3 py-1 text-sm transition ${
+                      selectedNodeId === node.id
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-dark-border/60 text-text-muted hover:text-text-soft'
+                    }`}
+                    on:click={() => handleNodeChange(node.id)}
+                    disabled={nodeBusy === node.id}
+                  >
+                    {node.label}
+                  </button>
+                {/each}
+              </div>
+              <p class="mt-3 text-xs text-text-muted">
+                Restore height: {$walletState.restoreHeight ?? '—'}
+              </p>
+            </div>
+
+            <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4">
+              <div class="flex items-center justify-between">
+                <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Backup</p>
+                <span
+                  class={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    $walletState.backupStatus === 'ok'
+                      ? 'bg-emerald-500/10 text-emerald-300'
+                      : $walletState.backupStatus === 'syncing'
+                      ? 'bg-primary/10 text-primary'
+                      : 'bg-amber-500/10 text-amber-200'
+                  }`}
+                >
+                  {$walletState.backupStatus === 'ok'
+                    ? 'Synced'
+                    : $walletState.backupStatus === 'syncing'
+                    ? 'Syncing'
+                    : 'Pending'}
+                </span>
+              </div>
+              <p class="mt-2 text-sm text-text-soft/90">
+                {$walletState.remoteBackupAvailable
+                  ? `Encrypted backup stored ${formatRelativeTime($walletState.lastBackupAt)} via your Nostr login.`
+                  : 'Log in with your Nostr key to keep a private backup in sync.'}
+              </p>
+            </div>
+
+            <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4">
+              <div class="flex items-center justify-between">
+                <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Seed phrase</p>
+                <button
+                  type="button"
+                  class="text-xs font-semibold text-primary transition hover:text-primary/80"
+                  on:click={() => (showSeedPhrase = !showSeedPhrase)}
+                >
+                  {showSeedPhrase ? 'Hide' : 'Reveal'}
+                </button>
+              </div>
+              {#if showSeedPhrase && displayMnemonic}
+                <p class="mt-3 break-words text-sm leading-relaxed text-text-soft/90">{displayMnemonic}</p>
+                <button
+                  type="button"
+                  class="mt-3 rounded-full border border-dark-border/60 px-4 py-2 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white"
+                  on:click={() => copyToClipboard(displayMnemonic, 'seed phrase')}
+                >
+                  Copy seed
+                </button>
+              {:else}
+                <p class="mt-3 text-sm text-text-muted">
+                  Keep this phrase private. You’ll need it if you ever reinstall Monstr or move wallets.
+                </p>
+              {/if}
+            </div>
+
+           <div class="flex flex-col gap-2 md:flex-row md:gap-3">
+             <button
+               type="button"
+               class="rounded-full border border-dark-border/60 px-4 py-2 text-sm font-semibold text-text-muted transition hover:border-primary/60 hover:text-white"
+               on:click={handleLock}
+             >
+               Lock wallet
+             </button>
+             <button
+               type="button"
+               class="btn-primary flex-1 justify-center"
+               on:click={() => copyToClipboard($walletState.address, 'address')}
+             >
+               Share address
+             </button>
+              <button
+                type="button"
+                class="rounded-full border border-rose-500/60 px-4 py-2 text-sm font-semibold text-rose-200 transition hover:bg-rose-500/10 disabled:opacity-50"
+                on:click={handleDeleteWallet}
+                disabled={deleteBusy}
+              >
+                {deleteBusy ? 'Deleting…' : 'Delete wallet'}
+              </button>
+            </div>
+          {:else if activePanel === 'deposit'}
+            <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4 text-center">
+              <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Deposit via QR</p>
+              {#if depositQr}
+                <img src={depositQr} alt="Monero deposit QR" class="mx-auto mt-4 h-48 w-48 rounded-xl border border-dark-border/40 bg-dark/80 p-3" />
+              {:else}
+                <div class="mt-6 rounded-xl border border-dashed border-dark-border/60 bg-dark/40 p-6 text-sm text-text-muted">
+                  {qrError ?? 'Generating QR code…'}
+                </div>
+              {/if}
+              <p class="mt-4 text-xs text-text-muted">
+                Scan with any Monero wallet or share your address. Funds stay in your browser until you withdraw.
+              </p>
+              <div class="mt-5 rounded-2xl border border-dark-border/60 bg-dark/50 p-4 text-left">
+                <div class="flex items-center justify-between gap-3">
+                  <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Deposit address</p>
+                  <button
+                    type="button"
+                    class="rounded-full border border-dark-border/60 px-4 py-1 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white"
+                    on:click={() => copyToClipboard($walletState.address, 'address')}
+                  >
+                    Copy
+                  </button>
+                </div>
+                <p class="mt-2 break-all text-sm text-text-soft/90">
+                  {$walletState.address}
+                </p>
+              </div>
+            </div>
+          {:else}
+            <form class="space-y-4" on:submit|preventDefault={handleSend}>
+              <div>
+                <label for="withdraw-amount" class="text-xs uppercase tracking-[0.25em] text-text-muted">Amount to withdraw (XMR)</label>
+                <div class="mt-2 flex gap-2">
+                  <input
+                    id="withdraw-amount"
+                    type="number"
+                    min="0"
+                    step="0.000001"
+                    class="flex-1 rounded-2xl border border-dark-border/60 bg-dark/70 px-3 py-2 text-sm text-text-soft focus:border-primary/60 focus:outline-none"
+                    bind:value={sendAmount}
+                    placeholder="0.010000"
+                  />
+                  <button
+                    type="button"
+                    class="rounded-2xl border border-dark-border/60 px-3 py-2 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white"
+                    on:click={useMaxBalance}
+                  >
+                    Max
+                  </button>
+                </div>
+                <p class="mt-1 text-xs text-text-muted">Unlocked: {$walletState.unlockedBalance.toFixed(6)} XMR</p>
+              </div>
+
+              <div>
+                <label for="withdraw-address" class="text-xs uppercase tracking-[0.25em] text-text-muted">Recipient address</label>
+                <textarea
+                  id="withdraw-address"
+                  rows="3"
+                  class="mt-2 w-full rounded-2xl border border-dark-border/60 bg-dark/70 p-3 text-sm text-text-soft focus:border-primary/60 focus:outline-none"
+                  bind:value={sendAddress}
+                  placeholder="Paste a Monero address or subaddress"
+                  required
+                />
+              </div>
+
+              {#if sendRecipientPubkey}
+                <p class="text-xs text-text-muted/80">
+                  Target pubkey: <span class="font-mono text-text-soft">{sendRecipientPubkey.slice(0, 16)}…</span>
+                </p>
+              {/if}
+
+              <div>
+                <label for="withdraw-note" class="text-xs uppercase tracking-[0.25em] text-text-muted">Optional note</label>
+                <input
+                  id="withdraw-note"
+                  type="text"
+                  class="mt-2 w-full rounded-2xl border border-dark-border/60 bg-dark/70 px-3 py-2 text-sm text-text-soft focus:border-primary/60 focus:outline-none"
+                  bind:value={sendNote}
+                  placeholder="Attach a short note"
+                />
+              </div>
+
+              <button class="btn-primary w-full justify-center" type="submit" disabled={sendLoading}>
+                {sendLoading ? 'Sending…' : 'Send Ember'}
+              </button>
+
+              {#if sendError}
+                <p class="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{sendError}</p>
+              {/if}
+
+              {#if lastTxHash}
+                <p class="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-100">
+                  Sent! Tx hash {lastTxHash.slice(0, 18)}…
+                </p>
+              {/if}
+
+              <p class="text-xs text-text-muted/80">
+                Withdrawals send XMR directly from this lightweight wallet. Please move long-term holdings to a dedicated cold-storage wallet.
+              </p>
+            </form>
+          {/if}
         {/if}
       </section>
 
-      {#if error}
+      {#if error && walletMode !== 'unlocked'}
         <p class="mt-4 rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</p>
       {/if}
 

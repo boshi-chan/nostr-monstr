@@ -15,8 +15,14 @@ export const feedError = writable<string | null>(null)
 export const metadataCache = writable<Map<string, UserMetadata>>(new Map())
 export const userEventIds = writable<Set<string>>(new Set())
 
-// Relationship graph
+// Relationship graph with cache metadata
+export interface CachedFollowingList {
+  pubkeys: Set<string>
+  fetchedAt: number
+}
+
 export const following = writable<Set<string>>(new Set())
+export const followingCache = writable<Map<string, CachedFollowingList>>(new Map()) // pubkey -> cached follows
 export const circles = writable<Set<string>>(new Set())
 export const longReadAuthors = derived([following, circles], ([$following, $circles]) => {
   const authors = new Set($following)

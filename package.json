@@ -11,6 +11,7 @@
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^3.0.0",
+    "@types/qrcode": "^1.5.6",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "autoprefixer": "^10.4.16",
@@ -19,6 +20,7 @@
     "svelte-check": "^3.5.0",
     "tailwindcss": "^3.3.5",
     "terser": "^5.44.0",
+    "ts-node": "^10.9.2",
     "typescript": "^5.2.0",
     "vite": "^5.0.0"
   },
@@ -27,8 +29,10 @@
     "@nostr-dev-kit/ndk-svelte": "^2.4.48",
     "@nostr-dev-kit/ndk-svelte-components": "^2.3.11",
     "idb": "^8.0.0",
+    "memfs": "^4.50.0",
     "monero-ts": "^0.11.6",
     "nostr-tools": "^2.17.2",
+    "qrcode": "^1.5.4",
     "qrcode.js": "^0.0.1"
   }
 }

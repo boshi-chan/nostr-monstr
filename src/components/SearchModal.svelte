@@ -74,16 +74,15 @@
 
 {#if $showSearch}
   <!-- Overlay -->
-  <div
-    role="button"
-    tabindex="0"
+  <button
+    type="button"
     aria-label="Close search"
     class="fixed inset-0 z-40 bg-black/50"
     on:click={handleOverlayClick}
     on:keydown={(e) => {
       if (e.key === 'Escape') closeSearch()
     }}
-  />
+  ></button>
 
   <!-- Search Modal -->
   <div class="fixed inset-0 z-50 flex items-start justify-center pt-20 px-4 md:pt-24">
@@ -91,7 +90,6 @@
       role="dialog"
       aria-modal="true"
       class="w-full max-w-2xl rounded-2xl border border-dark-border bg-dark-light shadow-2xl"
-      on:click|stopPropagation
     >
       <!-- Search Input -->
       <div class="border-b border-dark-border/60 p-4">

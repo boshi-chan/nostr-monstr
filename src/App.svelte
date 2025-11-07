@@ -18,6 +18,7 @@
   } from '$lib/feed-ndk'
   import { startNotificationListener, stopNotificationListener } from '$lib/notifications'
   import { hydrateWalletState } from '$lib/wallet'
+  import { initWalletLifecycle } from '$lib/wallet/lifecycle'
 
   // force reactivity for feedSource
   $: $feedSource
@@ -31,6 +32,7 @@
       await initNDK()
       await restoreSession()
       await hydrateWalletState()
+      initWalletLifecycle()
 
       // default feed: global on startup
       await subscribeToGlobalFeed()
@@ -50,8 +52,12 @@
     const pubkey = $currentUser?.pubkey ?? null
 
     ;(async () => {
+      // Stop all subscriptions and clear feed
       stopAllSubscriptions()
       clearFeed()
+      
+      // Give subscriptions time to actually stop before starting new ones
+      await new Promise(resolve => setTimeout(resolve, 100))
 
       if (targetFeed === 'global') {
         await subscribeToGlobalFeed()

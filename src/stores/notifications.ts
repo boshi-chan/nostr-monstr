@@ -11,6 +11,7 @@ export type NotificationType =
   | 'repost'
   | 'zap'
   | 'mention'
+  | 'ember'
 
 export interface Notification {
   id: string
@@ -20,7 +21,8 @@ export interface Notification {
   fromAvatar?: string
   eventId: string
   eventContent?: string
-  amount?: number // for zaps
+  amount?: number // zaps/embers
+  txHash?: string
   createdAt: number
   read: boolean
 }

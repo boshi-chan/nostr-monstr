@@ -4,7 +4,6 @@
   import { feedSource } from '$stores/feedSource'
   import { logout } from '$lib/auth'
   import { showCompose } from '$stores/feed'
-  import { showSearch } from '$stores/search'
   import { navigateToPage } from '$stores/router'
   import type { NavTab } from '$stores/nav'
   import HomeIcon from './icons/HomeIcon.svelte'
@@ -12,7 +11,6 @@
   import MessageIcon from './icons/MessageIcon.svelte'
   import BellIcon from './icons/BellIcon.svelte'
   import EditIcon from './icons/EditIcon.svelte'
-  import SearchIcon from './icons/SearchIcon.svelte'
   import { unreadCount } from '$stores/notifications'
 
   const tabs: { id: NavTab; label: string; icon: any }[] = [

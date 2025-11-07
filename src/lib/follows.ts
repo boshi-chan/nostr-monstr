@@ -7,7 +7,6 @@
 import { getNDK, getCurrentNDKUser } from './ndk'
 import { following } from '$stores/feed'
 import { get } from 'svelte/store'
-import type { NDKEvent } from '@nostr-dev-kit/ndk'
 
 /**
  * Get current contacts (follows) from NIP-03 (kind 3)
@@ -96,14 +95,31 @@ export async function followUser(pubkey: string): Promise<void> {
       throw new Error('Invalid pubkey')
     }
 
-    const currentFollowing = get(following)
+    // CRITICAL: Ensure following list is loaded from relays if empty
+    let currentFollowing = get(following)
+    
+    if (currentFollowing.size === 0) {
+      console.log('Following list empty, fetching from relays...')
+      currentFollowing = await getFollowingList()
+      following.set(currentFollowing)
+      console.log(`✓ Loaded ${currentFollowing.size} existing follows from relays`)
+    }
+
     if (currentFollowing.has(pubkey)) {
       console.log('Already following this user')
       return
     }
 
+    // CRITICAL: Validate before publishing - prevent empty list publish
+    if (currentFollowing.size === 0) {
+      throw new Error(
+        'Cannot follow: your contacts list could not be loaded. ' +
+        'Please try again or check your relay connections.'
+      )
+    }
+
     // Create new set with the new follow
-    const newFollowing = new Set(currentFollowing)
+    const newFollowing = new Set<string>(currentFollowing)
     newFollowing.add(pubkey)
 
     // Publish the updated list
@@ -112,7 +128,7 @@ export async function followUser(pubkey: string): Promise<void> {
     // Update store
     following.set(newFollowing)
 
-    console.log(`✓ Now following ${pubkey.slice(0, 8)}...`)
+    console.log(`✓ Now following ${pubkey.slice(0, 8)}... (total: ${newFollowing.size})`)
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err)
     console.error('Failed to follow user:', errorMsg)
@@ -129,14 +145,23 @@ export async function unfollowUser(pubkey: string): Promise<void> {
       throw new Error('Invalid pubkey')
     }
 
-    const currentFollowing = get(following)
+    // CRITICAL: Ensure following list is loaded from relays if empty
+    let currentFollowing = get(following)
+    
+    if (currentFollowing.size === 0) {
+      console.log('Following list empty, fetching from relays...')
+      currentFollowing = await getFollowingList()
+      following.set(currentFollowing)
+      console.log(`✓ Loaded ${currentFollowing.size} existing follows from relays`)
+    }
+
     if (!currentFollowing.has(pubkey)) {
       console.log('Not following this user')
       return
     }
 
     // Create new set without the user
-    const newFollowing = new Set(currentFollowing)
+    const newFollowing = new Set<string>(currentFollowing)
     newFollowing.delete(pubkey)
 
     // CRITICAL: Check if list would be empty
@@ -153,7 +178,7 @@ export async function unfollowUser(pubkey: string): Promise<void> {
     // Update store
     following.set(newFollowing)
 
-    console.log(`✓ Unfollowed ${pubkey.slice(0, 8)}...`)
+    console.log(`✓ Unfollowed ${pubkey.slice(0, 8)}... (total: ${newFollowing.size})`)
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err)
     console.error('Failed to unfollow user:', errorMsg)

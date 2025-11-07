@@ -10,10 +10,10 @@
   import type { User } from '$types/user'
   import type { UserMetadata } from '$types/user'
   import { activeRoute, openPost, openProfile } from '$stores/router'
-  import type { NavTab } from '$stores/nav'
+import type { NavTab } from '$stores/nav'
 
   export let pubkey: string | null = null
-  export let originTab: NavTab = 'home'
+  export let originTab: NavTab | null = null
 
   const ndk = getNDK()
   const metadataRequested = new Set<string>()
@@ -195,6 +195,9 @@
   }
 
   function getOriginTab(): NavTab {
+    if (originTab) {
+      return originTab
+    }
     const route = $activeRoute
     if (route.type === 'page') {
       return route.tab

@@ -4,9 +4,6 @@
  */
 
 import { getNDK, getCurrentNDKUser } from './ndk'
-import { currentUser } from '$stores/auth'
-import { get } from 'svelte/store'
-import type { NDKEvent } from '@nostr-dev-kit/ndk'
 
 export interface RelayConfig {
   url: string

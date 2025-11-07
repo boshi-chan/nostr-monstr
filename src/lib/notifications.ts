@@ -14,6 +14,7 @@ import { getUserMetadata, fetchUserMetadata } from '$lib/metadata'
 import type { NostrEvent } from '$types/nostr'
 import { getNDK } from '$lib/ndk'
 import type { NDKEvent, NDKFilter, NDKSubscription, NDKSubscriptionOptions } from '@nostr-dev-kit/ndk'
+import { EMBER_EVENT_KIND, EMBER_TAG, atomicToXmr, decodeEmberPayload } from '$lib/ember'
 
 let notificationSubscription: NDKSubscription | null = null
 const processedNotifications = new Set<string>()
@@ -154,7 +155,7 @@ export async function startNotificationListener(pubkey: string): Promise<void> {
   const userEventList = Array.from(get(userEventIds))
 
   const filter: NDKFilter = {
-    kinds: [1, 6, 7, 9734, 9735],
+    kinds: [1, 6, 7, 9734, 9735, EMBER_EVENT_KIND],
     '#p': [pubkey],
     since: Math.floor(Date.now() / 1000) - 86400 * 7,
   }
@@ -204,6 +205,9 @@ async function processNotificationEvent(event: NostrEvent, userPubkey: string): 
       case 9734:
       case 9735:
         if (await handleZapNotification(event, userPubkey)) return
+        break
+      case EMBER_EVENT_KIND:
+        if (await handleEmberNotification(event, userPubkey)) return
         break
     }
   } catch (err) {
@@ -412,6 +416,41 @@ async function handleZapNotification(event: NostrEvent, userPubkey: string): Pro
     eventId: targetEventId,
     eventContent: targetEvent.content.substring(0, 180),
     amount,
+    createdAt: event.created_at,
+    read: false,
+  })
+
+  return true
+}
+
+async function handleEmberNotification(event: NostrEvent, userPubkey: string): Promise<boolean> {
+  const isRecipient = event.tags.some(tag => tag[0] === 'p' && tag[1] === userPubkey)
+  if (!isRecipient) return false
+
+  const targetEventId = findFirstTagValue(event, 'e')
+  const amountTag = event.tags.find(tag => tag[0] === EMBER_TAG)?.[1]
+  if (!amountTag) return false
+
+  const payloadTag = event.tags.find(tag => tag[0] === 'payload')?.[1]
+  const payload = decodeEmberPayload(payloadTag)
+
+  const amount = payload ? atomicToXmr(payload.amountAtomic) : atomicToXmr(amountTag)
+  if (!amount) return false
+
+  const targetEvent = targetEventId ? await getTargetEvent(targetEventId) : null
+
+  const metadata = await getNotificationMetadata(event.pubkey)
+
+  addNotificationSorted({
+    id: event.id,
+    type: 'ember',
+    fromPubkey: event.pubkey,
+    fromName: metadata?.name || metadata?.display_name || 'User',
+    fromAvatar: metadata?.picture,
+    eventId: targetEventId ?? event.id,
+    eventContent: targetEvent?.content?.substring(0, 180),
+    amount,
+    txHash: payload?.txHash,
     createdAt: event.created_at,
     read: false,
   })

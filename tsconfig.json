@@ -31,7 +31,8 @@
       "$lib/*": ["src/lib/*"],
       "$components/*": ["src/components/*"],
       "$stores/*": ["src/stores/*"],
-      "$types/*": ["src/types/*"]
+      "$types/*": ["src/types/*"],
+      "assert": ["src/polyfills/assert.ts"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.svelte"],

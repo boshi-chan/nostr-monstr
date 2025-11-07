@@ -11,6 +11,7 @@ import {
   feedLoading,
   feedError,
   following,
+  followingCache,
   circles,
   longReadAuthors,
   userEventIds,
@@ -47,6 +48,7 @@ export function addEventToFeed(event: NostrEvent, origin: FeedOrigin = 'global')
     return
   }
 
+  // Early exit if already cached (prevents duplicate processing)
   if (eventCache.has(event.id)) {
     return
   }
@@ -60,7 +62,11 @@ export function addEventToFeed(event: NostrEvent, origin: FeedOrigin = 'global')
     void fetchUserMetadata(event.pubkey)
   }
 
-  pendingEvents.push({ event, origin })
+  // Only add to pending if not already queued
+  const alreadyQueued = pendingEvents.some(pe => pe.event.id === event.id)
+  if (!alreadyQueued) {
+    pendingEvents.push({ event, origin })
+  }
 
   if (!debounceTimeout) {
     debounceTimeout = setTimeout(flushPendingEvents, FEED_DEBOUNCE_MS)
@@ -98,6 +104,7 @@ function flushPendingEvents(): void {
       const combined = [...eventsToMerge, ...existing]
       combined.sort((a, b) => b.created_at - a.created_at)
 
+      // Deduplicate by ID and maintain size limit
       const seen = new Set<string>()
       const next: NostrEvent[] = []
 
@@ -108,7 +115,7 @@ function flushPendingEvents(): void {
         if (next.length >= MAX_FEED_SIZE) break
       }
 
-      // Keep cache size under control
+      // Keep cache size under control - remove events not in current feed
       if (eventCache.size > MAX_FEED_SIZE * 2) {
         const keep = new Set(next.map(ev => ev.id))
         for (const key of eventCache.keys()) {
@@ -156,6 +163,16 @@ function recordUserEvent(event: NostrEvent): void {
 }
 
 async function fetchFollowing(pubkey: string): Promise<Set<string>> {
+  // Check cache first (5 minute TTL)
+  const cache = get(followingCache)
+  const cached = cache.get(pubkey)
+  const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+  
+  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
+    console.log(`✓ Using cached following list for ${pubkey.slice(0, 8)} (${cached.pubkeys.size} follows)`)
+    return new Set(cached.pubkeys)
+  }
+
   const ndk = getNDK()
   const follows = new Set<string>()
 
@@ -185,6 +202,16 @@ async function fetchFollowing(pubkey: string): Promise<Set<string>> {
       console.warn('Failed to fetch following list:', err)
       finish()
     })
+  })
+
+  // Cache the result
+  followingCache.update(c => {
+    const next = new Map(c)
+    next.set(pubkey, {
+      pubkeys: follows,
+      fetchedAt: Date.now(),
+    })
+    return next
   })
 
   return follows
@@ -258,11 +285,18 @@ function subscribeWithFilter(
 
   registerSubscription(label, subscription)
 
+  let hasReceivedEvent = false
+
   subscription.on('event', (event: any) => {
+    if (!hasReceivedEvent) {
+      hasReceivedEvent = true
+      console.log(`✓ ${label} feed: received first event`)
+    }
     addEventToFeed(event, label)
   })
 
   subscription.on('eose', () => {
+    console.log(`✓ ${label} feed: EOSE received`)
     feedLoading.set(false)
   })
 
@@ -339,12 +373,13 @@ export async function subscribeToFollowingFeed(retryCount = 0): Promise<void> {
           return
         }
 
+        // Optimized for following feed: recent posts from trusted sources
         subscribeWithFilter(
           {
             authors,
             kinds: [1, 6, 16],
-            limit: 150,
-            since: Math.floor(Date.now() / 1000) - 86400 * 3,
+            limit: 200, // Increased for better coverage
+            since: Math.floor(Date.now() / 1000) - 86400 * 7, // 7 days instead of 3
           },
           'following'
         )
@@ -407,12 +442,13 @@ export async function subscribeToCirclesFeed(): Promise<void> {
       return
     }
 
+    // Optimized for circles feed: broader time range for discovery
     subscribeWithFilter(
       {
         authors,
         kinds: [1, 6, 16],
-        limit: 150,
-        since: Math.floor(Date.now() / 1000) - 86400 * 3,
+        limit: 250, // More events for discovery
+        since: Math.floor(Date.now() / 1000) - 86400 * 14, // 14 days for wider discovery
       },
       'circles'
     )
@@ -491,11 +527,12 @@ export async function subscribeToGlobalFeed(retryCount = 0): Promise<void> {
     // Create subscription promise
     const subscriptionPromise = new Promise<void>((resolve) => {
       try {
+        // Optimized for global feed: recent posts from all users
         subscribeWithFilter(
           {
-            kinds: [1],
-            limit: 100,
-            since: Math.floor(Date.now() / 1000) - 3600,
+            kinds: [1], // Text notes only
+            limit: 150, // Increased from 100 for better coverage
+            since: Math.floor(Date.now() / 1000) - 7200, // 2 hours for fresh content
           },
           'global'
         )

@@ -14,6 +14,7 @@
   import RepostIcon from '../icons/RepostIcon.svelte'
   import ZapIcon from '../icons/ZapIcon.svelte'
   import MentionIcon from '../icons/MentionIcon.svelte'
+  import EmberIcon from '../icons/EmberIcon.svelte'
 
   type IconComponent = typeof LikeIcon
 
@@ -66,6 +67,12 @@
       accent: 'text-sky-400',
       background: 'bg-sky-500/10',
       label: 'mentioned you',
+    },
+    ember: {
+      icon: EmberIcon,
+      accent: 'text-orange-400',
+      background: 'bg-orange-500/10',
+      label: 'sent you an Ember',
     },
   }
 
@@ -173,12 +180,20 @@
                   <span class="text-text-muted">{config.label}</span>
                   {#if notification.type === 'zap' && notification.amount}
                     <span class={`${config.accent} font-semibold`}>{notification.amount} sats</span>
+                  {:else if notification.type === 'ember' && notification.amount}
+                    <span class={`${config.accent} font-semibold`}>{notification.amount.toFixed(4)} XMR</span>
                   {/if}
                 </div>
 
                 {#if notification.eventContent}
                   <p class="mt-1 text-sm text-text-muted line-clamp-2">
                     {notification.eventContent}
+                  </p>
+                {/if}
+
+                {#if notification.type === 'ember' && notification.txHash}
+                  <p class="mt-1 text-xs text-text-muted/70 font-mono break-all">
+                    tx: {notification.txHash.slice(0, 18)}…
                   </p>
                 {/if}
 

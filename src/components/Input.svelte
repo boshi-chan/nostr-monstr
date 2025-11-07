@@ -5,6 +5,10 @@
   export let disabled: boolean = false
   export let label: string = ''
   export let error: string = ''
+  export let inputId: string | null = null
+
+  const fallbackId = `input-${Math.random().toString(36).slice(2)}`
+  $: resolvedId = inputId ?? fallbackId
 
   function handleInput(e: Event) {
     value = (e.target as HTMLInputElement).value
@@ -13,11 +17,12 @@
 
 <div class="space-y-1">
   {#if label}
-    <label class="block text-xs uppercase tracking-[0.2em] text-text-muted">{label}</label>
+    <label for={resolvedId} class="block text-xs uppercase tracking-[0.2em] text-text-muted">{label}</label>
   {/if}
 
   <input
-    type="text"
+    id={resolvedId}
+    type={inputType}
     {value}
     on:input={handleInput}
     {placeholder}

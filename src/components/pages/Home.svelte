@@ -46,7 +46,7 @@
 </script>
 
 <div class="w-full pb-24 md:pb-0">
-  <div class="sticky top-0 z-20 border-b border-dark-border/60 bg-dark/50 backdrop-blur-2xl backdrop-saturate-150 supports-[backdrop-filter]:bg-dark/30">
+  <div class="sticky top-0 z-20 border-b border-dark-border/60 bg-dark/80 backdrop-blur-3xl backdrop-saturate-150 supports-[backdrop-filter]:bg-dark/60">
     <div class="flex h-14 md:h-16 w-full items-center justify-between px-3 md:px-6 gap-2">
       <!-- Feed tabs (centered, flex-1) -->
       <div class="flex flex-1 w-full items-center gap-3 overflow-x-auto">

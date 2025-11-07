@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { currentUser } from '$stores/auth'
   import { getRelaysFromNIP65, publishRelays, getDefaultRelays, isValidRelayUrl, type RelayConfig } from '$lib/relays'
   import { onMount } from 'svelte'
 

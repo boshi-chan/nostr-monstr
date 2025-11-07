@@ -4,6 +4,16 @@
   import { metadataCache } from '$stores/feed'
   import { getAvatarUrl, getNip05Display } from '$lib/metadata'
   import RelaySettings from '../RelaySettings.svelte'
+  import { setWalletSharePreference } from '$lib/wallet'
+
+  async function handleShareToggle(event: Event): Promise<void> {
+    const input = event.currentTarget as HTMLInputElement
+    try {
+      await setWalletSharePreference(input.checked)
+    } catch (err) {
+      console.error('Failed to update share preference', err)
+    }
+  }
 </script>
 
 <div class="flex h-full flex-col bg-transparent pb-24 md:pb-0 md:px-10 md:py-8">
@@ -59,6 +69,7 @@
                 <p class="mt-2 text-3xl font-bold text-primary">
                   {$walletState.balance.toFixed(6)} XMR
                 </p>
+                <p class="text-sm text-text-muted">Unlocked: {$walletState.unlockedBalance.toFixed(6)} XMR</p>
               </div>
               <button class="btn-primary mt-4 w-full justify-center md:mt-0 md:w-auto" on:click={() => showWallet.set(true)}>
                 {$walletState.hasWallet ? 'Open Wallet' : 'Set Up Wallet'}
@@ -73,6 +84,26 @@
                 </p>
               </div>
             {/if}
+
+            <div class="rounded-xl border border-dark-border/60 bg-dark/50 p-4">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-sm font-semibold text-text-soft">Share Ember address</p>
+                  <p class="text-xs text-text-muted">
+                    Publish your Monero wallet address so others can send Embers directly.
+                  </p>
+                </div>
+                <label class="flex items-center gap-2 text-sm font-semibold text-text-soft">
+                  <input
+                    type="checkbox"
+                    class="h-4 w-4 accent-primary"
+                    checked={$walletState.shareAddress}
+                    on:change={handleShareToggle}
+                  />
+                  <span>{$walletState.shareAddress ? 'On' : 'Off'}</span>
+                </label>
+              </div>
+            </div>
           </div>
         </section>
 

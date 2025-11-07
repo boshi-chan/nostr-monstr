@@ -31,6 +31,8 @@
   import { get as getStore } from 'svelte/store'
   import MoreVerticalIcon from './icons/MoreVerticalIcon.svelte'
   import { nip19 } from 'nostr-tools'
+  import { showEmberModal, emberTarget } from '$stores/wallet'
+  import { emberTotals, ensureEmberTotal } from '$stores/ember'
 
   export let event: NostrEvent
   export let onSelect: ((event: NostrEvent) => void) | undefined = undefined
@@ -46,6 +48,7 @@
   let zapLoading = false
   let zapAmount = 0
   let isZapped = false
+  let emberAmount = 0
 
   let wrapperParsed = parseContent(event)
   $: wrapperParsed = parseContent(event)
@@ -85,8 +88,15 @@
   $: isReposted = $repostedEvents.has(actionableEvent.id)
   $: zapAmount = $zappedEvents.get(actionableEvent.id) ?? 0
   $: isZapped = zapAmount > 0
+  $: {
+    const totals = $emberTotals
+    emberAmount = totals.get(actionableEvent.id) ?? 0
+  }
+  $: if (actionableEvent.id) {
+    void ensureEmberTotal(actionableEvent.id)
+  }
 
-  let metadata
+  let metadata: UserMetadata | undefined
   $: metadata = $metadataCache.get(actionableEvent.pubkey)
   $: displayName = getDisplayName(actionableEvent.pubkey, metadata)
   $: avatarUrl = getAvatarUrl(metadata)
@@ -183,9 +193,25 @@
     }
   }
 
+  function resolveMoneroAddress(): string | null {
+    if (!metadata) return null
+    const candidates = ['monero_address', 'moneroAddress', 'xmr_address', 'ember_address']
+    for (const key of candidates) {
+      const value = metadata[key]
+      if (typeof value === 'string' && value.length > 80) {
+        return value
+      }
+    }
+    return null
+  }
+
   function handleEmber() {
-    // Placeholder for ember interaction
-    console.log('Ember reaction:', actionableEvent.id)
+    emberTarget.set({
+      recipientPubkey: actionableEvent.pubkey,
+      noteId: actionableEvent.id,
+      address: resolveMoneroAddress(),
+    })
+    showEmberModal.set(true)
   }
 
   async function navigateToEventId(eventId: string | null): Promise<void> {
@@ -511,7 +537,7 @@
         </button>
       {/if}
 
-      <div class="mt-2 text-text-soft whitespace-pre-wrap break-words">
+      <div class="mt-2 text-text-soft whitespace-pre-wrap break-words" style="overflow-wrap:anywhere">
         {parsed.text}
       </div>
 
@@ -536,39 +562,12 @@
       <!-- Action buttons -->
       {#if showActions}
         <div class="mt-3 flex justify-between text-text-muted -mx-2">
-          <!-- Reply -->
-          <button
-            on:click|stopPropagation={handleReply}
-            class={`${baseActionClass} hover:bg-orange-500/10 hover:text-orange-400 focus-visible:ring-2 focus-visible:ring-orange-500/40`}
-            title="Reply"
-          >
-            <CommentIcon size={18} color="currentColor" strokeWidth={1.75} />
-            {#if replyCount > 0}
-              <span class="text-xs text-orange-300 group-hover:text-orange-200">{replyCount}</span>
-            {/if}
-          </button>
-
-          <!-- Repost -->
-          <button
-            on:click|stopPropagation={handleRepost}
-            disabled={repostActionLoading}
-            class={`${baseActionClass} hover:bg-emerald-500/10 hover:text-emerald-400 focus-visible:ring-2 focus-visible:ring-emerald-500/40 ${
-              isReposted ? 'bg-emerald-500/10 text-emerald-400' : ''
-            }`}
-            title="Repost"
-          >
-            <RepostIcon size={18} color="currentColor" strokeWidth={1.75} />
-            {#if isReposted}
-              <span class="text-xs text-emerald-300 group-hover:text-emerald-200">1</span>
-            {/if}
-          </button>
-
           <!-- Like -->
           <button
             on:click|stopPropagation={handleLike}
             disabled={likeLoading}
-            class={`${baseActionClass} hover:bg-rose-500/10 hover:text-rose-400 focus-visible:ring-2 focus-visible:ring-rose-500/40 ${
-              isLiked ? 'bg-rose-500/10 text-rose-400' : ''
+            class={`${baseActionClass} hover:text-rose-400 focus-visible:ring-2 focus-visible:ring-rose-500/40 ${
+              isLiked ? 'text-rose-400' : ''
             }`}
             title="Like"
           >
@@ -578,12 +577,41 @@
             {/if}
           </button>
 
+          <!-- Comment -->
+          <button
+            on:click|stopPropagation={handleReply}
+            class={`${baseActionClass} hover:text-blue-400 focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
+              replyCount > 0 ? 'text-blue-400' : ''
+            }`}
+            title="Comment"
+          >
+            <CommentIcon size={18} color="currentColor" strokeWidth={1.75} />
+            {#if replyCount > 0}
+              <span class="text-xs text-blue-300 group-hover:text-blue-200">{replyCount}</span>
+            {/if}
+          </button>
+
+          <!-- Repost -->
+          <button
+            on:click|stopPropagation={handleRepost}
+            disabled={repostActionLoading}
+            class={`${baseActionClass} hover:text-emerald-400 focus-visible:ring-2 focus-visible:ring-emerald-500/40 ${
+              isReposted ? 'text-emerald-400' : ''
+            }`}
+            title="Repost"
+          >
+            <RepostIcon size={18} color="currentColor" strokeWidth={1.75} />
+            {#if isReposted}
+              <span class="text-xs text-emerald-300 group-hover:text-emerald-200">1</span>
+            {/if}
+          </button>
+
           <!-- Zap -->
           <button
             on:click|stopPropagation={handleZap}
             disabled={zapLoading}
-            class={`${baseActionClass} hover:bg-yellow-500/10 hover:text-yellow-400 focus-visible:ring-2 focus-visible:ring-yellow-500/40 ${
-              isZapped ? 'bg-yellow-500/10 text-yellow-400' : ''
+            class={`${baseActionClass} hover:text-yellow-400 focus-visible:ring-2 focus-visible:ring-yellow-500/40 ${
+              isZapped ? 'text-yellow-400' : ''
             }`}
             title="Zap"
           >
@@ -596,12 +624,20 @@
           <!-- Ember -->
           <button
             on:click|stopPropagation={handleEmber}
-            class={`${baseActionClass} hover:bg-orange-500/10 hover:text-orange-400 focus-visible:ring-2 focus-visible:ring-orange-500/40`}
+            class={`${baseActionClass} hover:text-orange-400 focus-visible:ring-2 focus-visible:ring-orange-500/40`}
             title="Ember"
           >
             <EmberIcon size={18} color="currentColor" strokeWidth={1.75} />
           </button>
         </div>
+        {#if emberAmount > 0}
+          <div class="mt-3 flex items-center gap-2 text-xs font-semibold text-orange-300">
+            <span class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-orange-500/10">
+              <EmberIcon size={14} color="currentColor" strokeWidth={1.5} />
+            </span>
+            <span>{emberAmount.toFixed(4)} XMR received</span>
+          </div>
+        {/if}
       {/if}
     </div>
   </div>
