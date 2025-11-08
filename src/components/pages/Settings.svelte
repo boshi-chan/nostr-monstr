@@ -58,7 +58,7 @@
           <div class="flex items-center justify-between">
             <h4 class="text-sm font-semibold uppercase tracking-[0.3em] text-text-muted">Wallet</h4>
             <span class="rounded-full bg-primary/10 px-3 py-1 text-xs text-primary">
-              {$walletState.hasWallet ? ($walletState.isLocked ? 'Locked' : 'Ready') : 'Not created'}
+              {$walletState.hasWallet ? ($walletState.isReady ? 'Ready' : 'Setting up') : 'Not created'}
             </span>
           </div>
 

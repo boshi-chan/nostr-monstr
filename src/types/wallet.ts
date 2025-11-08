@@ -1,7 +1,7 @@
 export type WalletBackupStatus = 'idle' | 'syncing' | 'ok' | 'error'
 
 export interface WalletState {
-  isLocked: boolean
+  isReady: boolean
   hasWallet: boolean
   balance: number
   unlockedBalance: number
@@ -18,7 +18,6 @@ export interface WalletState {
 }
 
 export interface WalletConfig {
-  pin: string
   seed?: string
 }
 

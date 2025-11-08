@@ -46,8 +46,8 @@
       return
     }
 
-    if ($walletState.isLocked) {
-      error = 'Unlock your wallet first.'
+    if (!$walletState.isReady) {
+      error = 'Open your wallet and let it finish syncing first.'
       return
     }
 
@@ -156,9 +156,9 @@
           />
         </div>
 
-        {#if $walletState.isLocked}
+        {#if !$walletState.isReady}
           <div class="rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-            Unlock your wallet before sending Embers.
+            Finish wallet setup before sending Embers.
             <button
               type="button"
               class="ml-2 text-amber-200 underline"
@@ -191,7 +191,7 @@
             type="button"
             class="btn-primary flex-1 justify-center disabled:opacity-50"
             on:click={handleSend}
-            disabled={loading || $walletState.isLocked}
+            disabled={loading || !$walletState.isReady}
           >
             {loading ? 'Sending…' : 'Send Ember'}
           </button>

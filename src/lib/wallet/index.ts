@@ -1,10 +1,9 @@
-﻿/**
+/**
  * Monero wallet integration powered by monero-ts.
- * Keys are generated client-side and encrypted with a user-provided PIN.
+ * Keys are generated client-side and stored encrypted with a local master key.
  * Adds remote backups via Nostr (NIP-04) and Ember tipping helpers.
  */
 
-import { get } from 'svelte/store'
 import { walletState, resetWalletStore, setSharePreferenceInStore } from '$stores/wallet'
 import { encryptWalletData, decryptWalletData } from '$lib/crypto'
 import { getSetting, saveSetting } from '$lib/db'
@@ -46,7 +45,7 @@ const WALLET_SECRETS_KEY = 'walletEncrypted'
 const WALLET_META_KEY = 'walletMetaInfo'
 const WALLET_NODE_KEY = 'walletActiveNode'
 const WALLET_SHARE_KEY = 'walletShareAddress'
-const SESSION_PIN_KEY = 'walletSessionPin'
+const WALLET_MASTER_KEY = 'walletMasterKey'
 const WALLET_BACKUP_KIND = 30078
 const WALLET_BACKUP_D_TAG = 'monstr-wallet'
 const BLOCK_TIME_SECONDS = 120
@@ -57,60 +56,56 @@ const RESTORE_LOOKBACK_SECONDS = 7 * 24 * 60 * 60 // rewind a week to capture ea
 let monero: MoneroLib | null = null
 let walletInstance: MoneroWalletFullInstance | null = null
 let walletSyncPromise: Promise<void> | null = null
-let currentPin: string | null = null
+let walletKey: string | null = null
 let cachedSecrets: StoredWalletSecrets | null = null
 let cachedMeta: WalletMetaInfo | null = null
 let activeNode: MoneroNode = DEFAULT_NODES[0]
 let shareAddressPreference = true
-let sessionPinCache: string | null = null
+let masterKeyCache: string | null = null
 
 function isBrowser(): boolean {
   return typeof window !== 'undefined'
 }
 
-function rememberSessionPin(pin: string): void {
-  sessionPinCache = pin
+function ensureMasterKey(): string {
+  if (masterKeyCache) return masterKeyCache
   if (!isBrowser()) {
-    return
+    throw new Error('Wallet key unavailable outside of browser')
   }
+  const existing = window.localStorage.getItem(WALLET_MASTER_KEY)
+  if (existing) {
+    masterKeyCache = existing
+    return existing
+  }
+  const randomBytes = crypto.getRandomValues(new Uint8Array(32))
+  const generated = Array.from(randomBytes, b => b.toString(16).padStart(2, '0')).join('')
   try {
-    window.sessionStorage.setItem(SESSION_PIN_KEY, window.btoa(pin))
+    window.localStorage.setItem(WALLET_MASTER_KEY, generated)
   } catch (err) {
-    console.warn('Failed to cache wallet PIN for this session', err)
+    console.warn('Failed to persist wallet key', err)
   }
+  masterKeyCache = generated
+  return generated
 }
 
-function readSessionPin(): string | null {
-  if (sessionPinCache) {
-    return sessionPinCache
+function readMasterKey(): string | null {
+  if (masterKeyCache) return masterKeyCache
+  if (!isBrowser()) return null
+  const stored = window.localStorage.getItem(WALLET_MASTER_KEY)
+  if (stored) {
+    masterKeyCache = stored
+    return stored
   }
-  if (!isBrowser()) {
-    return null
-  }
-  const encoded = window.sessionStorage.getItem(SESSION_PIN_KEY)
-  if (!encoded) {
-    return null
-  }
-  try {
-    const decoded = window.atob(encoded)
-    sessionPinCache = decoded
-    return decoded
-  } catch (err) {
-    console.warn('Failed to decode cached wallet PIN', err)
-    window.sessionStorage.removeItem(SESSION_PIN_KEY)
-    return null
-  }
+  return null
 }
 
-function clearSessionPinCache(): void {
-  sessionPinCache = null
-  if (!isBrowser()) {
-    return
-  }
+function clearMasterKey(): void {
+  masterKeyCache = null
+  if (!isBrowser()) return
   try {
-    window.sessionStorage.removeItem(SESSION_PIN_KEY)
+    window.localStorage.removeItem(WALLET_MASTER_KEY)
   } catch (err) {
-    console.warn('Failed to clear cached wallet PIN', err)
+    console.warn('Failed to clear wallet key', err)
   }
 }
 
@@ -129,13 +124,32 @@ async function loadMonero(): Promise<MoneroLib> {
   return module
 }
 
-async function persistSecrets(pin: string, secrets: StoredWalletSecrets): Promise<void> {
-  const encrypted = await encryptWalletData(JSON.stringify(secrets), pin)
+async function persistSecrets(key: string, secrets: StoredWalletSecrets): Promise<void> {
+  const encrypted = await encryptWalletData(JSON.stringify(secrets), key)
   await saveSetting(WALLET_SECRETS_KEY, encrypted)
 }
 
 async function loadEncryptedSecrets(): Promise<any> {
   return await getSetting(WALLET_SECRETS_KEY)
+}
+
+async function tryDecodeSecrets(
+  encrypted: Awaited<ReturnType<typeof loadEncryptedSecrets>>,
+  key: string
+): Promise<StoredWalletSecrets | null> {
+  if (!encrypted) return null
+  try {
+    const serialized = await decryptWalletData(
+      encrypted.encryptedData,
+      encrypted.iv,
+      encrypted.salt,
+      key
+    )
+    return JSON.parse(serialized) as StoredWalletSecrets
+  } catch (err) {
+    console.warn('Failed to decode wallet secrets with provided key', err)
+    return null
+  }
 }
 
 async function persistMeta(meta: WalletMetaInfo): Promise<void> {
@@ -200,26 +214,19 @@ function resolveNetworkType(lib: MoneroLib, network: WalletMetaInfo['network']) 
   }
 }
 
-function requireUnlocked(): void {
-  if (!cachedSecrets) {
-    throw new Error('Wallet is locked. Unlock it with your PIN first.')
+function requireReady(): void {
+  if (!cachedSecrets || !walletKey) {
+    throw new Error('Wallet is not ready. Create or restore it first.')
   }
 }
 
-async function ensureWalletInstance(pin?: string): Promise<MoneroWalletFullInstance> {
+async function ensureWalletInstance(): Promise<MoneroWalletFullInstance> {
   if (walletInstance) {
     return walletInstance
   }
 
-  requireUnlocked()
-
-  if (pin) {
-    currentPin = pin
-  }
-
-  if (!currentPin) {
-    throw new Error('PIN is required to initialize the wallet.')
-  }
+  requireReady()
+  const password = walletKey!
 
   const moneroLib = await loadMonero()
   const meta = cachedMeta ?? (await loadMeta())
@@ -235,7 +242,7 @@ async function ensureWalletInstance(pin?: string): Promise<MoneroWalletFullInsta
   if (walletExists) {
     walletInstance = await moneroLib.openWalletFull({
       path: walletPath,
-      password: currentPin,
+      password,
       networkType: resolveNetworkType(moneroLib, meta.network),
       server: {
         uri: activeNode.uri,
@@ -248,7 +255,7 @@ async function ensureWalletInstance(pin?: string): Promise<MoneroWalletFullInsta
   } else {
     walletInstance = await moneroLib.createWalletFull({
       path: walletPath,
-      password: currentPin,
+      password,
       networkType: resolveNetworkType(moneroLib, meta.network),
       seed: cachedSecrets!.mnemonic,
       restoreHeight: meta.restoreHeight,
@@ -493,7 +500,7 @@ export async function setActiveNode(nodeId: string): Promise<void> {
   }
   await disposeWalletInstance(false)
   setWalletState({ selectedNode: node.id })
-  if (cachedSecrets && currentPin) {
+  if (cachedSecrets && walletKey) {
     void refreshWalletInternal()
   }
 }
@@ -522,9 +529,31 @@ export async function hydrateWalletState(): Promise<void> {
     }
   }
 
+  const hasWallet = Boolean(encrypted && meta)
+  let isReady = false
+
+  if (hasWallet && meta) {
+    const key = readMasterKey()
+    if (key) {
+      const secrets = await tryDecodeSecrets(encrypted, key)
+      if (secrets) {
+        cachedSecrets = secrets
+        walletKey = key
+        isReady = true
+        if (shareAddressPreference) {
+          void syncProfileAddress(meta.address)
+        }
+        void refreshWalletInternal()
+      }
+    }
+  } else {
+    cachedSecrets = null
+    walletKey = null
+  }
+
   setWalletState({
-    hasWallet: Boolean(encrypted),
-    isLocked: Boolean(encrypted),
+    hasWallet,
+    isReady,
     address: meta?.address ?? null,
     selectedNode: activeNode.id,
     balance: 0,
@@ -536,18 +565,14 @@ export async function hydrateWalletState(): Promise<void> {
 }
 
 export async function initWallet(
-  pin: string,
   mnemonic?: string,
   options?: { createdAt?: number; restoreHeight?: number }
 ): Promise<WalletInfo> {
-  if (!pin || pin.trim().length < 4) {
-    throw new Error('PIN must be at least 4 characters long.')
-  }
-
+  const masterKey = ensureMasterKey()
   const moneroLib = await loadMonero()
 
   const walletKeys = await moneroLib.createWalletKeys({
-    password: pin,
+    password: masterKey,
     networkType: moneroLib.MoneroNetworkType.MAINNET,
     seed: mnemonic,
     proxyToWorker: true,
@@ -562,10 +587,9 @@ export async function initWallet(
     seed: walletSeed,
     mnemonic: walletMnemonic,
   }
-  currentPin = pin
-  rememberSessionPin(pin)
+  walletKey = masterKey
 
-  await persistSecrets(pin, cachedSecrets)
+  await persistSecrets(masterKey, cachedSecrets)
   const createdAt = options?.createdAt ?? Date.now()
   const restoreHeight = options?.restoreHeight ?? estimateRestoreHeight(createdAt)
   const meta: WalletMetaInfo = {
@@ -579,7 +603,7 @@ export async function initWallet(
 
   setWalletState({
     hasWallet: true,
-    isLocked: false,
+    isReady: true,
     address,
     balance: 0,
     unlockedBalance: 0,
@@ -604,68 +628,6 @@ export async function initWallet(
   }
 }
 
-export async function unlockWallet(pin: string): Promise<WalletInfo | null> {
-  const encrypted = await loadEncryptedSecrets()
-  const meta = await loadMeta()
-  if (!encrypted || !meta) {
-    return null
-  }
-
-  try {
-    const serialized = await decryptWalletData(
-      encrypted.encryptedData,
-      encrypted.iv,
-      encrypted.salt,
-      pin
-    )
-
-    const secrets = JSON.parse(serialized) as StoredWalletSecrets
-    cachedSecrets = secrets
-    currentPin = pin
-    rememberSessionPin(pin)
-
-    setWalletState({
-      hasWallet: true,
-      isLocked: false,
-      address: meta.address,
-      selectedNode: activeNode.id,
-      restoreHeight: meta.restoreHeight,
-      shareAddress: shareAddressPreference,
-    })
-
-    await refreshWalletInternal()
-    if (shareAddressPreference) {
-      void syncProfileAddress(meta.address)
-    }
-
-    const state = get(walletState)
-    return {
-      seed: secrets.seed,
-      mnemonic: secrets.mnemonic,
-      address: meta.address,
-      balance: state.balance,
-      unlockedBalance: state.unlockedBalance,
-    }
-  } catch (err) {
-    console.error('Failed to unlock wallet:', err)
-    return null
-  }
-}
-
-export function lockWallet(): void {
-  cachedSecrets = null
-  currentPin = null
-  clearSessionPinCache()
-  cachedMeta = cachedMeta ? { ...cachedMeta } : null
-  void disposeWalletInstance(false)
-  setWalletState({
-    isLocked: true,
-    balance: 0,
-    unlockedBalance: 0,
-    isSyncing: false,
-  })
-}
-
 export async function hasStoredWallet(): Promise<boolean> {
   const encrypted = await loadEncryptedSecrets()
   return Boolean(encrypted)
@@ -680,43 +642,23 @@ export function getCachedSeed(): string | null {
 }
 
 export async function refreshWallet(): Promise<void> {
-  requireUnlocked()
+  requireReady()
   await refreshWalletInternal()
 }
 
-export async function autoUnlockWithSessionPin(): Promise<boolean> {
-  const pin = readSessionPin()
-  if (!pin) {
-    return false
-  }
-  const state = get(walletState)
-  if (!state.hasWallet || !state.isLocked) {
-    return false
-  }
-  const unlocked = await unlockWallet(pin)
-  if (!unlocked) {
-    clearSessionPinCache()
-    return false
-  }
-  return true
-}
-
-export async function restoreWalletFromNostr(pin: string): Promise<WalletInfo> {
-  if (!pin || pin.trim().length < 4) {
-    throw new Error('PIN must be at least 4 characters long.')
-  }
+export async function restoreWalletFromNostr(): Promise<WalletInfo> {
   const record = await fetchWalletBackupRecord()
   if (!record) {
     throw new Error('No wallet backup found for this Nostr login yet.')
   }
-  return await initWallet(pin, record.payload.mnemonic, {
+  return await initWallet(record.payload.mnemonic, {
     createdAt: record.payload.createdAt,
     restoreHeight: record.payload.restoreHeight,
   })
 }
 
 export async function sendMonero(options: SendMoneroOptions): Promise<SendMoneroResult> {
-  requireUnlocked()
+  requireReady()
   const moneroLib = await loadMonero()
   const wallet = await ensureWalletInstance()
 
@@ -758,7 +700,7 @@ export async function sendMonero(options: SendMoneroOptions): Promise<SendMonero
 }
 
 export async function withdrawAll(address: string): Promise<SendMoneroResult[]> {
-  requireUnlocked()
+  requireReady()
   const moneroLib = await loadMonero()
   const wallet = await ensureWalletInstance()
   if (!address || !address.trim()) {
@@ -802,8 +744,8 @@ export async function deleteWallet(): Promise<void> {
   }
   cachedSecrets = null
   cachedMeta = null
-  currentPin = null
-  clearSessionPinCache()
+  walletKey = null
+  clearMasterKey()
   walletSyncPromise = null
   await saveSetting(WALLET_SECRETS_KEY, null)
   await saveSetting(WALLET_META_KEY, null)
@@ -811,4 +753,3 @@ export async function deleteWallet(): Promise<void> {
   await resetBrowserFs()
   resetWalletStore()
 }
-

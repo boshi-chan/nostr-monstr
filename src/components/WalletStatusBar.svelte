@@ -1,6 +1,5 @@
 <script lang="ts">
   import { walletState, showWallet } from '$stores/wallet'
-  import { autoUnlockWithSessionPin } from '$lib/wallet'
 
   function formatRelative(timestamp: number | null): string {
     if (!timestamp) return 'never'
@@ -12,8 +11,6 @@
   }
 
   type StatusInfo = { label: string; tone: string; dot: string }
-  let unlocking = false
-
   $: status = (() => {
     if (!$walletState.hasWallet) {
       return {
@@ -22,9 +19,9 @@
         dot: 'bg-amber-300 animate-pulse',
       }
     }
-    if ($walletState.isLocked) {
+    if (!$walletState.isReady) {
       return {
-        label: 'Wallet locked — open wallet to sync',
+        label: 'Wallet needs setup — open wallet to finish sync',
         tone: 'text-amber-100',
         dot: 'bg-amber-200',
       }
@@ -50,37 +47,20 @@
     }
   })() satisfies StatusInfo
 
-  $: needsUnlockAction = $walletState.hasWallet && $walletState.isLocked
-
-  async function handleUnlockClick(): Promise<void> {
-    if (unlocking) return
-    unlocking = true
-    try {
-      const unlocked = await autoUnlockWithSessionPin()
-      if (!unlocked) {
-        showWallet.set(true)
-      }
-    } catch (err) {
-      console.warn('Inline unlock failed', err)
-      showWallet.set(true)
-    } finally {
-      unlocking = false
-    }
-  }
+  $: needsAction = $walletState.hasWallet && !$walletState.isReady
 </script>
 
 <div class="w-full border-b border-dark-border/60 bg-dark/90 px-4 py-1 text-center backdrop-blur-2xl">
   <div class="inline-flex items-center justify-center gap-3 text-[11px] font-semibold text-text-soft">
     <span class={`h-2 w-2 rounded-full ${status.dot}`} aria-hidden="true"></span>
     <span class={status.tone}>{status.label}</span>
-    {#if needsUnlockAction}
+    {#if needsAction}
       <button
         type="button"
         class="rounded-full border border-amber-400/60 px-3 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-100 transition hover:border-amber-300 hover:text-white"
-        on:click={handleUnlockClick}
-        disabled={unlocking}
+        on:click={() => showWallet.set(true)}
       >
-        {unlocking ? 'Unlocking…' : 'Unlock'}
+        Open wallet
       </button>
     {/if}
   </div>

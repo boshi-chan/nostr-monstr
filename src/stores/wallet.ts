@@ -3,7 +3,7 @@ import type { EmberDraft, WalletState } from '$types/wallet'
 
 function createInitialState(shareAddress = true): WalletState {
   return {
-    isLocked: true,
+    isReady: false,
     hasWallet: false,
     balance: 0,
     unlockedBalance: 0,

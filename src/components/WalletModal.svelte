@@ -4,8 +4,6 @@
   import { currentUser } from '$stores/auth'
   import {
     initWallet,
-    unlockWallet,
-    lockWallet,
     getAvailableNodes,
     setActiveNode,
     getCachedMnemonic,
@@ -20,9 +18,6 @@
 
   const nodes: MoneroNode[] = getAvailableNodes()
 
-  let setupPin = ''
-  let confirmPin = ''
-  let unlockPin = ''
   let importSeed = ''
   let activeTab: 'create' | 'import' = 'create'
   let activePanel: 'overview' | 'deposit' | 'withdraw' = 'overview'
@@ -48,20 +43,20 @@
   let restoreHeightOverride = ''
 
   $: isOpen = $showWallet
-  $: walletMode = !$walletState.hasWallet ? 'setup' : $walletState.isLocked ? 'locked' : 'unlocked'
+  $: walletMode = !$walletState.hasWallet ? 'setup' : $walletState.isReady ? 'ready' : 'pending'
   $: selectedNodeId = $walletState.selectedNode ?? nodes[0]?.id
   $: displayMnemonic =
-    walletMode === 'unlocked'
+    walletMode === 'ready'
       ? recentWallet?.mnemonic ?? getCachedMnemonic()
       : recentWallet?.mnemonic ?? null
-  $: if (walletMode !== 'unlocked') {
+  $: if (walletMode !== 'ready') {
     activePanel = 'overview'
   }
   $: if (!isOpen) {
     resetForm()
   }
 
-  $: if (walletMode === 'unlocked' && $walletState.address) {
+  $: if (walletMode === 'ready' && $walletState.address) {
     if ($walletState.address !== lastQrAddress) {
       void generateDepositQr($walletState.address)
     }
@@ -71,9 +66,6 @@
   }
 
   function resetForm(): void {
-    setupPin = ''
-    confirmPin = ''
-    unlockPin = ''
     importSeed = ''
     activeTab = 'create'
     activePanel = 'overview'
@@ -108,21 +100,7 @@
     }
   }
 
-  function validatePinOnly(): string | null {
-    if (setupPin.trim().length < 4) {
-      return 'PIN must be at least 4 characters.'
-    }
-    if (setupPin !== confirmPin) {
-      return 'PINs do not match.'
-    }
-    return null
-  }
-
   function validateSetupForm(): string | null {
-    const pinError = validatePinOnly()
-    if (pinError) {
-      return pinError
-    }
     if (activeTab === 'import' && importSeed.trim().length === 0) {
       return 'Seed phrase is required to import a wallet.'
     }
@@ -150,14 +128,11 @@
     error = null
     try {
       const wallet = await initWallet(
-        setupPin.trim(),
         activeTab === 'import' ? importSeed.trim() : undefined,
         parsedRestoreHeight ? { restoreHeight: parsedRestoreHeight } : undefined
       )
       recentWallet = wallet
       showSeedPhrase = true
-      setupPin = ''
-      confirmPin = ''
       importSeed = ''
       restoreHeightOverride = ''
     } catch (err) {
@@ -168,51 +143,13 @@
     }
   }
 
-  async function handleUnlock(): Promise<void> {
-    if (unlockPin.trim().length === 0) {
-      error = 'Enter your PIN to unlock the wallet.'
-      return
-    }
-
-    loading = true
-    error = null
-    try {
-      const wallet = await unlockWallet(unlockPin.trim())
-      if (!wallet) {
-        error = 'Invalid PIN. Please try again.'
-      } else {
-        recentWallet = wallet
-        showSeedPhrase = false
-        unlockPin = ''
-      }
-    } catch (err) {
-      console.error('Failed to unlock wallet', err)
-      error = 'Unable to unlock wallet. Please try again.'
-    } finally {
-      loading = false
-    }
-  }
-
-  async function handleLock(): Promise<void> {
-    lockWallet()
-    recentWallet = null
-    showSeedPhrase = false
-  }
-
   async function handleRestoreViaNostr(): Promise<void> {
-    const pinError = validatePinOnly()
-    if (pinError) {
-      error = pinError
-      return
-    }
     restoreBusy = true
     error = null
     try {
-      const wallet = await restoreWalletFromNostr(setupPin.trim())
+      const wallet = await restoreWalletFromNostr()
       recentWallet = wallet
       showSeedPhrase = true
-      setupPin = ''
-      confirmPin = ''
       importSeed = ''
     } catch (err) {
       console.error('Wallet restore failed', err)
@@ -261,8 +198,8 @@
   }
 
   async function handleSend(): Promise<void> {
-    if ($walletState.isLocked) {
-      sendError = 'Unlock the wallet before sending.'
+    if (!$walletState.isReady) {
+      sendError = 'Finish wallet setup before sending.'
       return
     }
     const amountValue = Number(sendAmount)
@@ -357,8 +294,8 @@
           <p class="text-sm text-text-muted/75">
             {#if walletMode === 'setup'}
               Create or import a Monero wallet to send and receive tips.
-            {:else if walletMode === 'locked'}
-              Unlock your wallet to access your address and funds.
+            {:else if walletMode === 'pending'}
+              Finish syncing your wallet to access your address and funds.
             {:else}
               Wallet ready. Select a node, copy your address, or lock when done.
             {/if}
@@ -424,31 +361,6 @@
             </div>
           {/if}
 
-          <div class="grid gap-3 md:grid-cols-2">
-            <div>
-              <label for="wallet-create-pin" class="text-xs uppercase tracking-[0.25em] text-text-muted">PIN</label>
-              <input
-                id="wallet-create-pin"
-                type="password"
-                class="mt-2 w-full rounded-2xl border border-dark-border/60 bg-dark/70 px-3 py-2 text-sm text-text-soft focus:border-primary/60 focus:outline-none"
-                minlength={4}
-                bind:value={setupPin}
-                placeholder="Choose a secure PIN"
-              />
-            </div>
-            <div>
-              <label for="wallet-confirm-pin" class="text-xs uppercase tracking-[0.25em] text-text-muted">Confirm PIN</label>
-              <input
-                id="wallet-confirm-pin"
-                type="password"
-                class="mt-2 w-full rounded-2xl border border-dark-border/60 bg-dark/70 px-3 py-2 text-sm text-text-soft focus:border-primary/60 focus:outline-none"
-                minlength={4}
-                bind:value={confirmPin}
-                placeholder="Re-enter PIN"
-              />
-            </div>
-          </div>
-
           <button class="btn-primary w-full justify-center" on:click={handleCreateOrImport} disabled={loading}>
             {loading ? 'Preparing wallet…' : activeTab === 'create' ? 'Create wallet' : 'Import wallet'}
           </button>
@@ -463,28 +375,35 @@
               {restoreBusy ? 'Restoring…' : 'Restore from Nostr backup'}
             </button>
             <p class="mt-2 text-xs text-text-muted/80">
-              Enter a new PIN above, then pull your encrypted wallet backup via your Nostr login.
+              Secure your seed phrase offline—your wallet automatically unlocks on this device.
             </p>
           {:else}
             <p class="mt-3 text-xs text-text-muted/75">
               Log in with your Nostr key to sync a private wallet backup.
             </p>
           {/if}
-        {:else if walletMode === 'locked'}
-          <div>
-            <label for="wallet-unlock-pin" class="text-xs uppercase tracking-[0.25em] text-text-muted">PIN</label>
-            <input
-              id="wallet-unlock-pin"
-              type="password"
-              class="mt-2 w-full rounded-2xl border border-dark-border/60 bg-dark/70 px-3 py-2 text-sm text-text-soft focus:border-primary/60 focus:outline-none"
-              minlength={4}
-              bind:value={unlockPin}
-              placeholder="Enter your PIN"
-            />
+        {:else if walletMode === 'pending'}
+          <div class="rounded-2xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm text-amber-100">
+            We found an encrypted wallet on this device but could not load it automatically. Restore it from your Nostr backup or remove it and set up a new wallet.
           </div>
-          <button class="btn-primary w-full justify-center" on:click={handleUnlock} disabled={loading}>
-            {loading ? 'Unlocking…' : 'Unlock wallet'}
-          </button>
+          <div class="flex flex-col gap-3 md:flex-row">
+            <button
+              class="btn-primary flex-1 justify-center"
+              type="button"
+              on:click={handleRestoreViaNostr}
+              disabled={restoreBusy}
+            >
+              {restoreBusy ? 'Restoring…' : 'Restore backup'}
+            </button>
+            <button
+              class="flex-1 rounded-2xl border border-dark-border/60 px-4 py-2 text-sm font-semibold text-text-soft transition hover:border-rose-400/60 hover:text-rose-200 disabled:opacity-50"
+              type="button"
+              on:click={handleDeleteWallet}
+              disabled={deleteBusy}
+            >
+              {deleteBusy ? 'Removing…' : 'Remove local wallet'}
+            </button>
+          </div>
         {:else}
           <div class="flex gap-2 rounded-2xl border border-dark-border/60 bg-dark/60 p-1 text-sm font-semibold text-text-muted">
             <button
@@ -640,21 +559,14 @@
               {/if}
             </div>
 
-           <div class="flex flex-col gap-2 md:flex-row md:gap-3">
-             <button
-               type="button"
-               class="rounded-full border border-dark-border/60 px-4 py-2 text-sm font-semibold text-text-muted transition hover:border-primary/60 hover:text-white"
-               on:click={handleLock}
-             >
-               Lock wallet
-             </button>
-             <button
-               type="button"
-               class="btn-primary flex-1 justify-center"
-               on:click={() => copyToClipboard($walletState.address, 'address')}
-             >
-               Share address
-             </button>
+            <div class="flex flex-col gap-2 md:flex-row md:gap-3">
+              <button
+                type="button"
+                class="btn-primary flex-1 justify-center"
+                on:click={() => copyToClipboard($walletState.address, 'address')}
+              >
+                Share address
+              </button>
               <button
                 type="button"
                 class="rounded-full border border-rose-500/60 px-4 py-2 text-sm font-semibold text-rose-200 transition hover:bg-rose-500/10 disabled:opacity-50"
@@ -769,7 +681,7 @@
         {/if}
       </section>
 
-      {#if error && walletMode !== 'unlocked'}
+      {#if error && walletMode !== 'ready'}
         <p class="mt-4 rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</p>
       {/if}
 

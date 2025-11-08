@@ -1,7 +1,7 @@
 import { get } from 'svelte/store'
 import { walletState } from '$stores/wallet'
 import { currentUser } from '$stores/auth'
-import { autoUnlockWithSessionPin, refreshWallet } from '$lib/wallet'
+import { refreshWallet } from '$lib/wallet'
 import type { User } from '$types/user'
 
 const SYNC_INTERVAL_MS = 60_000
@@ -9,8 +9,6 @@ const SYNC_INTERVAL_MS = 60_000
 let lifecycleInitialized = false
 let backgroundTimer: number | null = null
 let syncInFlight = false
-let autoUnlockAttempted = false
-
 export function initWalletLifecycle(): void {
   if (lifecycleInitialized || typeof window === 'undefined') {
     return
@@ -22,7 +20,6 @@ export function initWalletLifecycle(): void {
   document.addEventListener('visibilitychange', handleVisibilityChange)
 
   evaluateSyncLoop()
-  void maybeAutoUnlock()
 }
 
 function handleWalletChange(): void {
@@ -31,29 +28,15 @@ function handleWalletChange(): void {
 
 function handleUserChange(user: User | null): void {
   if (!user) {
-    autoUnlockAttempted = false
     stopBackgroundSync()
     return
   }
-  void maybeAutoUnlock()
   evaluateSyncLoop()
-}
-
-async function maybeAutoUnlock(): Promise<void> {
-  if (autoUnlockAttempted) {
-    return
-  }
-  autoUnlockAttempted = true
-  try {
-    await autoUnlockWithSessionPin()
-  } catch (err) {
-    console.warn('Auto-unlock attempt failed', err)
-  }
 }
 
 function evaluateSyncLoop(): void {
   const state = get(walletState)
-  if (!state.hasWallet || state.isLocked) {
+  if (!state.hasWallet || !state.isReady) {
     stopBackgroundSync()
     return
   }
@@ -94,7 +77,7 @@ async function runSync(reason: 'start' | 'interval' | 'focus'): Promise<void> {
     return
   }
   const state = get(walletState)
-  if (!state.hasWallet || state.isLocked) {
+  if (!state.hasWallet || !state.isReady) {
     return
   }
   if (reason === 'interval' && document.visibilityState === 'hidden') {
