@@ -1,22 +1,23 @@
 <script lang="ts">
   import { activeTab } from '$stores/nav'
   import { currentUser } from '$stores/auth'
-  import { feedSource } from '$stores/feedSource'
+  import { feedSource, lastTimelineFeed } from '$stores/feedSource'
   import { logout } from '$lib/auth'
   import { showCompose } from '$stores/feed'
   import { navigateToPage } from '$stores/router'
   import type { NavTab } from '$stores/nav'
   import HomeIcon from './icons/HomeIcon.svelte'
   import BookOpenIcon from './icons/BookOpenIcon.svelte'
-  import MessageIcon from './icons/MessageIcon.svelte'
   import BellIcon from './icons/BellIcon.svelte'
-  import EditIcon from './icons/EditIcon.svelte'
+  import SquarePenIcon from './icons/SquarePenIcon.svelte'
+  import SearchIcon from './icons/SearchIcon.svelte'
   import { unreadCount } from '$stores/notifications'
+  import { showSearch } from '$stores/search'
 
   const tabs: { id: NavTab; label: string; icon: any }[] = [
     { id: 'home', label: 'Home', icon: HomeIcon },
     { id: 'long-reads', label: 'Long Reads', icon: BookOpenIcon },
-    { id: 'messages', label: 'Messages', icon: MessageIcon },
+    // { id: 'messages', label: 'Messages', icon: MessageIcon }, // DISABLED - relay config needs fixing
     { id: 'notifications', label: 'Notifications', icon: BellIcon },
   ]
 
@@ -27,7 +28,8 @@
     navigateToPage(tab)
 
     if (tab === 'home') {
-      feedSource.set('global')
+      const targetFeed = $lastTimelineFeed ?? 'following'
+      feedSource.set(targetFeed)
     } else if (tab === 'long-reads') {
       feedSource.set('long-reads')
     }
@@ -72,6 +74,11 @@
       closeMenus()
     }
   }
+
+  function handleSearch() {
+    showSearch.set(true)
+    closeMenus()
+  }
 </script>
 
 <nav class="relative flex h-16 w-full items-center gap-3 border-t border-dark-border bg-dark-light px-3 py-2 text-text-muted md:h-full md:w-20 md:flex-col md:items-center md:justify-start md:gap-4 md:border-t-0 md:border-r md:bg-transparent md:px-4 md:py-4">
@@ -108,18 +115,18 @@
   <!-- Compose button (mobile) -->
   <button
     on:click={handleCompose}
-    class="md:hidden h-10 w-10 flex items-center justify-center rounded-xl bg-primary text-dark transition-colors duration-200 hover:bg-primary/90"
+    class="md:hidden relative flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-dark font-semibold transition-colors duration-200"
     title="Compose"
   >
     <div class="flex h-5 w-5 items-center justify-center">
-      <EditIcon size={17} color="currentColor" strokeWidth={1.6} />
+      <SquarePenIcon size={17} color="currentColor" strokeWidth={1.6} />
     </div>
   </button>
 
   <!-- Account button (mobile) -->
   <button
     on:click={toggleMobileMenu}
-    class="md:hidden h-10 w-10 flex items-center justify-center rounded-xl border border-dark-border/60 bg-dark-light/80"
+    class="md:hidden relative flex h-10 w-10 items-center justify-center rounded-xl text-text-muted hover:bg-dark-lighter/60 hover:text-text-soft transition-colors duration-200"
     title="Account"
   >
     {#if $currentUser?.picture}
@@ -138,7 +145,7 @@
       class="w-12 h-12 flex items-center justify-center rounded-xl bg-primary text-dark transition-colors duration-200 hover:bg-primary/90"
       title="Compose"
     >
-      <EditIcon size={22} color="currentColor" strokeWidth={1.75} />
+      <SquarePenIcon size={22} color="currentColor" strokeWidth={1.75} />
     </button>
 
     <div class="relative">
@@ -202,6 +209,12 @@
     on:keydown={handleOverlayKey}
   ></div>
   <div class="fixed bottom-20 right-4 z-50 w-48 rounded-2xl border border-dark-border/70 bg-dark-light/95 p-2 shadow-xl md:hidden">
+    <button
+      class="w-full rounded-xl px-3 py-2 text-left text-sm text-text-soft hover:bg-dark-lighter/60"
+      on:click={handleSearch}
+    >
+      Search
+    </button>
     <button
       class="w-full rounded-xl px-3 py-2 text-left text-sm text-text-soft hover:bg-dark-lighter/60"
       on:click={() => navigate('profile')}

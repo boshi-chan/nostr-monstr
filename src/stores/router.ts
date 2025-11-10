@@ -45,6 +45,12 @@ export function openPostById(
   initialEvent?: NostrEvent
 ): void {
   const current = get(activeRoute)
+
+  // Don't push to history if we're already viewing this post
+  if (current.type === 'post' && current.eventId === eventId) {
+    return
+  }
+
   routeHistory.update(history => [...history, current])
   activeRoute.set({
     type: 'post',
@@ -57,6 +63,12 @@ export function openPostById(
 
 export function openProfile(pubkey: string, originTab: NavTab): void {
   const current = get(activeRoute)
+
+  // Don't push to history if we're already viewing this profile
+  if (current.type === 'profile' && current.pubkey === pubkey) {
+    return
+  }
+
   routeHistory.update(history => [...history, current])
   activeRoute.set({
     type: 'profile',

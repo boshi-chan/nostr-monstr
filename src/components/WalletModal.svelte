@@ -280,14 +280,14 @@
 </script>
 
 {#if isOpen}
-  <div class="fixed inset-0 z-50 flex items-center justify-center px-4" aria-labelledby="wallet-modal-title" aria-modal="true" role="dialog" transition:fade>
+  <div class="fixed inset-0 z-50 flex items-center justify-center px-4 py-4" aria-labelledby="wallet-modal-title" aria-modal="true" role="dialog" transition:fade>
     <button
       type="button"
       class="absolute inset-0 bg-dark/80 backdrop-blur-md"
       aria-label="Close wallet modal"
       on:click={closeModal}
     ></button>
-    <div class="relative w-full max-w-xl rounded-3xl border border-dark-border/60 bg-dark-light/95 p-6 shadow-2xl">
+    <div class="relative w-full max-w-xl max-h-[calc(100vh-2rem)] overflow-y-auto rounded-3xl border border-dark-border/60 bg-dark-light/95 p-4 md:p-6 shadow-2xl">
       <header class="flex items-center justify-between gap-4">
         <div>
           <h2 id="wallet-modal-title" class="text-lg font-semibold text-text-soft">Monstr Wallet</h2>

@@ -313,6 +313,7 @@ async function refreshWalletInternal(): Promise<void> {
         lastSyncedAt: Date.now(),
       })
     } catch (err) {
+      console.error('Wallet sync failed:', err)
       setWalletState({ isSyncing: false })
       throw err
     } finally {
@@ -540,9 +541,11 @@ export async function hydrateWalletState(): Promise<void> {
         cachedSecrets = secrets
         walletKey = key
         isReady = true
-        if (shareAddressPreference) {
-          void syncProfileAddress(meta.address)
-        }
+        // CRITICAL FIX: Don't sync profile address immediately during hydration!
+        // The metadata cache is empty at this point, which would wipe the profile.
+        // Instead, sync will happen later when the app is fully initialized and metadata is loaded.
+        // See: syncProfileAddressWhenReady() in App.svelte
+        console.log('⏳ Wallet hydrated. Profile address sync will happen when metadata is ready.')
         void refreshWalletInternal()
       }
     }
@@ -615,8 +618,10 @@ export async function initWallet(
 
   void publishWalletBackup()
   void refreshWalletInternal()
+
+  // CRITICAL FIX: Don't sync profile address immediately after wallet creation!
   if (shareAddressPreference) {
-    void syncProfileAddress(address)
+    console.log('⏳ Wallet created. Profile address sync will happen when metadata is ready.')
   }
 
   return {
@@ -730,17 +735,29 @@ export async function setWalletSharePreference(enabled: boolean): Promise<void> 
   setSharePreferenceInStore(enabled)
   if (enabled) {
     if (cachedMeta?.address) {
-      void syncProfileAddress(cachedMeta.address)
+      try {
+        await syncProfileAddress(cachedMeta.address)
+      } catch (err) {
+        console.warn('Failed to sync address to profile:', err)
+      }
     }
   } else {
-    void syncProfileAddress(null)
+    try {
+      await syncProfileAddress(null)
+    } catch (err) {
+      console.warn('Failed to remove address from profile:', err)
+    }
   }
 }
 
 export async function deleteWallet(): Promise<void> {
   await disposeWalletInstance(false)
   if (shareAddressPreference) {
-    void syncProfileAddress(null)
+    try {
+      await syncProfileAddress(null)
+    } catch (err) {
+      console.warn('Failed to remove address from profile:', err)
+    }
   }
   cachedSecrets = null
   cachedMeta = null

@@ -33,6 +33,10 @@ export interface ThreadContext {
 const MAX_ANCESTORS = 100
 const MAX_REPLIES = 500
 
+// Cache for reply fetches to avoid redundant network requests
+const repliesCache = new Map<string, { replies: NostrEvent[]; fetchedAt: number }>()
+const REPLIES_CACHE_TTL = 30000 // 30 seconds
+
 /**
  * Find the root post in a thread by traversing up the reply chain
  */
@@ -118,16 +122,43 @@ async function fetchAllAncestors(event: NostrEvent): Promise<NostrEvent[]> {
  * Fetch all direct replies to an event
  */
 async function fetchDirectReplies(eventId: string): Promise<NostrEvent[]> {
+  // Check cache first
+  const cached = repliesCache.get(eventId)
+  if (cached && Date.now() - cached.fetchedAt < REPLIES_CACHE_TTL) {
+    return cached.replies
+  }
+
   try {
     const ndk = getNDK()
-    const result = (await ndk.fetchEvents(
-      { kinds: [1, 6], '#e': [eventId], limit: 100 },
-      { closeOnEose: true } as NDKSubscriptionOptions
-    )) as Set<any>
 
-    return Array.from(result)
+    // Add timeout to prevent hanging
+    const fetchPromise = ndk.fetchEvents(
+      { kinds: [1, 6], '#e': [eventId], limit: 500 },
+      { closeOnEose: true } as NDKSubscriptionOptions
+    )
+
+    const timeoutPromise = new Promise<Set<any>>((_, reject) =>
+      setTimeout(() => reject(new Error('Fetch replies timeout')), 5000)
+    )
+
+    const result = (await Promise.race([fetchPromise, timeoutPromise])) as Set<any>
+
+    const replies = Array.from(result)
       .map(item => (item.rawEvent?.() ?? item) as NostrEvent)
       .filter(Boolean)
+
+    // Cache the result
+    repliesCache.set(eventId, { replies, fetchedAt: Date.now() })
+
+    // Keep cache size under control
+    if (repliesCache.size > 100) {
+      const oldestKey = repliesCache.keys().next().value
+      if (oldestKey) {
+        repliesCache.delete(oldestKey)
+      }
+    }
+
+    return replies
   } catch (err) {
     console.warn('Failed to fetch direct replies:', err)
     return []
@@ -147,28 +178,36 @@ async function fetchAllReplies(
   }
 
   const allReplies: NostrEvent[] = []
-  const queue: Array<{ event: NostrEvent; depth: number }> = [{ event: post, depth: 0 }]
   const processed = new Set<string>()
 
-  while (queue.length > 0 && allReplies.length < MAX_REPLIES) {
-    const { event: current, depth: currentDepth } = queue.shift()!
+  // Fetch replies level by level in parallel
+  let currentLevel: NostrEvent[] = [post]
+  let currentDepth = 0
 
-    if (processed.has(current.id)) continue
-    processed.add(current.id)
+  while (currentLevel.length > 0 && currentDepth <= maxDepth && allReplies.length < MAX_REPLIES) {
+    // Mark all current level events as processed
+    for (const event of currentLevel) {
+      processed.add(event.id)
+    }
 
-    // Fetch direct replies
-    const replies = await fetchDirectReplies(current.id)
+    // Fetch replies for all events at this level in parallel
+    const repliesPromises = currentLevel.map(event => fetchDirectReplies(event.id))
+    const repliesArrays = await Promise.all(repliesPromises)
 
-    for (const reply of replies) {
-      if (!processed.has(reply.id) && allReplies.length < MAX_REPLIES) {
-        allReplies.push(reply)
-
-        // Continue fetching replies if not too deep
-        if (currentDepth < maxDepth) {
-          queue.push({ event: reply, depth: currentDepth + 1 })
+    // Flatten and deduplicate replies
+    const nextLevel: NostrEvent[] = []
+    for (const replies of repliesArrays) {
+      for (const reply of replies) {
+        if (!processed.has(reply.id) && allReplies.length < MAX_REPLIES) {
+          allReplies.push(reply)
+          nextLevel.push(reply)
+          processed.add(reply.id)
         }
       }
     }
+
+    currentLevel = nextLevel
+    currentDepth++
   }
 
   return allReplies
@@ -178,36 +217,53 @@ async function fetchAllReplies(
  * Build complete thread context for an event
  */
 export async function buildCompleteThread(event: NostrEvent): Promise<ThreadContext> {
+  const THREAD_LOAD_TIMEOUT = 10000 // 10 seconds
+
   try {
-    // Parallel fetch: ancestors and replies
-    const [ancestors, rootPost] = await Promise.all([
-      fetchAllAncestors(event),
-      findRootPost(event),
-    ])
-
-    // Fetch all replies (including nested)
-    const allReplies = await fetchAllReplies(rootPost)
-
-    // Combine all events
-    const allEvents = [rootPost, ...ancestors, event, ...allReplies]
-    const uniqueEvents = Array.from(
-      new Map(allEvents.map(e => [e.id, e])).values()
+    // Wrap the entire operation in a timeout
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Thread loading timeout')), THREAD_LOAD_TIMEOUT)
     )
 
-    // Build thread tree
-    const threadTree = buildThreadTree(rootPost, uniqueEvents, event.id)
+    const threadPromise = (async () => {
+      console.log('⏳ Building thread for', event.id.slice(0, 8))
 
-    // Find path from root to main event
-    const pathToMain = findPathInThread(threadTree, event.id)
+      // Parallel fetch: ancestors and replies
+      const [ancestors, rootPost] = await Promise.all([
+        fetchAllAncestors(event),
+        findRootPost(event),
+      ])
 
-    return {
-      rootPost,
-      mainEvent: event,
-      allEvents: uniqueEvents,
-      threadTree,
-      pathToMain,
-      totalPostsInThread: uniqueEvents.length,
-    }
+      console.log('✓ Found root post and ancestors')
+
+      // Fetch all replies (including nested)
+      const allReplies = await fetchAllReplies(rootPost)
+
+      console.log(`✓ Fetched ${allReplies.length} replies`)
+
+      // Combine all events
+      const allEvents = [rootPost, ...ancestors, event, ...allReplies]
+      const uniqueEvents = Array.from(
+        new Map(allEvents.map(e => [e.id, e])).values()
+      )
+
+      // Build thread tree
+      const threadTree = buildThreadTree(rootPost, uniqueEvents, event.id)
+
+      // Find path from root to main event
+      const pathToMain = findPathInThread(threadTree, event.id)
+
+      return {
+        rootPost,
+        mainEvent: event,
+        allEvents: uniqueEvents,
+        threadTree,
+        pathToMain,
+        totalPostsInThread: uniqueEvents.length,
+      }
+    })()
+
+    return await Promise.race([threadPromise, timeoutPromise])
   } catch (err) {
     console.error('Failed to build complete thread:', err)
     // Return minimal thread with just the event

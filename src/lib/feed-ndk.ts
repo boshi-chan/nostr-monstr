@@ -13,8 +13,11 @@ import {
   following,
   followingCache,
   circles,
-  longReadAuthors,
+  circlesCache,
   userEventIds,
+  likedEvents,
+  repostedEvents,
+  zappedEvents,
 } from '$stores/feed'
 import { parseMetadataEvent, fetchUserMetadata } from './metadata'
 import { feedSource, type FeedSource } from '$stores/feedSource'
@@ -38,6 +41,21 @@ let pendingEvents: Array<{ event: NostrEvent; origin: FeedOrigin }> = []
 const SUBSCRIPTION_TIMEOUT = 8000 // 8 seconds
 const MAX_RETRIES = 2
 const RETRY_DELAY = 1000 // 1 second
+const HEX_PUBKEY_REGEX = /^[0-9a-f]{64}$/i
+
+function isHexPubkey(value: unknown): value is string {
+  return typeof value === 'string' && HEX_PUBKEY_REGEX.test(value)
+}
+
+function sanitizePubkeySet(values: Iterable<string>): Set<string> {
+  const sanitized = new Set<string>()
+  for (const value of values) {
+    if (isHexPubkey(value)) {
+      sanitized.add(value.toLowerCase())
+    }
+  }
+  return sanitized
+}
 
 /**
  * Queue event for debounced feed update
@@ -170,7 +188,7 @@ async function fetchFollowing(pubkey: string): Promise<Set<string>> {
   
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
     console.log(`✓ Using cached following list for ${pubkey.slice(0, 8)} (${cached.pubkeys.size} follows)`)
-    return new Set(cached.pubkeys)
+    return sanitizePubkeySet(cached.pubkeys)
   }
 
   const ndk = getNDK()
@@ -191,8 +209,8 @@ async function fetchFollowing(pubkey: string): Promise<Set<string>> {
 
     sub.on('event', (event: any) => {
       for (const tag of event.tags) {
-        if (tag[0] === 'p' && tag[1]) {
-          follows.add(tag[1])
+        if (tag[0] === 'p' && isHexPubkey(tag[1])) {
+          follows.add(tag[1].toLowerCase())
         }
       }
     })
@@ -204,23 +222,38 @@ async function fetchFollowing(pubkey: string): Promise<Set<string>> {
     })
   })
 
+  const sanitized = sanitizePubkeySet(follows)
+
   // Cache the result
   followingCache.update(c => {
     const next = new Map(c)
     next.set(pubkey, {
-      pubkeys: follows,
+      pubkeys: sanitized,
       fetchedAt: Date.now(),
     })
     return next
   })
 
-  return follows
+  return sanitized
 }
 
-async function fetchCirclesFromFollowing(follows: Set<string>): Promise<Set<string>> {
+async function fetchCirclesFromFollowing(follows: Set<string>, pubkey: string): Promise<Set<string>> {
+  // Check cache first (5 minute TTL like following)
+  const cache = get(circlesCache)
+  const cached = cache.get(pubkey)
+  const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+
+  if (cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
+    console.log(`✓ Using cached circles for ${pubkey.slice(0, 8)} (${cached.pubkeys.size} circles)`)
+    return sanitizePubkeySet(cached.pubkeys)
+  }
+
+  console.log(`⏳ Fetching circles from ${follows.size} follows...`)
+  const startTime = Date.now()
+
   const ndk = getNDK()
   const circleSet = new Set<string>()
-  const authors = Array.from(follows)
+  const authors = Array.from(follows).filter(isHexPubkey).map(pk => pk.toLowerCase())
 
   if (authors.length === 0) {
     return circleSet
@@ -228,8 +261,14 @@ async function fetchCirclesFromFollowing(follows: Set<string>): Promise<Set<stri
 
   const chunkSize = 50
 
-  const fetchChunk = (chunk: string[]) =>
+  const fetchChunk = (chunk: string[], index: number) =>
     new Promise<void>(resolve => {
+      // Add timeout per chunk to prevent hanging
+      const timeout = setTimeout(() => {
+        console.warn(`⚠️ Chunk ${index} timed out after 3s`)
+        resolve()
+      }, 3000)
+
       const sub = ndk.subscribe(
         { authors: chunk, kinds: [3], limit: 1 },
         { closeOnEose: true } as NDKSubscriptionOptions,
@@ -238,31 +277,52 @@ async function fetchCirclesFromFollowing(follows: Set<string>): Promise<Set<stri
       )
 
       const finish = () => {
+        clearTimeout(timeout)
         sub.stop()
         resolve()
       }
 
       sub.on('event', (event: any) => {
         for (const tag of event.tags) {
-          if (tag[0] === 'p' && tag[1] && !follows.has(tag[1])) {
-            circleSet.add(tag[1])
+          if (tag[0] === 'p' && isHexPubkey(tag[1])) {
+            const pk = tag[1].toLowerCase()
+            if (!follows.has(pk)) {
+              circleSet.add(pk)
+            }
           }
         }
       })
 
       sub.on('eose', finish)
       ;(sub as any).on?.('error', (err: unknown) => {
-        console.warn('Failed to fetch circles for chunk:', err)
+        console.warn(`Failed to fetch circles for chunk ${index}:`, err)
         finish()
       })
     })
 
+  // Fetch all chunks in parallel for much faster loading
+  const chunks = []
   for (let i = 0; i < authors.length; i += chunkSize) {
-    const chunk = authors.slice(i, i + chunkSize)
-    await fetchChunk(chunk)
+    chunks.push(authors.slice(i, i + chunkSize))
   }
 
-  return circleSet
+  await Promise.all(chunks.map((chunk, idx) => fetchChunk(chunk, idx)))
+
+  const sanitized = sanitizePubkeySet(circleSet)
+  const duration = Date.now() - startTime
+
+  // Cache the result
+  circlesCache.update(c => {
+    const next = new Map(c)
+    next.set(pubkey, {
+      pubkeys: sanitized,
+      fetchedAt: Date.now(),
+    })
+    return next
+  })
+
+  console.log(`✓ Fetched ${sanitized.size} circles in ${duration}ms`)
+  return sanitized
 }
 
 function registerSubscription(label: FeedSource, subscription: any): void {
@@ -285,18 +345,11 @@ function subscribeWithFilter(
 
   registerSubscription(label, subscription)
 
-  let hasReceivedEvent = false
-
   subscription.on('event', (event: any) => {
-    if (!hasReceivedEvent) {
-      hasReceivedEvent = true
-      console.log(`✓ ${label} feed: received first event`)
-    }
     addEventToFeed(event, label)
   })
 
   subscription.on('eose', () => {
-    console.log(`✓ ${label} feed: EOSE received`)
     feedLoading.set(false)
   })
 
@@ -310,26 +363,24 @@ function subscribeWithFilter(
 async function ensureFollowing(pubkey: string): Promise<Set<string>> {
   const existing = get(following)
   if (existing.size > 0) {
-    return new Set(existing)
+    return sanitizePubkeySet(existing)
   }
   const fetched = await fetchFollowing(pubkey)
-  const next = new Set(fetched)
+  const next = sanitizePubkeySet(fetched)
   following.set(next)
   return next
 }
 
-async function ensureCircles(follows: Set<string>): Promise<Set<string>> {
+async function ensureCircles(follows: Set<string>, pubkey: string): Promise<Set<string>> {
   if (follows.size === 0) {
     circles.set(new Set())
     return new Set()
   }
-  const existing = get(circles)
-  if (existing.size > 0) {
-    return new Set(existing)
-  }
-  const fetched = await fetchCirclesFromFollowing(follows)
-  circles.set(fetched)
-  return fetched
+  // Always fetch (it will use cache if available)
+  const fetched = await fetchCirclesFromFollowing(follows, pubkey)
+  const sanitized = sanitizePubkeySet(fetched)
+  circles.set(sanitized)
+  return sanitized
 }
 
 /**
@@ -363,7 +414,7 @@ export async function subscribeToFollowingFeed(retryCount = 0): Promise<void> {
         following.set(followingSet)
 
         // refresh circles in background
-        void ensureCircles(followingSet)
+        void ensureCircles(followingSet, user.pubkey)
 
         const authors = Array.from(followingSet)
         if (authors.length === 0) {
@@ -433,25 +484,50 @@ export async function subscribeToCirclesFeed(): Promise<void> {
       return
     }
 
-    const circleSet = await ensureCircles(followSet)
+    // Check if we have cached circles to use immediately
+    const cache = get(circlesCache)
+    const cached = cache.get(user.pubkey)
+    const hasCachedCircles = cached && cached.pubkeys.size > 0
 
-    const authors = Array.from(circleSet)
-    if (authors.length === 0) {
-      feedLoading.set(false)
-      feedError.set('No second-degree contacts yet')
-      return
+    if (hasCachedCircles) {
+      // Use cached circles immediately - instant load!
+      console.log(`⚡ Using ${cached.pubkeys.size} cached circles for instant load`)
+      const authors = Array.from(cached.pubkeys)
+
+      subscribeWithFilter(
+        {
+          authors,
+          kinds: [1, 6, 16],
+          limit: 250,
+          since: Math.floor(Date.now() / 1000) - 86400 * 14,
+        },
+        'circles'
+      )
+
+      // Refresh circles in background for next time
+      void ensureCircles(followSet, user.pubkey)
+    } else {
+      // No cache - need to fetch circles first, but do it fast
+      console.log('⏳ Fetching circles for first time...')
+      const circleSet = await ensureCircles(followSet, user.pubkey)
+
+      const authors = Array.from(circleSet)
+      if (authors.length === 0) {
+        feedLoading.set(false)
+        feedError.set('No second-degree contacts yet')
+        return
+      }
+
+      subscribeWithFilter(
+        {
+          authors,
+          kinds: [1, 6, 16],
+          limit: 250,
+          since: Math.floor(Date.now() / 1000) - 86400 * 14,
+        },
+        'circles'
+      )
     }
-
-    // Optimized for circles feed: broader time range for discovery
-    subscribeWithFilter(
-      {
-        authors,
-        kinds: [1, 6, 16],
-        limit: 250, // More events for discovery
-        since: Math.floor(Date.now() / 1000) - 86400 * 14, // 14 days for wider discovery
-      },
-      'circles'
-    )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('Failed to subscribe to circles feed:', err)
@@ -482,21 +558,41 @@ export async function subscribeToLongReadsFeed(): Promise<void> {
       return
     }
 
-    await ensureCircles(followSet)
+    // Check if we have cached circles to use immediately
+    const cache = get(circlesCache)
+    const cached = cache.get(user.pubkey)
+    const circleSet = cached?.pubkeys ?? new Set<string>()
 
-    const authors = Array.from(get(longReadAuthors))
+    // Combine following and circles for long-read authors
+    // Limit to prevent overwhelming relays (prioritize follows over circles)
+    const followAuthors = Array.from(followSet).filter(isHexPubkey).map(pk => pk.toLowerCase())
+    const circleAuthors = Array.from(circleSet).filter(isHexPubkey).map(pk => pk.toLowerCase())
+
+    // Take all follows + top circles up to 500 total authors max
+    const maxAuthors = 500
+    const authors = [
+      ...followAuthors,
+      ...circleAuthors.slice(0, Math.max(0, maxAuthors - followAuthors.length))
+    ]
+
     if (authors.length === 0) {
       feedLoading.set(false)
       feedError.set('No long-read authors discovered yet')
       return
     }
 
+    console.log(`⚡ Loading long reads from ${authors.length} authors (${followAuthors.length} follows + ${Math.min(circleAuthors.length, maxAuthors - followAuthors.length)} circles)`)
+
+    // Refresh circles in background for next time (non-blocking)
+    void ensureCircles(followSet, user.pubkey)
+
+    // Use subscription instead of fetchEvents for better performance
     subscribeWithFilter(
       {
         authors,
         kinds: [30023],
         limit: 100,
-        since: Math.floor(Date.now() / 1000) - 86400 * 30,
+        since: Math.floor(Date.now() / 1000) - 86400 * 30, // 30 days
       },
       'long-reads'
     )
@@ -605,22 +701,34 @@ export async function fetchEventById(id: string): Promise<NostrEvent | null> {
     return cached
   }
 
-  const ndk = getNDK()
+  try {
+    const ndk = getNDK()
 
-  const event = await ndk.fetchEvent(
-    { ids: [id] },
-    { closeOnEose: true } as NDKSubscriptionOptions
-  )
+    // Add timeout to prevent hanging
+    const fetchPromise = ndk.fetchEvent(
+      { ids: [id] },
+      { closeOnEose: true } as NDKSubscriptionOptions
+    )
 
-  if (!event) {
+    const timeoutPromise = new Promise<null>((_, reject) =>
+      setTimeout(() => reject(new Error('Fetch event timeout')), 8000)
+    )
+
+    const event = await Promise.race([fetchPromise, timeoutPromise])
+
+    if (!event) {
+      return null
+    }
+
+    const raw = (event as NDKEvent).rawEvent?.() ?? (event as unknown as NostrEvent)
+    eventCache.set(raw.id, raw)
+    void fetchUserMetadata(raw.pubkey)
+
+    return raw
+  } catch (err) {
+    console.error(`Failed to fetch event ${id.slice(0, 8)}:`, err)
     return null
   }
-
-  const raw = (event as NDKEvent).rawEvent?.() ?? (event as unknown as NostrEvent)
-  eventCache.set(raw.id, raw)
-  void fetchUserMetadata(raw.pubkey)
-
-  return raw
 }
 
 /**
@@ -833,4 +941,86 @@ export async function publishZapRequest(
 
   await ndkEvent.sign()
   await ndkEvent.publish()
+}
+
+/**
+ * Load user's own interactions (likes, reposts, zaps) to populate UI state
+ */
+export async function loadUserInteractions(): Promise<void> {
+  const ndk = getNDK()
+  const user = getCurrentNDKUser()
+
+  if (!user?.pubkey) {
+    console.log('No user authenticated, skipping interaction load')
+    return
+  }
+
+  try {
+    console.log('Loading user interactions...')
+
+    // Load reactions (kind:7 - likes)
+    const reactions = await ndk.fetchEvents(
+      {
+        kinds: [7],
+        authors: [user.pubkey],
+        limit: 500,
+      },
+      { closeOnEose: true }
+    )
+
+    const likedEventIds = new Set<string>()
+    for (const reaction of reactions) {
+      const eventTag = reaction.tags.find((t: string[]) => t[0] === 'e')
+      if (eventTag && eventTag[1]) {
+        likedEventIds.add(eventTag[1])
+      }
+    }
+    likedEvents.set(likedEventIds)
+    console.log(`Loaded ${likedEventIds.size} likes`)
+
+    // Load reposts (kind:6)
+    const reposts = await ndk.fetchEvents(
+      {
+        kinds: [6],
+        authors: [user.pubkey],
+        limit: 500,
+      },
+      { closeOnEose: true }
+    )
+
+    const repostedEventIds = new Set<string>()
+    for (const repost of reposts) {
+      const eventTag = repost.tags.find((t: string[]) => t[0] === 'e')
+      if (eventTag && eventTag[1]) {
+        repostedEventIds.add(eventTag[1])
+      }
+    }
+    repostedEvents.set(repostedEventIds)
+    console.log(`Loaded ${repostedEventIds.size} reposts`)
+
+    // Load zaps (kind:9735 - zap receipts we sent)
+    const zaps = await ndk.fetchEvents(
+      {
+        kinds: [9735],
+        authors: [user.pubkey],
+        limit: 500,
+      },
+      { closeOnEose: true }
+    )
+
+    const zappedEventMap = new Map<string, number>()
+    for (const zap of zaps) {
+      const eventTag = zap.tags.find((t: string[]) => t[0] === 'e')
+      const amountTag = zap.tags.find((t: string[]) => t[0] === 'amount')
+      if (eventTag && eventTag[1]) {
+        const eventId = eventTag[1]
+        const amount = amountTag ? parseInt(amountTag[1], 10) / 1000 : 0
+        zappedEventMap.set(eventId, (zappedEventMap.get(eventId) || 0) + amount)
+      }
+    }
+    zappedEvents.set(zappedEventMap)
+    console.log(`Loaded ${zappedEventMap.size} zapped events`)
+  } catch (err) {
+    console.error('Failed to load user interactions:', err)
+  }
 }

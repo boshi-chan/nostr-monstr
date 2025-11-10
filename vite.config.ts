@@ -1,9 +1,10 @@
 import { defineConfig } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
+import basicSsl from '@vitejs/plugin-basic-ssl'
 import path from 'path'
 
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [svelte(), basicSsl()],
   resolve: {
     alias: {
       '$lib': path.resolve(__dirname, './src/lib'),
@@ -11,6 +12,18 @@ export default defineConfig({
       '$stores': path.resolve(__dirname, './src/stores'),
       '$types': path.resolve(__dirname, './src/types'),
       'assert': path.resolve(__dirname, './src/polyfills/assert.ts'),
+    }
+  },
+  define: {
+    'global': 'globalThis',
+  },
+  optimizeDeps: {
+    include: ['monero-ts'],
+    esbuildOptions: {
+      target: 'esnext',
+      define: {
+        'global': 'globalThis'
+      }
     }
   },
   build: {
@@ -26,6 +39,12 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    strictPort: false
+    strictPort: false,
+    fs: {
+      allow: ['..']
+    }
+  },
+  worker: {
+    format: 'es'
   }
 })

@@ -19,7 +19,8 @@ export interface Notification {
   fromPubkey: string
   fromName?: string
   fromAvatar?: string
-  eventId: string
+  eventId: string // The target event (your post that was interacted with)
+  replyEventId?: string // For replies: the actual reply event ID
   eventContent?: string
   amount?: number // zaps/embers
   txHash?: string

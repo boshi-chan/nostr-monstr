@@ -13,6 +13,8 @@
   import Settings from './pages/Settings.svelte'
   import PostView from './pages/PostView.svelte'
   import { activeRoute } from '$stores/router'
+
+  $: isMessagesTab = $activeRoute.type === 'page' && $activeRoute.tab === 'messages'
 </script>
 
 <div class="flex h-screen w-screen flex-col bg-dark">
@@ -24,7 +26,7 @@
     </div>
 
     <!-- Main content -->
-    <main class="flex-1 overflow-y-auto bg-transparent">
+    <main class={`flex-1 bg-transparent ${isMessagesTab ? 'overflow-hidden pb-16 md:pb-0' : 'overflow-y-auto'}`}>
       {#if $activeRoute.type === 'page'}
         {#if $activeRoute.tab === 'home'}
           <Home />

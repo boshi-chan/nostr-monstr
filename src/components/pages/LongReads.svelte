@@ -7,6 +7,10 @@
   import LongReadPreview from '../LongReadPreview.svelte'
   import { openPost, openProfile } from '$stores/router'
 
+  // Filter for kind 30023 (long-form) events only
+  let longReadEvents: NostrEvent[] = []
+  $: longReadEvents = $feedEvents.filter(event => event.kind === 30023)
+
   onMount(() => {
     feedSource.set('long-reads')
   })
@@ -32,18 +36,18 @@
 
   <div class="mx-auto w-full max-w-3xl px-3 md:px-6">
     <div class="flex flex-col gap-3 pt-3">
-      {#if $feedLoading && $feedEvents.length === 0}
+      {#if $feedLoading && longReadEvents.length === 0}
         {#each Array(5) as _}
           <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-5">
             <Skeleton count={4} height="h-4" />
           </div>
         {/each}
-      {:else if $feedError && $feedEvents.length === 0}
+      {:else if $feedError && longReadEvents.length === 0}
         <div class="rounded-2xl border border-rose-500/40 bg-rose-500/10 p-6 text-center">
           <p class="text-lg font-semibold text-rose-100">Long reads unavailable</p>
           <p class="mt-2 text-sm text-rose-200/80">{$feedError}</p>
         </div>
-      {:else if $feedEvents.length === 0}
+      {:else if longReadEvents.length === 0}
         <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-6 text-center">
           <p class="text-lg font-semibold text-text-soft">No long reads yet</p>
           <p class="mt-2 text-sm text-text-muted">
@@ -51,7 +55,7 @@
           </p>
         </div>
       {:else}
-        {#each $feedEvents as event (event.id)}
+        {#each longReadEvents as event (event.id)}
           <LongReadPreview
             event={event}
             onSelect={handleEventSelect}

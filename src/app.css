@@ -54,7 +54,7 @@
   }
 
   .surface-panel {
-    @apply bg-dark-lighter/80 border border-dark-border/70 backdrop-blur-xl rounded-lg shadow-sm;
+    @apply bg-dark-lighter/80 border border-dark-border/70 backdrop-blur-md rounded-lg shadow-sm;
   }
 
   .pill-tab {

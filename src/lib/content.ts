@@ -12,6 +12,7 @@ export interface ParsedContent {
   videos: string[]
   quotes: string[] // Event IDs
   embeds: string[] // URLs
+  nostrURIs: string[] // nostr: URIs (NIP-21)
   repostId: string | null
   nestedEvent: NostrEvent | null
   replyToId: string | null
@@ -32,6 +33,7 @@ export function parseContent(event: NostrEvent): ParsedContent {
   const videos: string[] = []
   const quotes: string[] = []
   const embeds: string[] = []
+  const nostrURIs: string[] = []
   const mentions: Mention[] = []
   let repostId: string | null = null
   let nestedEvent: NostrEvent | null = null
@@ -158,6 +160,12 @@ export function parseContent(event: NostrEvent): ParsedContent {
     })
   }
 
+  // Find nostr: URIs (NIP-21)
+  const nostrURIRegex = /nostr:(note1|nevent1|npub1|nprofile1|naddr1)[a-z0-9]+/gi
+  while ((match = nostrURIRegex.exec(content)) !== null) {
+    nostrURIs.push(match[0])
+  }
+
   return {
     text: content,
     mentions,
@@ -165,6 +173,7 @@ export function parseContent(event: NostrEvent): ParsedContent {
     videos,
     quotes,
     embeds,
+    nostrURIs,
     repostId,
     nestedEvent,
     replyToId,

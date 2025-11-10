@@ -23,7 +23,7 @@
     { id: 'global', label: 'Global', icon: GlobeIcon },
   ]
 
-  let activeFeed: FeedSource = 'global'
+let activeFeed: FeedSource = 'following'
   $: activeFeed = $feedSource
 
   function setActiveFeed(tab: FeedSource) {
@@ -54,25 +54,27 @@
           {@const isActive = activeFeed === tab.id}
           <button
             type="button"
-            class={`flex flex-1 min-w-[120px] items-center justify-center gap-2 whitespace-nowrap rounded-xl px-4 py-2 text-sm font-semibold transition-colors duration-200 ${
+            class={`flex flex-1 md:min-w-[120px] items-center justify-center gap-2 whitespace-nowrap rounded-xl px-3 md:px-4 py-2 text-sm font-semibold transition-colors duration-200 ${
               isActive
                 ? 'bg-primary text-dark shadow-md shadow-primary/20'
                 : 'text-text-muted hover:text-text-soft hover:bg-dark/30'
             }`}
             on:click={() => setActiveFeed(tab.id)}
+            aria-label={tab.label}
           >
             <svelte:component this={tab.icon} size={16} />
-            <span>{tab.label}</span>
+            <span class="hidden md:inline">{tab.label}</span>
           </button>
         {/each}
       </div>
 
-      <!-- Search button (desktop only, right side) -->
+      <!-- Search button (desktop only, moved to mobile menu) -->
       <button
         type="button"
         on:click={() => showSearch.set(true)}
         class="hidden md:flex h-10 w-10 items-center justify-center rounded-xl text-text-muted hover:text-text-soft hover:bg-dark/30 transition-colors duration-200 flex-shrink-0"
         title="Search"
+        aria-label="Search"
       >
         <SearchIcon size={18} color="currentColor" strokeWidth={1.6} />
       </button>

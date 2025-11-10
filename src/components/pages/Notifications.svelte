@@ -85,9 +85,15 @@
 
   function handleNotificationClick(notification: Notification) {
     markAsRead(notification.id)
-    if (notification.eventId) {
-      // Use the current active route as the origin tab
-      openPostById(notification.eventId, 'notifications')
+
+    // For replies, navigate to the actual reply event to show it in thread context
+    // For other notifications (likes, reposts), navigate to the target event
+    const targetEventId = notification.type === 'reply' || notification.type === 'quote' || notification.type === 'thread-reply'
+      ? (notification.replyEventId ?? notification.eventId)
+      : notification.eventId
+
+    if (targetEventId) {
+      openPostById(targetEventId, 'notifications')
     }
   }
 

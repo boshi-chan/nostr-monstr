@@ -10,6 +10,13 @@
   </head>
   <body class="bg-dark text-white">
     <div id="app"></div>
+    <script>
+      // Polyfill for CommonJS require (needed for monero-ts)
+      window.require = window.require || function() {
+        throw new Error('Module not found - monero-ts should use ES imports');
+      };
+      window.global = window.globalThis;
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

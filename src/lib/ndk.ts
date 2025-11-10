@@ -12,6 +12,7 @@ const DEFAULT_RELAYS = [
   'wss://relay.nostr.band',
   'wss://nos.lol',
   'wss://relay.snort.social',
+  'wss://relay.primal.net', // Good for long-form content
 ]
 
 // Global NDK instance

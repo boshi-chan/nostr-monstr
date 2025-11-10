@@ -9,8 +9,9 @@
   import type { NostrEvent } from '$types/nostr'
   import type { User } from '$types/user'
   import type { UserMetadata } from '$types/user'
-  import { activeRoute, openPost, openProfile } from '$stores/router'
-import type { NavTab } from '$stores/nav'
+  import { activeRoute, openPost, openProfile, goBack } from '$stores/router'
+  import type { NavTab } from '$stores/nav'
+  import ChevronLeftIcon from 'lucide-svelte/icons/chevron-left'
 
   export let pubkey: string | null = null
   export let originTab: NavTab | null = null
@@ -221,6 +222,14 @@ import type { NavTab } from '$stores/nav'
 {#if targetPubkey}
   <div class="flex h-full flex-col bg-transparent pb-24 md:pb-0">
     <section class="mx-auto w-full max-w-3xl px-4 pt-6 md:px-0 md:pt-8">
+      <button
+        type="button"
+        class="mb-4 inline-flex items-center gap-2 rounded-full border border-dark-border/70 bg-dark/70 px-4 py-2 text-sm font-medium text-text-soft transition-colors duration-200 hover:border-primary/60 hover:text-white"
+        on:click={goBack}
+      >
+        <ChevronLeftIcon class="h-4 w-4" />
+        Back
+      </button>
       <div class="relative overflow-hidden rounded-3xl border border-dark-border/60 bg-dark-light shadow-xl">
         <div class="h-20 w-full md:h-24">
           {#if bannerUrl}
@@ -263,22 +272,22 @@ import type { NavTab } from '$stores/nav'
               {#if !isOwnProfile && resolvedPubkey}
                 <FollowButton pubkey={resolvedPubkey} size="md" />
               {/if}
-              <div class="flex items-center gap-6 rounded-2xl border border-dark-border/70 bg-dark px-6 py-4 shadow-md">
-                <div>
-                  <p class="text-xs uppercase tracking-[0.3em] text-text-muted">Following</p>
-                  <p class="mt-1 text-lg font-semibold text-white">
+              <div class="flex items-center gap-3 md:gap-6 rounded-2xl border border-dark-border/70 bg-dark px-3 md:px-6 py-3 md:py-4 shadow-md">
+                <div class="flex-1 text-center md:text-left">
+                  <p class="text-[10px] md:text-xs uppercase tracking-[0.2em] md:tracking-[0.3em] text-text-muted">Following</p>
+                  <p class="mt-1 text-base md:text-lg font-semibold text-white">
                     {loadingStats ? '...' : followingCount}
                   </p>
                 </div>
-                <div>
-                  <p class="text-xs uppercase tracking-[0.3em] text-text-muted">Followers</p>
-                  <p class="mt-1 text-lg font-semibold text-white">
+                <div class="flex-1 text-center md:text-left">
+                  <p class="text-[10px] md:text-xs uppercase tracking-[0.2em] md:tracking-[0.3em] text-text-muted">Followers</p>
+                  <p class="mt-1 text-base md:text-lg font-semibold text-white">
                     {loadingStats ? '...' : followersCount}
                   </p>
                 </div>
-                <div>
-                  <p class="text-xs uppercase tracking-[0.3em] text-text-muted">Posts</p>
-                  <p class="mt-1 text-lg font-semibold text-white">
+                <div class="flex-1 text-center md:text-left">
+                  <p class="text-[10px] md:text-xs uppercase tracking-[0.2em] md:tracking-[0.3em] text-text-muted">Posts</p>
+                  <p class="mt-1 text-base md:text-lg font-semibold text-white">
                     {loadingPosts ? '...' : posts.length}
                   </p>
                 </div>

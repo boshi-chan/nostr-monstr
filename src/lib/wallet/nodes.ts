@@ -9,13 +9,13 @@ export interface MoneroNode {
 export const DEFAULT_NODES: MoneroNode[] = [
   {
     id: 'cake-us',
-    label: 'Cake Wallet (US)',
-    uri: 'https://node.cakewallet.com:18081',
+    label: 'Cake Wallet',
+    uri: 'https://xmr-node-cakewallet.com:18081',
   },
   {
-    id: 'cake-eu',
-    label: 'Cake Wallet (EU)',
-    uri: 'https://node2.cakewallet.com:18081',
+    id: 'hashvault',
+    label: 'HashVault',
+    uri: 'https://nodes.hashvault.pro:18081',
   },
   {
     id: 'seth',

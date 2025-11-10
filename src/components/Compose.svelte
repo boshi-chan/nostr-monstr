@@ -67,7 +67,7 @@
 <!-- Modal overlay -->
 {#if $showCompose}
   <div
-    class="fixed inset-0 z-50 flex items-end bg-black/50 md:items-center md:justify-center"
+    class="fixed inset-0 z-50 flex items-end bg-black/50 px-0 py-0 md:items-center md:justify-center md:px-4 md:py-4"
     role="dialog"
     aria-modal="true"
   >
@@ -79,7 +79,7 @@
     />
     <!-- Modal content -->
     <div
-      class="relative w-full rounded-t-3xl border border-dark-border bg-dark-light md:w-full md:max-w-2xl md:rounded-3xl"
+      class="relative w-full max-h-[90vh] md:max-h-[calc(100vh-2rem)] overflow-y-auto rounded-t-3xl border border-dark-border bg-dark-light md:w-full md:max-w-2xl md:rounded-3xl"
       on:click|stopPropagation
       role="presentation"
     >

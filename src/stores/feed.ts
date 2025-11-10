@@ -24,6 +24,7 @@ export interface CachedFollowingList {
 export const following = writable<Set<string>>(new Set())
 export const followingCache = writable<Map<string, CachedFollowingList>>(new Map()) // pubkey -> cached follows
 export const circles = writable<Set<string>>(new Set())
+export const circlesCache = writable<Map<string, CachedFollowingList>>(new Map()) // pubkey -> cached circles
 export const longReadAuthors = derived([following, circles], ([$following, $circles]) => {
   const authors = new Set($following)
   for (const pk of $circles) {

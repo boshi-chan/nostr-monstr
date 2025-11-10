@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(printf %sn '## Store Organization' 'Each store (src/stores/) manages a specific domain:' '- messages.ts: DM conversations and messages' '- feed.ts: Timeline events, metadata cache, follows' '- auth.ts: Current user, authentication state' '- app.ts: App initialization state' '- notifications.ts: Notification/reaction state' '- router.ts: Current route' '- voice-calls.ts: Voice call state' '- wallet.ts: Wallet balance and state' '- ember.ts: Ember protocol state' '- search.ts: Search query and results' '- feedSource.ts: Which feed is active (global/following/circles)' '- nav.ts: Navigation state' 'Stores use reactive patterns:' '- writable() for mutable state' '- derived() for computed state' '- get() to read synchronously' '- subscribe() to listen in components' 'Example usage in components:' '  import { conversations } from \"\"\"\"$stores/messages\"\"\"\"' '  $: conversationList = $conversations  // Auto-subscribe' --- '## Event Kinds Used' 'Kind 0: User metadata (name, bio, avatar)' 'Kind 1: Text notes (posts)' 'Kind 4: Direct messages (NIP-04, encrypted)' 'Kind 6: Repost events' 'Kind 7: Reactions/likes' 'Kind 9735: Zaps (Lightning payments)' 'Kind 30023: Long-form content (NIP-23)' 'Kind 1059: Giftwrap (NIP-59, privacy)' --- '## Existing Svelte Component Patterns' 'Pattern 1: Reactive variable binding' '  let count = 0' '  $: doubled = count * 2  // Auto-computed' 'Pattern 2: Store subscription' '  import { feedEvents } from \"\"\"\"$stores/feed\"\"\"\"' '  {#each $feedEvents as event (event.id)}' 'Pattern 3: Event handlers' '  <button on:click={handleClick}>' 'Pattern 4: Conditional rendering' '  {#if condition}' '    content' '  {:else}' '    fallback' '  {/if}' 'Pattern 5: Class binding' '  <div class={isActive ? \"\"\"\"active\"\"\"\" : \"\"\"\"inactive\"\"\"\"}>' --- cat d:nostr-monstrCODEBASE_ARCHITECTURE.md)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

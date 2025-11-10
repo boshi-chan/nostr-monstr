@@ -6,6 +6,8 @@
     getPubkeyFromURI,
     type NostrURI,
   } from '$lib/nostr-uri'
+  import { metadataCache } from '$stores/feed'
+  import { getDisplayName } from '$lib/metadata'
 
   export let text: string
   export let onEventClick: ((eventId: string) => void) | undefined = undefined
@@ -90,13 +92,18 @@
     const pubkey = getPubkeyFromURI(uri)
 
     if (uri.type === 'note' || uri.type === 'nevent') {
-      return `📝 Note ${eventId?.slice(0, 8) ?? 'unknown'}...`
+      return `@${eventId?.slice(0, 8) ?? 'unknown'}`
     } else if (uri.type === 'npub' || uri.type === 'nprofile') {
-      return `👤 User ${pubkey?.slice(0, 8) ?? 'unknown'}...`
+      if (pubkey) {
+        const metadata = $metadataCache.get(pubkey)
+        const displayName = getDisplayName(pubkey, metadata)
+        return `@${displayName}`
+      }
+      return `@${pubkey?.slice(0, 8) ?? 'unknown'}`
     } else if (uri.type === 'naddr') {
-      return `📄 Article`
+      return `@article`
     }
-    return '🔗 Link'
+    return '@link'
   }
 </script>
 
@@ -105,6 +112,9 @@
   {#if part.type === 'text'}
     <span>{part.content}</span>
   {:else if part.uri && part.type === 'uri'}
+    {@const pubkey = getPubkeyFromURI(part.uri)}
+    {@const metadata = pubkey ? $metadataCache.get(pubkey) : null}
+    {@const displayName = pubkey ? getDisplayName(pubkey, metadata) : null}
     <button
       type="button"
       on:click|stopPropagation={() => {
@@ -112,10 +122,12 @@
           handleURIClick(part.uri)
         }
       }}
-      class="inline-block rounded-lg border border-primary/40 bg-primary/10 px-2 py-0.5 text-sm font-medium text-primary transition-all duration-200 hover:border-primary/60 hover:bg-primary/15 hover:text-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      class="text-primary hover:underline focus:outline-none focus:ring-1 focus:ring-primary/40 rounded px-0.5 -mx-0.5"
       title={part.content}
     >
-      {#if part.uri}
+      {#if part.uri.type === 'npub' || part.uri.type === 'nprofile'}
+        @{displayName || pubkey?.slice(0, 8) || 'unknown'}
+      {:else}
         {getURILabel(part.uri)}
       {/if}
     </button>

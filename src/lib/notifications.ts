@@ -349,6 +349,7 @@ async function handleReplyNotification(event: NostrEvent, userPubkey: string): P
     fromName: metadata?.name || metadata?.display_name || 'User',
     fromAvatar: metadata?.picture,
     eventId: eventIdForNotification,
+    replyEventId: event.id, // Store the actual reply event ID
     eventContent: event.content.substring(0, 280),
     createdAt: event.created_at,
     read: false,

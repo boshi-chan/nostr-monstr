@@ -20,7 +20,9 @@
   import { parseContent } from '$lib/content'
   import type { NostrEvent } from '$types/nostr'
   import type { UserMetadata } from '$types/user'
+  import snarkdown from 'snarkdown'
   import MediaRenderer from './MediaRenderer.svelte'
+  import NostrURIRenderer from './NostrURIRenderer.svelte'
   import LikeIcon from './icons/LikeIcon.svelte'
   import CommentIcon from './icons/CommentIcon.svelte'
   import RepostIcon from './icons/RepostIcon.svelte'
@@ -65,6 +67,16 @@
   let repostTargetId: string | null = null
   $: repostTargetId = isRepostWrapper ? wrapperParsed.nestedEvent?.id ?? wrapperParsed.repostId ?? null : null
 
+  // Check if this is long-form content (kind 30023)
+  let isLongForm = false
+  $: isLongForm = actionableEvent.kind === 30023
+
+  // Render markdown for long-form posts
+  let renderedHtml = ''
+  $: if (isLongForm && parsed.text) {
+    renderedHtml = snarkdown(parsed.text)
+  }
+
   $: {
     if (!isRepostWrapper) {
       displayEvent = event
@@ -103,19 +115,6 @@
   $: nip05 = getNip05Display(metadata?.nip05)
   $: displayLabel = displayName || actionableEvent.pubkey.slice(0, 8)
   $: initials = displayLabel.slice(0, 2).toUpperCase()
-
-  let postType: 'post' | 'repost' | 'reply' | 'quote' = 'post'
-  $: {
-    if (isRepostWrapper) {
-      postType = 'repost'
-    } else if (parsed.quotes.length > 0 || parsed.nestedEvent) {
-      postType = 'quote'
-    } else if (parsed.replyToId !== null) {
-      postType = 'reply'
-    } else {
-      postType = 'post'
-    }
-  }
 
   let isReply = false
   $: isReply = parsed.replyToId !== null
@@ -394,12 +393,14 @@
   }}
 >
   {#if isRepostWrapper}
-    <div class="mb-3 flex items-center gap-2 text-sm text-text-muted">
-      <RepostIcon size={16} color="currentColor" strokeWidth={1.6} />
-      <div class="flex flex-wrap items-center gap-1 text-text-soft/80">
+    <div class="mb-3 flex items-center gap-2 text-sm text-text-muted/80">
+      <span class="text-emerald-400/70">
+        <RepostIcon size={16} color="currentColor" strokeWidth={1.8} />
+      </span>
+      <div class="flex flex-wrap items-center gap-1.5">
         <button
           type="button"
-          class="font-semibold text-text-soft hover:underline focus:outline-none focus:ring-2 focus:ring-primary/40 rounded-md px-1 -mx-1"
+          class="font-semibold text-text-soft hover:underline focus:outline-none focus:ring-1 focus:ring-primary/40 rounded px-1 -mx-1"
           on:click|stopPropagation={() => onProfileSelect?.(event.pubkey)}
           on:keydown|stopPropagation={(keyboardEvent) => {
             if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
@@ -410,16 +411,11 @@
         >
           {reposterDisplay ?? 'Someone'}
         </button>
-        <span>reposted</span>
+        <span class="text-text-muted/70">reposted</span>
         {#if repostTargetLoading}
-          <span class="text-xs text-text-muted/70">(fetching note...)</span>
+          <span class="text-xs text-text-muted/60">(loading...)</span>
         {/if}
       </div>
-    </div>
-  {:else if postType === 'quote'}
-    <div class="mb-3 inline-flex items-center gap-2 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.25em] text-amber-400/80">
-      <span>💬</span>
-      <span>Quote</span>
     </div>
   {/if}
 
@@ -448,14 +444,14 @@
       </button>
     </div>
 
-    <!-- Content -->
+    <!-- User info and header content only -->
     <div class="flex-1 min-w-0">
       <!-- User info row -->
-      <div class="flex items-start gap-2">
-        <div class="flex flex-wrap items-center gap-2">
+      <div class="flex items-start justify-between gap-2">
+        <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
           <button
             type="button"
-            class="font-semibold text-text-soft hover:underline focus:outline-none focus:ring-2 focus:ring-primary/40 rounded-md px-1 -mx-1"
+            class="font-semibold text-text-soft hover:underline focus:outline-none focus:ring-2 focus:ring-primary/40 rounded-md px-1 -mx-1 truncate"
             on:click|stopPropagation={() => onProfileSelect?.(actionableEvent.pubkey)}
             on:keydown|stopPropagation={(keyboardEvent) => {
               if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
@@ -467,14 +463,19 @@
             {displayLabel}
           </button>
           {#if nip05}
-            <span class="text-xs text-text-muted">{nip05}</span>
+            <div class="flex items-center gap-1.5">
+              <span class="text-xs text-text-muted truncate">@{nip05}</span>
+              <!-- NIP-05 Verified Badge -->
+              <svg class="h-4 w-4 text-primary flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-label="Verified">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd" />
+              </svg>
+            </div>
           {/if}
         </div>
 
-        <div class="ml-auto flex items-center gap-3 text-sm text-text-muted">
+        <div class="flex items-center gap-2 text-sm text-text-muted flex-shrink-0">
+          <span class="hover:underline cursor-pointer" title={new Date(actionableEvent.created_at * 1000).toLocaleString()}>{formattedTime}</span>
           <FollowButton pubkey={actionableEvent.pubkey} size="sm" layout="inline" />
-          <span aria-hidden="true">•</span>
-          <span>{formattedTime}</span>
           <div class="relative">
             <button
               type="button"
@@ -520,74 +521,115 @@
           </div>
         </div>
       </div>
+    </div>
+  </div>
 
-      {#if isReply && parsed.replyToId}
-        <button
-          type="button"
-          class="mt-2 text-sm font-semibold text-primary hover:text-primary/80 focus:outline-none focus:ring-2 focus:ring-primary/40 rounded-md px-1 -mx-1"
-          on:click|stopPropagation={() => {
-            void handleReplyContextClick()
-          }}
-        >
-          {#if parentLoading}
-            Replying to original note...
-          {:else}
-            replying to <span class="text-text-soft">@{parentDisplayName ?? 'original note'}</span>
+  <!-- Post content (full width below header) -->
+  <div class="mt-3">
+    {#if isReply && (parsed.replyToId || parsed.mentions.length > 0)}
+      <div class="text-sm text-text-muted">
+          <span class="text-text-tertiary">Replying to</span>
+          {#if parsed.mentions.length > 0}
+            {#each parsed.mentions.slice(0, 3) as mention, idx}
+              {@const mentionMetadata = $metadataCache.get(mention.pubkey)}
+              {@const mentionDisplayName = getDisplayName(mention.pubkey, mentionMetadata) || mention.pubkey.slice(0, 8)}
+              <button
+                type="button"
+                class="text-primary hover:underline focus:outline-none focus:ring-1 focus:ring-primary/40 rounded px-0.5 -mx-0.5"
+                on:click|stopPropagation={() => onProfileSelect?.(mention.pubkey)}
+              >
+                @{mentionDisplayName}
+              </button>
+              {#if idx < Math.min(parsed.mentions.length, 3) - 1}
+                <span class="text-text-tertiary"> </span>
+              {/if}
+            {/each}
+            {#if parsed.mentions.length > 3}
+              <span class="text-text-tertiary"> and {parsed.mentions.length - 3} others</span>
+            {/if}
+          {:else if parentLoading}
+            <span class="text-text-tertiary">...</span>
+          {:else if parentDisplayName}
+            <button
+              type="button"
+              class="text-primary hover:underline focus:outline-none focus:ring-1 focus:ring-primary/40 rounded px-0.5 -mx-0.5"
+              on:click|stopPropagation={() => {
+                void handleReplyContextClick()
+              }}
+            >
+              @{parentDisplayName}
+            </button>
           {/if}
-        </button>
-      {/if}
-
-      <div class="mt-2 text-text-soft whitespace-pre-wrap break-words" style="overflow-wrap:anywhere">
-        {parsed.text}
       </div>
+    {/if}
 
-      {#if parsed.images.length > 0 || parsed.videos.length > 0 || parsed.embeds.length > 0}
-        <div class="mt-3">
-          <MediaRenderer images={parsed.images} videos={parsed.videos} embeds={parsed.embeds} />
-        </div>
-      {/if}
-
-      <!-- Quoted/referenced note -->
-      {#if quotedEventId || quotedEventData}
-        <div class="mt-3">
-          <QuotedNote
-            eventId={quotedEventId}
-            eventData={quotedEventData}
-            onSelect={handleQuotedSelect}
-            onOpen={handleQuotedOpen}
+    {#if isLongForm}
+      <!-- Render markdown for long-form content -->
+      <div class="mt-2 prose prose-invert prose-sm max-w-none text-text-soft">
+        {@html renderedHtml}
+      </div>
+    {:else}
+      <!-- Regular plaintext content -->
+      <div class="mt-2 text-text-soft whitespace-pre-wrap break-words" style="overflow-wrap:anywhere">
+        {#if parsed.nostrURIs && parsed.nostrURIs.length > 0}
+          <NostrURIRenderer
+            text={parsed.text}
+            onEventClick={onNavigateToEventId}
+            onProfileClick={onProfileSelect}
           />
-        </div>
-      {/if}
+        {:else}
+          {parsed.text}
+        {/if}
+      </div>
+    {/if}
 
-      <!-- Action buttons -->
-      {#if showActions}
-        <div class="mt-3 flex justify-between text-text-muted -mx-2">
+    {#if parsed.images.length > 0 || parsed.videos.length > 0 || parsed.embeds.length > 0}
+      <div class="mt-3">
+        <MediaRenderer images={parsed.images} videos={parsed.videos} embeds={parsed.embeds} />
+      </div>
+    {/if}
+
+    <!-- Quoted/referenced note -->
+    {#if quotedEventId || quotedEventData}
+      <div class="mt-3">
+        <QuotedNote
+          eventId={quotedEventId}
+          eventData={quotedEventData}
+          onSelect={handleQuotedSelect}
+          onOpen={handleQuotedOpen}
+        />
+      </div>
+    {/if}
+
+    <!-- Action buttons -->
+    {#if showActions}
+      <div class="mt-4 flex items-center justify-between text-text-muted border-t border-dark-border/40 pt-3">
           <!-- Like -->
           <button
             on:click|stopPropagation={handleLike}
             disabled={likeLoading}
-            class={`${baseActionClass} hover:text-rose-400 focus-visible:ring-2 focus-visible:ring-rose-500/40 ${
-              isLiked ? 'text-rose-400' : ''
+            class={`${baseActionClass} hover:text-rose-400 hover:bg-rose-400/5 ${
+              isLiked ? 'text-rose-400/80' : ''
             }`}
             title="Like"
           >
             <LikeIcon size={18} color="currentColor" strokeWidth={1.75} filled={isLiked} />
             {#if isLiked}
-              <span class="text-xs text-rose-300 group-hover:text-rose-200">1</span>
+              <span class="text-xs font-medium">1</span>
             {/if}
           </button>
 
           <!-- Comment -->
           <button
             on:click|stopPropagation={handleReply}
-            class={`${baseActionClass} hover:text-blue-400 focus-visible:ring-2 focus-visible:ring-blue-500/40 ${
-              replyCount > 0 ? 'text-blue-400' : ''
+            class={`${baseActionClass} hover:text-primary hover:bg-primary/5 ${
+              replyCount > 0 ? 'text-primary/80' : ''
             }`}
             title="Comment"
           >
             <CommentIcon size={18} color="currentColor" strokeWidth={1.75} />
             {#if replyCount > 0}
-              <span class="text-xs text-blue-300 group-hover:text-blue-200">{replyCount}</span>
+              <span class="text-xs font-medium">{replyCount}</span>
             {/if}
           </button>
 
@@ -595,14 +637,14 @@
           <button
             on:click|stopPropagation={handleRepost}
             disabled={repostActionLoading}
-            class={`${baseActionClass} hover:text-emerald-400 focus-visible:ring-2 focus-visible:ring-emerald-500/40 ${
-              isReposted ? 'text-emerald-400' : ''
+            class={`${baseActionClass} hover:text-emerald-400 hover:bg-emerald-400/5 ${
+              isReposted ? 'text-emerald-400/80' : ''
             }`}
             title="Repost"
           >
             <RepostIcon size={18} color="currentColor" strokeWidth={1.75} />
             {#if isReposted}
-              <span class="text-xs text-emerald-300 group-hover:text-emerald-200">1</span>
+              <span class="text-xs font-medium">1</span>
             {/if}
           </button>
 
@@ -610,38 +652,141 @@
           <button
             on:click|stopPropagation={handleZap}
             disabled={zapLoading}
-            class={`${baseActionClass} hover:text-yellow-400 focus-visible:ring-2 focus-visible:ring-yellow-500/40 ${
-              isZapped ? 'text-yellow-400' : ''
+            class={`${baseActionClass} hover:text-yellow-400 hover:bg-yellow-400/5 ${
+              isZapped ? 'text-yellow-400/80' : ''
             }`}
-            title="Zap"
+            title="Zap {zapAmount > 0 ? zapAmount + ' sats' : ''}"
           >
             <ZapIcon size={18} color="currentColor" strokeWidth={1.75} />
-            {#if isZapped}
-              <span class="text-xs text-yellow-300 group-hover:text-yellow-200">{zapAmount}</span>
+            {#if zapAmount > 0}
+              <span class="text-xs font-medium">{zapAmount}</span>
             {/if}
           </button>
 
           <!-- Ember -->
           <button
             on:click|stopPropagation={handleEmber}
-            class={`${baseActionClass} hover:text-orange-400 focus-visible:ring-2 focus-visible:ring-orange-500/40`}
-            title="Ember"
+            class={`${baseActionClass} hover:text-orange-400 hover:bg-orange-400/5 ${
+              emberAmount > 0 ? 'text-orange-400' : ''
+            }`}
+            title="Ember {emberAmount > 0 ? emberAmount.toFixed(4) + ' XMR' : ''}"
           >
             <EmberIcon size={18} color="currentColor" strokeWidth={1.75} />
+            {#if emberAmount > 0}
+              <span class="text-xs font-medium">{emberAmount.toFixed(4)}</span>
+            {/if}
           </button>
-        </div>
-        {#if emberAmount > 0}
-          <div class="mt-3 flex items-center gap-2 text-xs font-semibold text-orange-300">
-            <span class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-orange-500/10">
-              <EmberIcon size={14} color="currentColor" strokeWidth={1.5} />
-            </span>
-            <span>{emberAmount.toFixed(4)} XMR received</span>
-          </div>
-        {/if}
-      {/if}
-    </div>
+      </div>
+    {/if}
   </div>
 </div>
+
+<style>
+  /* Markdown styling for long-form posts */
+  :global(.prose) {
+    color: inherit;
+    line-height: 1.75;
+  }
+
+  :global(.prose h1) {
+    font-size: 1.875rem;
+    font-weight: 700;
+    margin-top: 1.5rem;
+    margin-bottom: 1rem;
+    color: #fff;
+  }
+
+  :global(.prose h2) {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-top: 1.25rem;
+    margin-bottom: 0.75rem;
+    color: #fff;
+  }
+
+  :global(.prose h3) {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-top: 1rem;
+    margin-bottom: 0.5rem;
+    color: #e5e7eb;
+  }
+
+  :global(.prose p) {
+    margin-top: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
+  :global(.prose a) {
+    color: #f97316;
+    text-decoration: underline;
+  }
+
+  :global(.prose a:hover) {
+    color: #fb923c;
+  }
+
+  :global(.prose strong) {
+    font-weight: 600;
+    color: #fff;
+  }
+
+  :global(.prose em) {
+    font-style: italic;
+  }
+
+  :global(.prose code) {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.25rem;
+    font-size: 0.875em;
+    font-family: ui-monospace, monospace;
+  }
+
+  :global(.prose pre) {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 1rem;
+    border-radius: 0.5rem;
+    overflow-x: auto;
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  :global(.prose ul),
+  :global(.prose ol) {
+    margin-top: 0.75rem;
+    margin-bottom: 0.75rem;
+    padding-left: 1.5rem;
+  }
+
+  :global(.prose li) {
+    margin-top: 0.25rem;
+    margin-bottom: 0.25rem;
+  }
+
+  :global(.prose blockquote) {
+    border-left: 4px solid #f97316;
+    padding-left: 1rem;
+    font-style: italic;
+    color: #9ca3af;
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  :global(.prose hr) {
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    margin-top: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  :global(.prose img) {
+    border-radius: 0.5rem;
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+    max-width: 100%;
+    height: auto;
+  }
+</style>
 
 
 
