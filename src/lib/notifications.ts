@@ -7,7 +7,6 @@ import { get } from 'svelte/store'
 import { feedEvents, userEventIds } from '$stores/feed'
 import {
   addNotification,
-  clearNotifications,
   type Notification,
 } from '$stores/notifications'
 import { getUserMetadata, fetchUserMetadata } from '$lib/metadata'
@@ -479,5 +478,5 @@ export function stopNotificationListener(): void {
   }
   processedNotifications.clear()
   notificationEventCache.clear()
-  clearNotifications()
+  // Note: Don't clear notifications - they persist in localStorage
 }

@@ -28,10 +28,58 @@ export interface Notification {
   read: boolean
 }
 
+const NOTIFICATIONS_STORAGE_KEY = 'monstr_notifications'
+
 /**
- * Notifications store
+ * Load notifications from localStorage
  */
-export const notifications = writable<Notification[]>([])
+function loadNotifications(): Notification[] {
+  if (typeof window === 'undefined') return []
+
+  try {
+    const stored = window.localStorage.getItem(NOTIFICATIONS_STORAGE_KEY)
+    if (!stored) return []
+
+    const parsed = JSON.parse(stored)
+    if (!Array.isArray(parsed)) return []
+
+    // Only keep notifications from last 7 days
+    const weekAgo = Date.now() / 1000 - 86400 * 7
+    return parsed.filter((n: Notification) => n.createdAt > weekAgo)
+  } catch (err) {
+    console.warn('Failed to load notifications from localStorage:', err)
+    return []
+  }
+}
+
+/**
+ * Save notifications to localStorage
+ */
+function saveNotifications(notifs: Notification[]): void {
+  if (typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(notifs))
+  } catch (err) {
+    console.warn('Failed to save notifications to localStorage:', err)
+  }
+}
+
+/**
+ * Notifications store (persisted to localStorage)
+ */
+export const notifications = writable<Notification[]>(loadNotifications())
+
+// Persist to localStorage whenever notifications change
+let isFirstLoad = true
+notifications.subscribe(notifs => {
+  // Skip saving on initial load to avoid writing back what we just read
+  if (isFirstLoad) {
+    isFirstLoad = false
+    return
+  }
+  saveNotifications(notifs)
+})
 
 /**
  * Unread notification count

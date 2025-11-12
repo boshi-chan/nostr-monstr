@@ -7,9 +7,9 @@
 
 <svg
   {color}
-  fill={filled ? color : 'none'}
+  fill={filled ? '#fb7185' : 'none'}
   height={size}
-  stroke={color}
+  stroke={filled ? '#fb7185' : color}
   stroke-linecap="round"
   stroke-linejoin="round"
   stroke-width={strokeWidth}
