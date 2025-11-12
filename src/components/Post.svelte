@@ -585,7 +585,7 @@
 
     {#if parsed.images.length > 0 || parsed.videos.length > 0 || parsed.embeds.length > 0}
       <div class="mt-3">
-        <MediaRenderer images={parsed.images} videos={parsed.videos} embeds={parsed.embeds} />
+        <MediaRenderer images={parsed.images} videos={parsed.videos} embeds={parsed.embeds} event={actionableEvent} />
       </div>
     {/if}
 

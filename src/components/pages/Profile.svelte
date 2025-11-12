@@ -1,11 +1,14 @@
 <script lang="ts">
   import { currentUser } from '$stores/auth'
-  import { metadataCache } from '$stores/feed'
+  import { metadataCache, likedEvents } from '$stores/feed'
+  import { feedFilters } from '$stores/feedFilters'
   import { getDisplayName, getAvatarUrl, getNip05Display, fetchUserMetadata } from '$lib/metadata'
   import { getNDK } from '$lib/ndk'
+  import { isReply, isRepostEvent, hasMedia } from '$lib/content'
   import Post from '../Post.svelte'
   import FollowButton from '../FollowButton.svelte'
   import Skeleton from '../Skeleton.svelte'
+  import ProfileFilterBar from '../ProfileFilterBar.svelte'
   import type { NostrEvent } from '$types/nostr'
   import type { User } from '$types/user'
   import type { UserMetadata } from '$types/user'
@@ -38,6 +41,31 @@
   let posts: NostrEvent[] = []
   let error: string | null = null
   let lastLoadedPubkey: string | null = null
+
+  // Filter posts based on profile mode
+  // Following AI_Guidelines: Avoid using $ syntax inside reactive statements
+  let profileMode: string = 'all'
+  $: profileMode = $feedFilters.profileMode
+
+  let likedEventsSet: Set<string> = new Set()
+  $: likedEventsSet = $likedEvents
+
+  $: filteredPosts = posts.filter(event => {
+    switch (profileMode) {
+      case 'all':
+        return true
+      case 'replies':
+        return isReply(event)
+      case 'media':
+        return hasMedia(event)
+      case 'reposts':
+        return isRepostEvent(event)
+      case 'likes':
+        return likedEventsSet.has(event.id)
+      default:
+        return true
+    }
+  })
 
   $: authUser = $currentUser
   $: targetPubkey = pubkey ?? authUser?.pubkey ?? null
@@ -119,8 +147,9 @@
 
   async function loadPosts(pubkey: string): Promise<void> {
     try {
+      // Fetch both regular posts (kind:1) and reposts (kind:6)
       const result = (await ndk.fetchEvents(
-        { authors: [pubkey], kinds: [1], limit: 50 },
+        { authors: [pubkey], kinds: [1, 6], limit: 50 },
         { closeOnEose: true }
       )) as Set<any>
 
@@ -224,8 +253,12 @@
     <section class="mx-auto w-full max-w-3xl px-4 pt-6 md:px-0 md:pt-8">
       <button
         type="button"
-        class="mb-4 inline-flex items-center gap-2 rounded-full border border-dark-border/70 bg-dark/70 px-4 py-2 text-sm font-medium text-text-soft transition-colors duration-200 hover:border-primary/60 hover:text-white"
-        on:click={goBack}
+        class="mb-4 inline-flex items-center gap-2 rounded-full border border-dark-border/70 bg-dark/70 px-4 py-2 text-sm font-medium text-text-soft transition-colors duration-200 hover:border-primary/60 hover:text-white touch-manipulation relative z-10"
+        on:click={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          goBack()
+        }}
       >
         <ChevronLeftIcon class="h-4 w-4" />
         Back
@@ -313,12 +346,17 @@
     </section>
 
     <section class="mx-auto mt-6 w-full max-w-3xl px-4 md:px-0 md:mt-8 flex-1">
+      <!-- Filter Bar -->
+      <div class="mb-4">
+        <ProfileFilterBar />
+      </div>
+
       <div class="flex items-center justify-between px-2 md:px-1">
         <h2 class="text-lg font-semibold text-white md:text-xl">
           {isOwnProfile ? 'Your Posts' : `${displayName}'s Posts`}
         </h2>
         <span class="text-xs uppercase tracking-[0.2em] text-text-muted">
-          {loadingPosts ? 'Loading' : `${posts.length} total`}
+          {loadingPosts ? 'Loading' : `${filteredPosts.length} of ${posts.length}`}
         </span>
       </div>
 
@@ -337,8 +375,12 @@
           <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-6 text-center text-sm text-text-muted">
             {isOwnProfile ? "You haven't posted anything yet." : 'No posts yet.'}
           </div>
+        {:else if filteredPosts.length === 0}
+          <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-6 text-center text-sm text-text-muted">
+            No posts match the selected filter.
+          </div>
         {:else}
-          {#each posts as post (post.id)}
+          {#each filteredPosts as post (post.id)}
             <Post
               event={post}
               showActions

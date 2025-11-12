@@ -6,7 +6,7 @@
 import { get } from 'svelte/store'
 import { getNDK, getCurrentNDKUser } from './ndk'
 import {
-  feedEvents,
+  unfilteredFeedEvents,
   activeSubscriptions,
   feedLoading,
   feedError,
@@ -21,9 +21,10 @@ import {
 } from '$stores/feed'
 import { parseMetadataEvent, fetchUserMetadata } from './metadata'
 import { feedSource, type FeedSource } from '$stores/feedSource'
+import { feedFilters } from '$stores/feedFilters'
 import type { NostrEvent } from '$types/nostr'
 import { NDKEvent, type NDKSubscriptionOptions } from '@nostr-dev-kit/ndk'
-import { parseContent } from './content'
+import { parseContent, isReply, isRepostEvent } from './content'
 
 const subscriptionRefs = new Map<string, any>()
 const eventCache = new Map<string, NostrEvent>()
@@ -99,6 +100,26 @@ function shouldIncludeEvent(origin: FeedOrigin, currentFeed: FeedSource): boolea
   return origin === currentFeed
 }
 
+/**
+ * Check if event passes the current feed filters
+ */
+function passesFilters(event: NostrEvent): boolean {
+  const filters = get(feedFilters)
+
+  // Check if it's a repost
+  if (isRepostEvent(event)) {
+    return filters.showReposts
+  }
+
+  // Check if it's a reply
+  if (isReply(event)) {
+    return filters.showReplies
+  }
+
+  // It's a regular post
+  return filters.showPosts
+}
+
 function flushPendingEvents(): void {
   if (pendingEvents.length === 0) {
     debounceTimeout = null
@@ -110,6 +131,7 @@ function flushPendingEvents(): void {
   const eventsToMerge: NostrEvent[] = []
 
   for (const { event, origin } of chunk) {
+    // Only check feed source, NOT filters (filters applied in App.svelte)
     if (shouldIncludeEvent(origin, currentFeed)) {
       eventsToMerge.push(event)
     } else {
@@ -118,7 +140,7 @@ function flushPendingEvents(): void {
   }
 
   if (eventsToMerge.length > 0) {
-    feedEvents.update(existing => {
+    unfilteredFeedEvents.update(existing => {
       const combined = [...eventsToMerge, ...existing]
       combined.sort((a, b) => b.created_at - a.created_at)
 
@@ -163,7 +185,7 @@ export function clearFeed(): void {
     debounceTimeout = null
   }
   pendingEvents = []
-  feedEvents.set([])
+  unfilteredFeedEvents.set([])
   eventCache.clear()
 }
 
@@ -537,7 +559,109 @@ export async function subscribeToCirclesFeed(): Promise<void> {
 }
 
 /**
- * Subscribe to long-form content (kind 30023)
+ * Subscribe to long-form content from following only (kind 30023)
+ */
+export async function subscribeToLongReadsFollowingFeed(): Promise<void> {
+  try {
+    const user = getCurrentNDKUser()
+    if (!user?.pubkey) {
+      feedError.set('Not authenticated')
+      feedLoading.set(false)
+      return
+    }
+
+    feedLoading.set(true)
+    feedError.set(null)
+
+    const followSet = await ensureFollowing(user.pubkey)
+    if (followSet.size === 0) {
+      feedLoading.set(false)
+      feedError.set('Follow someone to build your long read feed')
+      return
+    }
+
+    const followAuthors = Array.from(followSet).filter(isHexPubkey).map(pk => pk.toLowerCase())
+
+    if (followAuthors.length === 0) {
+      feedLoading.set(false)
+      feedError.set('No long-read authors discovered yet')
+      return
+    }
+
+    console.log(`⚡ Loading long reads from ${followAuthors.length} following`)
+
+    subscribeWithFilter(
+      {
+        authors: followAuthors,
+        kinds: [30023],
+        limit: 100,
+        since: Math.floor(Date.now() / 1000) - 86400 * 30, // 30 days
+      },
+      'long-reads-following'
+    )
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('Failed to subscribe to long reads (following):', err)
+    feedError.set(message)
+    feedLoading.set(false)
+  }
+}
+
+/**
+ * Subscribe to long-form content from circles (kind 30023)
+ */
+export async function subscribeToLongReadsCirclesFeed(): Promise<void> {
+  try {
+    const user = getCurrentNDKUser()
+    if (!user?.pubkey) {
+      feedError.set('Not authenticated')
+      feedLoading.set(false)
+      return
+    }
+
+    feedLoading.set(true)
+    feedError.set(null)
+
+    const followSet = await ensureFollowing(user.pubkey)
+    if (followSet.size === 0) {
+      feedLoading.set(false)
+      feedError.set('Follow someone to build your circles')
+      return
+    }
+
+    // Get circles (this will fetch if not cached)
+    const circleSet = await ensureCircles(followSet, user.pubkey)
+
+    const circleAuthors = Array.from(circleSet).filter(isHexPubkey).map(pk => pk.toLowerCase())
+
+    if (circleAuthors.length === 0) {
+      feedLoading.set(false)
+      feedError.set('No circle authors discovered yet')
+      return
+    }
+
+    console.log(`⚡ Loading long reads from ${circleAuthors.length} circles`)
+
+    subscribeWithFilter(
+      {
+        authors: circleAuthors.slice(0, 500), // Limit to 500
+        kinds: [30023],
+        limit: 100,
+        since: Math.floor(Date.now() / 1000) - 86400 * 30, // 30 days
+      },
+      'long-reads-circles'
+    )
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('Failed to subscribe to long reads (circles):', err)
+    feedError.set(message)
+    feedLoading.set(false)
+  }
+}
+
+/**
+ * Subscribe to long-form content (kind 30023) - legacy combined feed
+ * @deprecated Use subscribeToLongReadsFollowingFeed or subscribeToLongReadsCirclesFeed instead
  */
 export async function subscribeToLongReadsFeed(): Promise<void> {
   try {

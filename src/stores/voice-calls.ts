@@ -54,15 +54,15 @@ export const callStats = writable({
 /**
  * Derived: Is user in a call?
  */
-export const isInCall = derived(activeCall, $activeCall => {
-  return $activeCall?.state === 'connected' || $activeCall?.state === 'connecting'
+export const isInCall = derived(activeCall, call => {
+  return call?.state === 'connected' || call?.state === 'connecting'
 })
 
 /**
  * Derived: Is user being called?
  */
-export const hasIncomingCall = derived(incomingCall, $incoming => {
-  return $incoming !== null
+export const hasIncomingCall = derived(incomingCall, incoming => {
+  return incoming !== null
 })
 
 /**

@@ -11,6 +11,7 @@
   import type { NostrEvent } from '$types/nostr'
   import Post from '../Post.svelte'
   import Skeleton from '../Skeleton.svelte'
+  import FilterBar from '../FilterBar.svelte'
   import UsersIcon from '../icons/UsersIcon.svelte'
   import CircleIcon from '../icons/CircleIcon.svelte'
   import GlobeIcon from '../icons/GlobeIcon.svelte'
@@ -30,14 +31,8 @@ let activeFeed: FeedSource = 'following'
     feedSource.set(tab)
   }
 
-  import { getReplies } from '$lib/feed-ndk'
-
   function handleEventSelect(event: NostrEvent) {
     openPost(event, 'home')
-  }
-
-  function handleGetReplyCount(eventId: string): number {
-    return getReplies(eventId, $feedEvents).length
   }
 
   function handleProfileSelect(pubkey: string) {
@@ -46,8 +41,8 @@ let activeFeed: FeedSource = 'following'
 </script>
 
 <div class="w-full pb-24 md:pb-0">
-  <div class="sticky top-0 z-20 border-b border-dark-border/60 bg-dark/80 backdrop-blur-3xl backdrop-saturate-150 supports-[backdrop-filter]:bg-dark/60">
-    <div class="flex h-14 md:h-16 w-full items-center justify-between px-3 md:px-6 gap-2">
+  <div class="sticky top-0 z-20 bg-dark/80 backdrop-blur-3xl backdrop-saturate-150 supports-[backdrop-filter]:bg-dark/60">
+    <div class="flex h-14 md:h-16 w-full items-center justify-between px-3 md:px-6 gap-2 border-b border-dark-border/60">
       <!-- Feed tabs (centered, flex-1) -->
       <div class="flex flex-1 w-full items-center gap-3 overflow-x-auto">
         {#each feedTabs as tab (tab.id)}
@@ -56,7 +51,7 @@ let activeFeed: FeedSource = 'following'
             type="button"
             class={`flex flex-1 md:min-w-[120px] items-center justify-center gap-2 whitespace-nowrap rounded-xl px-3 md:px-4 py-2 text-sm font-semibold transition-colors duration-200 ${
               isActive
-                ? 'bg-primary text-dark shadow-md shadow-primary/20'
+                ? 'bg-primary text-white shadow-md shadow-primary/20'
                 : 'text-text-muted hover:text-text-soft hover:bg-dark/30'
             }`}
             on:click={() => setActiveFeed(tab.id)}
@@ -79,6 +74,9 @@ let activeFeed: FeedSource = 'following'
         <SearchIcon size={18} color="currentColor" strokeWidth={1.6} />
       </button>
     </div>
+
+    <!-- Filter Bar -->
+    <FilterBar />
   </div>
 
   <div class="mx-auto w-full max-w-3xl px-3 md:px-6">
@@ -109,7 +107,7 @@ let activeFeed: FeedSource = 'following'
             {event}
             onSelect={handleEventSelect}
             onProfileSelect={handleProfileSelect}
-            replyCount={handleGetReplyCount(event.id)}
+            replyCount={0}
           />
         {/each}
 

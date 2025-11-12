@@ -83,6 +83,7 @@
                       images={parsed.images}
                       videos={parsed.videos}
                       embeds={parsed.embeds}
+                      event={threadEvent}
                     />
                   {/if}
 

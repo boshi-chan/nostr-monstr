@@ -49,9 +49,9 @@ const WALLET_MASTER_KEY = 'walletMasterKey'
 const WALLET_BACKUP_KIND = 30078
 const WALLET_BACKUP_D_TAG = 'monstr-wallet'
 const BLOCK_TIME_SECONDS = 120
-const REFERENCE_HEIGHT = 3100000
-const REFERENCE_TIMESTAMP = Date.UTC(2023, 0, 1)
-const RESTORE_LOOKBACK_SECONDS = 7 * 24 * 60 * 60 // rewind a week to capture early deposits
+const REFERENCE_HEIGHT = 3350000 // Fallback reference: December 2024
+const REFERENCE_TIMESTAMP = Date.UTC(2024, 11, 15) // Fallback reference: December 15, 2024
+const RESTORE_LOOKBACK_SECONDS = 7 * 24 * 60 * 60 // Lookback period: 7 days for fast sync (enough for new wallets)
 
 let monero: MoneroLib | null = null
 let walletInstance: MoneroWalletFullInstance | null = null
@@ -176,7 +176,7 @@ function normalizeMeta(meta: any): WalletMetaInfo | null {
     return null
   }
   const createdAt = typeof meta.createdAt === 'number' ? meta.createdAt : Date.now()
-  const restoreHeight = typeof meta.restoreHeight === 'number' ? meta.restoreHeight : estimateRestoreHeight(createdAt)
+  const restoreHeight = typeof meta.restoreHeight === 'number' ? meta.restoreHeight : estimateRestoreHeightFallback(createdAt)
   const nodeId = typeof meta.nodeId === 'string' ? meta.nodeId : activeNode.id
   const normalizedNode = getNodeById(nodeId) ?? activeNode
   return {
@@ -195,12 +195,57 @@ function setWalletState(partial: Partial<Parameters<typeof walletState.set>[0]>)
   }))
 }
 
-function estimateRestoreHeight(createdAt: number): number {
+/**
+ * Fetch current blockchain height from daemon
+ */
+async function fetchCurrentHeight(): Promise<number> {
+  try {
+    const moneroLib = await loadMonero()
+    const connection = new moneroLib.MoneroRpcConnection({
+      uri: activeNode.uri,
+      username: activeNode.username,
+      password: activeNode.password,
+    })
+
+    const daemonHeight = await connection.getHeight()
+    return daemonHeight
+  } catch (err) {
+    console.warn('Failed to fetch daemon height, using fallback estimation:', err)
+    // Fallback to estimation if daemon fetch fails
+    return estimateRestoreHeightFallback(Date.now())
+  }
+}
+
+/**
+ * Fallback: estimate restore height based on time (used if daemon is unreachable)
+ */
+function estimateRestoreHeightFallback(createdAt: number): number {
   const lookbackMillis = RESTORE_LOOKBACK_SECONDS * 1000
   const adjustedTimestamp = Math.max(REFERENCE_TIMESTAMP, createdAt - lookbackMillis)
   const deltaSeconds = Math.max(0, Math.floor((adjustedTimestamp - REFERENCE_TIMESTAMP) / 1000))
   const deltaBlocks = Math.floor(deltaSeconds / BLOCK_TIME_SECONDS)
-  return Math.max(0, REFERENCE_HEIGHT + deltaBlocks)
+  const estimatedHeight = Math.max(0, REFERENCE_HEIGHT + deltaBlocks)
+
+  // Safety cap: Don't go more than 90 days ahead of reference to prevent sync failures
+  const maxSafeBlocks = Math.floor((90 * 24 * 60 * 60) / BLOCK_TIME_SECONDS)
+  const cappedHeight = Math.min(estimatedHeight, REFERENCE_HEIGHT + maxSafeBlocks)
+
+  return cappedHeight
+}
+
+/**
+ * Calculate restore height with lookback period
+ */
+async function calculateRestoreHeight(): Promise<number> {
+  const currentHeight = await fetchCurrentHeight()
+
+  // Calculate lookback blocks (30 days)
+  const lookbackBlocks = Math.floor(RESTORE_LOOKBACK_SECONDS / BLOCK_TIME_SECONDS)
+
+  // Restore from current height minus lookback, ensuring we don't go negative
+  const restoreHeight = Math.max(0, currentHeight - lookbackBlocks)
+
+  return restoreHeight
 }
 
 function resolveNetworkType(lib: MoneroLib, network: WalletMetaInfo['network']) {
@@ -594,7 +639,7 @@ export async function initWallet(
 
   await persistSecrets(masterKey, cachedSecrets)
   const createdAt = options?.createdAt ?? Date.now()
-  const restoreHeight = options?.restoreHeight ?? estimateRestoreHeight(createdAt)
+  const restoreHeight = options?.restoreHeight ?? (await calculateRestoreHeight())
   const meta: WalletMetaInfo = {
     address,
     network: 'mainnet',
@@ -649,6 +694,26 @@ export function getCachedSeed(): string | null {
 export async function refreshWallet(): Promise<void> {
   requireReady()
   await refreshWalletInternal()
+}
+
+export async function getTransactionHistory(): Promise<any[]> {
+  requireReady()
+  const wallet = await ensureWalletInstance()
+
+  try {
+    // Fetch all transactions (incoming and outgoing)
+    const txs = await wallet.getTxs()
+
+    // Sort by timestamp (most recent first)
+    return Array.from(txs).sort((a, b) => {
+      const timeA = a.getTimestamp() || 0
+      const timeB = b.getTimestamp() || 0
+      return timeB - timeA
+    })
+  } catch (err) {
+    console.error('Failed to fetch transaction history:', err)
+    return []
+  }
 }
 
 export async function restoreWalletFromNostr(): Promise<WalletInfo> {

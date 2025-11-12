@@ -439,6 +439,7 @@ async function handleEmberNotification(event: NostrEvent, userPubkey: string): P
   if (!amount) return false
 
   const targetEvent = targetEventId ? await getTargetEvent(targetEventId) : null
+  const senderNote = event.content?.trim() || undefined
 
   const metadata = await getNotificationMetadata(event.pubkey)
 
@@ -449,7 +450,7 @@ async function handleEmberNotification(event: NostrEvent, userPubkey: string): P
     fromName: metadata?.name || metadata?.display_name || 'User',
     fromAvatar: metadata?.picture,
     eventId: targetEventId ?? event.id,
-    eventContent: targetEvent?.content?.substring(0, 180),
+    eventContent: senderNote || targetEvent?.content?.substring(0, 180),
     amount,
     txHash: payload?.txHash,
     createdAt: event.created_at,

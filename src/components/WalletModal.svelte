@@ -11,16 +11,21 @@
     restoreWalletFromNostr,
     sendMonero,
     deleteWallet,
+    getTransactionHistory,
     type WalletInfo,
   } from '$lib/wallet'
   import { toDataURL as qrToDataURL } from 'qrcode'
   import type { MoneroNode } from '$lib/wallet/nodes'
+  import LayoutGridIcon from 'lucide-svelte/icons/layout-grid'
+  import ClockIcon from 'lucide-svelte/icons/clock'
+  import ArrowDownIcon from 'lucide-svelte/icons/arrow-down'
+  import ArrowUpIcon from 'lucide-svelte/icons/arrow-up'
 
   const nodes: MoneroNode[] = getAvailableNodes()
 
   let importSeed = ''
   let activeTab: 'create' | 'import' = 'create'
-  let activePanel: 'overview' | 'deposit' | 'withdraw' = 'overview'
+  let activePanel: 'overview' | 'deposit' | 'withdraw' | 'history' = 'overview'
   let error: string | null = null
   let loading = false
   let restoreBusy = false
@@ -41,6 +46,9 @@
   let lastQrAddress: string | null = null
   let deleteBusy = false
   let restoreHeightOverride = ''
+  let transactions: any[] = []
+  let loadingHistory = false
+  let historyError: string | null = null
 
   $: isOpen = $showWallet
   $: walletMode = !$walletState.hasWallet ? 'setup' : $walletState.isReady ? 'ready' : 'pending'
@@ -87,6 +95,9 @@
     qrError = null
     lastQrAddress = null
     restoreHeightOverride = ''
+    transactions = []
+    loadingHistory = false
+    historyError = null
   }
 
   function closeModal(): void {
@@ -277,6 +288,84 @@
       depositQr = null
     }
   }
+
+  function handleHistoryClick(): void {
+    activePanel = 'history'
+    if (transactions.length === 0) {
+      void loadTransactionHistory()
+    }
+  }
+
+  async function loadTransactionHistory(): Promise<void> {
+    if (loadingHistory) return
+    loadingHistory = true
+    historyError = null
+    try {
+      transactions = await getTransactionHistory()
+    } catch (err) {
+      console.error('Failed to load transaction history', err)
+      historyError = err instanceof Error ? err.message : 'Unable to load transaction history.'
+    } finally {
+      loadingHistory = false
+    }
+  }
+
+  function formatTxDate(timestamp: number | null): string {
+    if (!timestamp) return 'Pending'
+    const date = new Date(timestamp)
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+
+  function formatTxTime(timestamp: number | null): string {
+    if (!timestamp) return ''
+    const date = new Date(timestamp)
+    return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  }
+
+  function getTxDirection(tx: any): 'in' | 'out' {
+    // Check if transaction has any incoming transfers
+    const incomingTransfers = tx.getIncomingTransfers?.() || []
+    const outgoingTransfer = tx.getOutgoingTransfer?.()
+
+    if (incomingTransfers.length > 0) return 'in'
+    if (outgoingTransfer) return 'out'
+
+    // Fallback: check if it's in the subaddresses we own
+    return tx.getIsIncoming?.() ? 'in' : 'out'
+  }
+
+  function getTxAmount(tx: any): number {
+    const direction = getTxDirection(tx)
+    const incomingTransfers = tx.getIncomingTransfers?.() || []
+    const outgoingTransfer = tx.getOutgoingTransfer?.()
+
+    if (direction === 'in' && incomingTransfers.length > 0) {
+      return incomingTransfers.reduce((sum: number, transfer: any) => {
+        return sum + (transfer.getAmount?.() || 0)
+      }, 0)
+    }
+
+    if (direction === 'out' && outgoingTransfer) {
+      return outgoingTransfer.getAmount?.() || 0
+    }
+
+    return 0
+  }
+
+  function formatXmr(atomic: number): string {
+    // Convert atomic units to XMR (1 XMR = 1e12 atomic units)
+    const xmr = atomic / 1_000_000_000_000
+    return xmr.toFixed(6)
+  }
+
+  function getTxHash(tx: any): string {
+    return tx.getHash?.() || tx.getId?.() || 'Unknown'
+  }
+
+  function shortenHash(hash: string): string {
+    if (hash.length <= 16) return hash
+    return `${hash.slice(0, 8)}...${hash.slice(-8)}`
+  }
 </script>
 
 {#if isOpen}
@@ -290,7 +379,7 @@
     <div class="relative w-full max-w-xl max-h-[calc(100vh-2rem)] overflow-y-auto rounded-3xl border border-dark-border/60 bg-dark-light/95 p-4 md:p-6 shadow-2xl">
       <header class="flex items-center justify-between gap-4">
         <div>
-          <h2 id="wallet-modal-title" class="text-lg font-semibold text-text-soft">Monstr Wallet</h2>
+          <h2 id="wallet-modal-title" class="text-lg font-semibold text-text-soft">Ember Wallet</h2>
           <p class="text-sm text-text-muted/75">
             {#if walletMode === 'setup'}
               Create or import a Monero wallet to send and receive tips.
@@ -408,24 +497,35 @@
           <div class="flex gap-2 rounded-2xl border border-dark-border/60 bg-dark/60 p-1 text-sm font-semibold text-text-muted">
             <button
               type="button"
-              class={`flex-1 rounded-xl px-4 py-2 transition ${activePanel === 'overview' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
+              class={`flex-1 rounded-xl px-3 py-2 transition flex items-center justify-center gap-2 ${activePanel === 'overview' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
               on:click={() => (activePanel = 'overview')}
             >
-              Overview
+              <LayoutGridIcon size={16} />
+              <span class="hidden sm:inline">Overview</span>
             </button>
             <button
               type="button"
-              class={`flex-1 rounded-xl px-4 py-2 transition ${activePanel === 'deposit' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
+              class={`flex-1 rounded-xl px-3 py-2 transition flex items-center justify-center gap-2 ${activePanel === 'history' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
+              on:click={handleHistoryClick}
+            >
+              <ClockIcon size={16} />
+              <span class="hidden sm:inline">History</span>
+            </button>
+            <button
+              type="button"
+              class={`flex-1 rounded-xl px-3 py-2 transition flex items-center justify-center gap-2 ${activePanel === 'deposit' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
               on:click={() => (activePanel = 'deposit')}
             >
-              Deposit
+              <ArrowDownIcon size={16} />
+              <span class="hidden sm:inline">Deposit</span>
             </button>
             <button
               type="button"
-              class={`flex-1 rounded-xl px-4 py-2 transition ${activePanel === 'withdraw' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
+              class={`flex-1 rounded-xl px-3 py-2 transition flex items-center justify-center gap-2 ${activePanel === 'withdraw' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
               on:click={() => (activePanel = 'withdraw')}
             >
-              Withdraw
+              <ArrowUpIcon size={16} />
+              <span class="hidden sm:inline">Withdraw</span>
             </button>
           </div>
 
@@ -554,7 +654,7 @@
                 </button>
               {:else}
                 <p class="mt-3 text-sm text-text-muted">
-                  Keep this phrase private. You’ll need it if you ever reinstall Monstr or move wallets.
+                  Keep this phrase private. You'll need it if you ever reinstall the app or move wallets.
                 </p>
               {/if}
             </div>
@@ -605,7 +705,7 @@
                 </p>
               </div>
             </div>
-          {:else}
+          {:else if activePanel === 'withdraw'}
             <form class="space-y-4" on:submit|preventDefault={handleSend}>
               <div>
                 <label for="withdraw-amount" class="text-xs uppercase tracking-[0.25em] text-text-muted">Amount to withdraw (XMR)</label>
@@ -677,6 +777,93 @@
                 Withdrawals send XMR directly from this lightweight wallet. Please move long-term holdings to a dedicated cold-storage wallet.
               </p>
             </form>
+          {:else if activePanel === 'history'}
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Transaction History</p>
+                <button
+                  type="button"
+                  class="rounded-full border border-dark-border/60 px-3 py-1 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white disabled:opacity-50"
+                  on:click={loadTransactionHistory}
+                  disabled={loadingHistory}
+                >
+                  {loadingHistory ? 'Loading…' : 'Refresh'}
+                </button>
+              </div>
+
+              {#if loadingHistory && transactions.length === 0}
+                <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-6 text-center text-sm text-text-muted">
+                  Loading transaction history...
+                </div>
+              {:else if historyError}
+                <div class="rounded-2xl border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-100">
+                  {historyError}
+                </div>
+              {:else if transactions.length === 0}
+                <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-6 text-center text-sm text-text-muted">
+                  No transactions yet. Deposit or receive Embers to see your history.
+                </div>
+              {:else}
+                <div class="space-y-2 max-h-96 overflow-y-auto">
+                  {#each transactions as tx (getTxHash(tx))}
+                    {@const direction = getTxDirection(tx)}
+                    {@const amount = getTxAmount(tx)}
+                    {@const hash = getTxHash(tx)}
+                    {@const timestamp = tx.getTimestamp?.() || null}
+                    {@const isConfirmed = tx.getIsConfirmed?.() || false}
+                    {@const confirmations = tx.getNumConfirmations?.() || 0}
+
+                    <div class="rounded-2xl border border-dark-border/60 bg-dark/50 p-4 hover:bg-dark/70 transition-colors">
+                      <div class="flex items-start justify-between gap-3">
+                        <div class="flex-1 min-w-0">
+                          <div class="flex items-center gap-2">
+                            <span class={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
+                              direction === 'in'
+                                ? 'bg-emerald-500/10 text-emerald-300'
+                                : 'bg-orange-500/10 text-orange-300'
+                            }`}>
+                              {direction === 'in' ? '↓' : '↑'}
+                            </span>
+                            <span class="text-sm font-semibold text-text-soft">
+                              {direction === 'in' ? 'Received' : 'Sent'}
+                            </span>
+                            {#if !isConfirmed}
+                              <span class="text-xs text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full">
+                                Pending
+                              </span>
+                            {/if}
+                          </div>
+                          <p class="mt-1 text-xs font-mono text-text-muted break-all">
+                            {shortenHash(hash)}
+                          </p>
+                          <p class="mt-1 text-xs text-text-muted">
+                            {formatTxDate(timestamp)} {formatTxTime(timestamp)}
+                            {#if isConfirmed}
+                              · {confirmations} confirmations
+                            {/if}
+                          </p>
+                        </div>
+                        <div class="text-right">
+                          <p class={`text-base font-semibold ${
+                            direction === 'in' ? 'text-emerald-300' : 'text-text-soft'
+                          }`}>
+                            {direction === 'in' ? '+' : '-'}{formatXmr(amount)} XMR
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+
+                <p class="text-xs text-center text-text-muted/70 pt-2">
+                  Showing {transactions.length} transaction{transactions.length === 1 ? '' : 's'}
+                </p>
+              {/if}
+
+              <p class="text-xs text-text-muted/80">
+                Transaction history is stored privately on your device. This data is not shared or backed up to Nostr.
+              </p>
+            </div>
           {/if}
         {/if}
       </section>
@@ -687,7 +874,7 @@
 
       {#if walletMode !== 'setup'}
         <p class="mt-4 text-center text-xs text-text-muted/70">
-          Monero tipping is in progress—wallets created here keep your keys on-device.
+          Ember Wallet keeps your keys on-device. Non-custodial Monero for tipping.
         </p>
       {/if}
     </div>

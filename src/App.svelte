@@ -15,6 +15,8 @@
     subscribeToFollowingFeed,
     subscribeToCirclesFeed,
     subscribeToLongReadsFeed,
+    subscribeToLongReadsFollowingFeed,
+    subscribeToLongReadsCirclesFeed,
   } from '$lib/feed-ndk'
   import { startNotificationListener, stopNotificationListener } from '$lib/notifications'
   import { hydrateWalletState } from '$lib/wallet'
@@ -45,17 +47,22 @@
     }
   })
 
+  // Track last feed source to avoid duplicate subscriptions
+  let lastFeedSource: string | null = null
+
   // switching tabs changes subscription here
-  $: if ($isInitialized) {
+  // Following AI_Guidelines: Be explicit about reactive dependencies
+  $: if ($isInitialized && $feedSource !== lastFeedSource) {
     const targetFeed = $feedSource
     const authed = $isAuthenticated
     const pubkey = $currentUser?.pubkey ?? null
+    lastFeedSource = targetFeed
 
     ;(async () => {
       // Stop all subscriptions and clear feed
       stopAllSubscriptions()
       clearFeed()
-      
+
       // Give subscriptions time to actually stop before starting new ones
       await new Promise(resolve => setTimeout(resolve, 100))
 
@@ -84,12 +91,25 @@
         await subscribeToLongReadsFeed()
         return
       }
+
+      if (targetFeed === 'long-reads-following') {
+        await subscribeToLongReadsFollowingFeed()
+        return
+      }
+
+      if (targetFeed === 'long-reads-circles') {
+        await subscribeToLongReadsCirclesFeed()
+        return
+      }
     })().catch(err => {
       console.error('Subscription error:', err)
       feedError.set(String(err))
       feedLoading.set(false)
     })
   }
+
+  // Filtering is now handled automatically by the derived feedEvents store in feed.ts
+  // Following AI_Guidelines: Logic lives in stores, reactivity is automatic
 
   // manage notifications and cleanup on logout
   $: if ($isAuthenticated && $currentUser?.pubkey) {

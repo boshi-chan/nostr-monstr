@@ -32,14 +32,16 @@ export interface NostrAddressableEvent {
 }
 
 /**
- * Parse a nostr: URI
+ * Parse a nostr: URI or bare NIP-19 identifier
  */
 export function parseNostrURI(uri: string): NostrURI | null {
-  if (!uri.startsWith('nostr:')) {
-    return null
+  // Handle both "nostr:nevent1..." and bare "nevent1..." formats
+  let encoded: string
+  if (uri.startsWith('nostr:')) {
+    encoded = uri.slice(6) // Remove 'nostr:' prefix
+  } else {
+    encoded = uri
   }
-
-  const encoded = uri.slice(6) // Remove 'nostr:' prefix
 
   try {
     // Determine type from prefix
@@ -85,16 +87,17 @@ export function parseNostrURI(uri: string): NostrURI | null {
 }
 
 /**
- * Extract all nostr: URIs from text
+ * Extract all nostr: URIs and bare NIP-19 identifiers from text
  */
 export function extractNostrURIs(text: string): string[] {
-  const regex = /nostr:(note1|nevent1|npub1|nprofile1|naddr1)[a-z0-9]+/gi
+  const regex = /(?:nostr:)?(note1|nevent1|npub1|nprofile1|naddr1)[a-z0-9]+/gi
   const matches = text.match(regex)
-  return matches ?? []
+  // Normalize all to include nostr: prefix
+  return matches?.map(m => m.startsWith('nostr:') ? m : `nostr:${m}`) ?? []
 }
 
 /**
- * Replace nostr: URIs in text with placeholders
+ * Replace nostr: URIs and bare NIP-19 identifiers in text with placeholders
  * Returns: { text with placeholders, map of placeholder -> URI }
  */
 export function replaceNostrURIs(text: string): {
@@ -102,7 +105,7 @@ export function replaceNostrURIs(text: string): {
   uris: Map<string, NostrURI>
 } {
   const uris = new Map<string, NostrURI>()
-  const regex = /nostr:(note1|nevent1|npub1|nprofile1|naddr1)[a-z0-9]+/gi
+  const regex = /(?:nostr:)?(note1|nevent1|npub1|nprofile1|naddr1)[a-z0-9]+/gi
 
   let counter = 0
   const replacedText = text.replace(regex, (match) => {

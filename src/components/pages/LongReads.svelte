@@ -1,19 +1,36 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { feedEvents, feedLoading, feedError } from '$stores/feed'
-  import { feedSource } from '$stores/feedSource'
+  import { feedSource, lastLongReadsFeed, type LongReadsFeed } from '$stores/feedSource'
   import type { NostrEvent } from '$types/nostr'
   import Skeleton from '../Skeleton.svelte'
   import LongReadPreview from '../LongReadPreview.svelte'
   import { openPost, openProfile } from '$stores/router'
+  import UsersIcon from '../icons/UsersIcon.svelte'
+  import CircleIcon from '../icons/CircleIcon.svelte'
+
+  const feedTabs: { id: LongReadsFeed; label: string; icon: typeof UsersIcon }[] = [
+    { id: 'long-reads-following', label: 'Following', icon: UsersIcon },
+    { id: 'long-reads-circles', label: 'Circles', icon: CircleIcon },
+  ]
 
   // Filter for kind 30023 (long-form) events only
   let longReadEvents: NostrEvent[] = []
   $: longReadEvents = $feedEvents.filter(event => event.kind === 30023)
 
+  let activeFeed: LongReadsFeed = 'long-reads-following'
+  $: if ($feedSource === 'long-reads-following' || $feedSource === 'long-reads-circles') {
+    activeFeed = $feedSource
+  }
+
   onMount(() => {
-    feedSource.set('long-reads')
+    // Start with last used long reads feed, or default to following
+    feedSource.set($lastLongReadsFeed)
   })
+
+  function setActiveFeed(tab: LongReadsFeed) {
+    feedSource.set(tab)
+  }
 
   function handleEventSelect(event: NostrEvent) {
     openPost(event, 'long-reads')
@@ -25,11 +42,25 @@
 </script>
 
 <div class="w-full pb-24 md:pb-0">
-  <div class="sticky top-0 z-20 border-b border-dark-border/60 bg-dark/50 backdrop-blur-2xl backdrop-saturate-150 supports-[backdrop-filter]:bg-dark/30">
-    <div class="mx-auto flex h-16 w-full max-w-3xl items-center justify-between px-4 md:h-20 md:px-6">
-      <div>
-        <h1 class="text-lg font-semibold text-white md:text-xl">Long Reads</h1>
-        <p class="text-xs text-text-muted md:text-sm">Deep dives and longer-form posts from your network</p>
+  <div class="sticky top-0 z-20 bg-dark/80 backdrop-blur-3xl backdrop-saturate-150 supports-[backdrop-filter]:bg-dark/60">
+    <div class="flex h-14 md:h-16 w-full items-center justify-between px-3 md:px-6 gap-2 border-b border-dark-border/60">
+      <!-- Feed tabs -->
+      <div class="flex flex-1 w-full items-center gap-3 overflow-x-auto">
+        {#each feedTabs as tab (tab.id)}
+          {@const isActive = activeFeed === tab.id}
+          <button
+            type="button"
+            class={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition ${
+              isActive
+                ? 'bg-primary text-dark shadow-sm shadow-primary/30'
+                : 'text-text-muted hover:text-text-soft'
+            }`}
+            on:click={() => setActiveFeed(tab.id)}
+          >
+            <svelte:component this={tab.icon} size={16} />
+            <span>{tab.label}</span>
+          </button>
+        {/each}
       </div>
     </div>
   </div>
