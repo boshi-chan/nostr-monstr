@@ -19,12 +19,18 @@
   let activeTab: SettingsTab = 'profile'
 
   // Profile state
+  // Following AI_Guidelines: Extract store value for reactivity
+  let shareAddress = false
+  $: shareAddress = $walletState.shareAddress
+
   async function handleShareToggle(event: Event): Promise<void> {
     const input = event.currentTarget as HTMLInputElement
     try {
       await setWalletSharePreference(input.checked)
     } catch (err) {
       console.error('Failed to update share preference', err)
+      // Revert checkbox on error
+      input.checked = !input.checked
     }
   }
 
@@ -489,10 +495,10 @@
                 <input
                   type="checkbox"
                   class="h-4 w-4 accent-primary"
-                  checked={$walletState.shareAddress}
+                  checked={shareAddress}
                   on:change={handleShareToggle}
                 />
-                <span>{$walletState.shareAddress ? 'On' : 'Off'}</span>
+                <span>{shareAddress ? 'On' : 'Off'}</span>
               </label>
             </div>
           </div>

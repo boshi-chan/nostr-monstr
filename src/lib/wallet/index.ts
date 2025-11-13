@@ -664,9 +664,15 @@ export async function initWallet(
   void publishWalletBackup()
   void refreshWalletInternal()
 
-  // CRITICAL FIX: Don't sync profile address immediately after wallet creation!
+  // Sync address to profile metadata if sharing is enabled
   if (shareAddressPreference) {
-    console.log('⏳ Wallet created. Profile address sync will happen when metadata is ready.')
+    console.log('📝 Syncing Monero address to profile metadata...')
+    try {
+      await syncProfileAddress(address)
+      console.log('✅ Monero address published to profile')
+    } catch (err) {
+      console.warn('⚠️ Failed to sync address to profile (non-fatal):', err)
+    }
   }
 
   return {
@@ -755,9 +761,18 @@ export async function sendMonero(options: SendMoneroOptions): Promise<SendMonero
   const txHash = tx.getHash()
   const fee = moneroLib.MoneroUtils.atomicUnitsToXmr(tx.getFee())
 
-  await refreshWalletInternal()
-  void publishWalletBackup()
-  await publishEmberReceipt(options.amount, txHash ?? '', options)
+  // PERFORMANCE OPTIMIZATION: Run wallet refresh and receipt publishing in background
+  // This allows the UI to close the "Sending..." modal immediately after transaction is sent
+  // instead of waiting 45-60 seconds for wallet sync and Nostr event publishing
+  void (async () => {
+    try {
+      await refreshWalletInternal()
+      void publishWalletBackup()
+      await publishEmberReceipt(options.amount, txHash ?? '', options)
+    } catch (err) {
+      console.warn('Background post-send operations failed:', err)
+    }
+  })()
 
   return {
     txHash: txHash ?? '',

@@ -15,6 +15,8 @@
   import { activeRoute, openPost, openProfile, goBack } from '$stores/router'
   import type { NavTab } from '$stores/nav'
   import ChevronLeftIcon from 'lucide-svelte/icons/chevron-left'
+  import SearchIcon from 'lucide-svelte/icons/search'
+  import XIcon from 'lucide-svelte/icons/x'
 
   export let pubkey: string | null = null
   export let originTab: NavTab | null = null
@@ -41,6 +43,7 @@
   let posts: NostrEvent[] = []
   let error: string | null = null
   let lastLoadedPubkey: string | null = null
+  let searchQuery = ''
 
   // Filter posts based on profile mode
   // Following AI_Guidelines: Avoid using $ syntax inside reactive statements
@@ -51,20 +54,50 @@
   $: likedEventsSet = $likedEvents
 
   $: filteredPosts = posts.filter(event => {
+    // First apply filter mode
+    let passesMode = false
     switch (profileMode) {
       case 'all':
-        return true
+        passesMode = true
+        break
       case 'replies':
-        return isReply(event)
+        passesMode = isReply(event)
+        break
       case 'media':
-        return hasMedia(event)
+        passesMode = hasMedia(event)
+        break
       case 'reposts':
-        return isRepostEvent(event)
+        passesMode = isRepostEvent(event)
+        break
       case 'likes':
-        return likedEventsSet.has(event.id)
+        passesMode = likedEventsSet.has(event.id)
+        break
       default:
-        return true
+        passesMode = true
     }
+
+    if (!passesMode) return false
+
+    // Then apply search query
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return true
+
+    // Search in content
+    const content = event.content?.toLowerCase() || ''
+    if (content.includes(query)) return true
+
+    // Search in mentioned user names (if metadata is available)
+    const mentionedPubkeys = event.tags
+      .filter(t => t[0] === 'p')
+      .map(t => t[1])
+
+    for (const pubkey of mentionedPubkeys) {
+      const metadata = $metadataCache.get(pubkey)
+      const displayName = getDisplayName(pubkey, metadata)
+      if (displayName.toLowerCase().includes(query)) return true
+    }
+
+    return false
   })
 
   $: authUser = $currentUser
@@ -114,6 +147,7 @@
     error = null
     followingCount = 0
     followersCount = 0
+    searchQuery = '' // Clear search when switching profiles
     if (setLoading) {
       loadingStats = true
       loadingPosts = true
@@ -351,6 +385,29 @@
         <ProfileFilterBar />
       </div>
 
+      <!-- Search Bar -->
+      <div class="mb-4">
+        <div class="relative">
+          <SearchIcon class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+          <input
+            type="text"
+            placeholder="Search posts..."
+            bind:value={searchQuery}
+            class="w-full rounded-full bg-dark-light/50 pl-10 pr-10 py-2.5 text-sm text-text-soft placeholder-text-muted outline-none transition-colors focus:bg-dark-light/70 border border-dark-border/30 focus:border-primary/40"
+          />
+          {#if searchQuery}
+            <button
+              type="button"
+              on:click={() => searchQuery = ''}
+              class="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1 text-text-muted transition-colors hover:bg-dark-light/60 hover:text-text-soft"
+              aria-label="Clear search"
+            >
+              <XIcon class="h-4 w-4" />
+            </button>
+          {/if}
+        </div>
+      </div>
+
       <div class="flex items-center justify-between px-2 md:px-1">
         <h2 class="text-lg font-semibold text-white md:text-xl">
           {isOwnProfile ? 'Your Posts' : `${displayName}'s Posts`}
@@ -377,7 +434,12 @@
           </div>
         {:else if filteredPosts.length === 0}
           <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-6 text-center text-sm text-text-muted">
-            No posts match the selected filter.
+            {#if searchQuery.trim()}
+              <p>No posts found matching "{searchQuery}"</p>
+              <p class="mt-2 text-xs">Try different keywords or clear the search</p>
+            {:else}
+              No posts match the selected filter.
+            {/if}
           </div>
         {:else}
           {#each filteredPosts as post (post.id)}
