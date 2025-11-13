@@ -82,6 +82,12 @@ export const repostedEvents = writable<Set<string>>(new Set())
 // Zapped events (track which we've zapped)
 export const zappedEvents = writable<Map<string, number>>(new Map()) // eventId -> amount
 
+// Aggregate engagement counts
+export const likeCounts = writable<Map<string, number>>(new Map())
+export const repostCounts = writable<Map<string, number>>(new Map())
+export const zapTotals = writable<Map<string, number>>(new Map()) // total sats per event
+export const replyCounts = writable<Map<string, number>>(new Map())
+
 // Compose modal state
 export const showCompose = writable(false)
 export const composeReplyTo = writable<NostrEvent | null>(null)

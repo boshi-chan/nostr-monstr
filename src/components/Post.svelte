@@ -7,6 +7,10 @@
     showCompose,
     composeReplyTo,
     feedEvents,
+    likeCounts,
+    repostCounts,
+    zapTotals,
+    replyCounts,
   } from '$stores/feed'
   import {
     publishReaction,
@@ -35,6 +39,7 @@
   import { showEmberModal, emberTarget } from '$stores/wallet'
   import { emberTotals, ensureEmberTotal } from '$stores/ember'
   import { openZapModal } from '$stores/nwc'
+  import { queueEngagementHydration } from '$lib/engagement'
 
   export let event: NostrEvent
   export let onSelect: ((event: NostrEvent) => void) | undefined = undefined
@@ -51,6 +56,15 @@
   let zapAmount = 0
   let isZapped = false
   let emberAmount = 0
+
+  let aggregateLikeCount = 0
+  let aggregateRepostCount = 0
+  let aggregateZapTotal = 0
+  let aggregateReplyCount = 0
+  let displayLikeCount = 0
+  let displayRepostCount = 0
+  let displayZapAmount = 0
+  let displayReplyCount = 0
 
   let wrapperParsed = parseContent(event)
   $: wrapperParsed = parseContent(event)
@@ -100,6 +114,14 @@
   $: isReposted = $repostedEvents.has(actionableEvent.id)
   $: zapAmount = $zappedEvents.get(actionableEvent.id) ?? 0
   $: isZapped = zapAmount > 0
+  $: aggregateLikeCount = $likeCounts.get(actionableEvent.id) ?? 0
+  $: aggregateRepostCount = $repostCounts.get(actionableEvent.id) ?? 0
+  $: aggregateZapTotal = $zapTotals.get(actionableEvent.id) ?? 0
+  $: aggregateReplyCount = $replyCounts.get(actionableEvent.id) ?? 0
+  $: displayLikeCount = Math.max(aggregateLikeCount, isLiked ? 1 : 0)
+  $: displayRepostCount = Math.max(aggregateRepostCount, isReposted ? 1 : 0)
+  $: displayZapAmount = Math.max(aggregateZapTotal, zapAmount)
+  $: displayReplyCount = Math.max(aggregateReplyCount, replyCount ?? 0)
   $: {
     const totals = $emberTotals
     emberAmount = totals.get(actionableEvent.id) ?? 0
@@ -139,6 +161,7 @@
   let menuOpen = false
   let reposterMetadata: UserMetadata | undefined = undefined
   let reposterDisplay: string | null = null
+  let lastHydratedActionableId: string | null = null
 
   $: if (lastEventId !== event.id) {
     lastEventId = event.id
@@ -154,6 +177,11 @@
   $: reposterDisplay = isRepostWrapper
     ? getDisplayName(event.pubkey, reposterMetadata) || event.pubkey.slice(0, 8)
     : null
+
+  $: if (actionableEvent?.id && lastHydratedActionableId !== actionableEvent.id) {
+    lastHydratedActionableId = actionableEvent.id
+    queueEngagementHydration([actionableEvent.id])
+  }
 
   async function handleLike() {
     if (likeLoading) return
@@ -378,7 +406,7 @@
   }
 
   const baseActionClass =
-    'group flex items-center gap-2 rounded-md px-2 py-1 text-text-muted transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none'
+    'group flex items-center gap-2 rounded-md px-2 py-1 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none'
 </script>
 
 <svelte:window on:click={handleWindowClick} on:keydown={handleWindowKeydown} />
@@ -618,27 +646,27 @@
             on:click|stopPropagation={handleLike}
             disabled={likeLoading}
             class={`${baseActionClass} hover:text-rose-400 hover:bg-rose-400/5 ${
-              isLiked ? 'text-rose-400/80' : ''
+              isLiked ? 'text-rose-400/80' : 'text-text-muted'
             }`}
             title="Like"
           >
             <LikeIcon size={18} color="currentColor" strokeWidth={1.75} filled={isLiked} />
-            {#if isLiked}
-              <span class="text-xs font-medium">1</span>
+            {#if displayLikeCount > 0}
+              <span class="text-xs font-medium">{displayLikeCount}</span>
             {/if}
           </button>
 
           <!-- Comment -->
           <button
             on:click|stopPropagation={handleReply}
-            class={`${baseActionClass} hover:text-primary hover:bg-primary/5 ${
-              replyCount > 0 ? 'text-primary/80' : ''
+            class={`${baseActionClass} hover:text-sky-400 hover:bg-sky-400/10 ${
+              displayReplyCount > 0 ? 'text-sky-300' : 'text-text-muted'
             }`}
             title="Comment"
           >
             <CommentIcon size={18} color="currentColor" strokeWidth={1.75} />
-            {#if replyCount > 0}
-              <span class="text-xs font-medium">{replyCount}</span>
+            {#if displayReplyCount > 0}
+              <span class="text-xs font-medium">{displayReplyCount}</span>
             {/if}
           </button>
 
@@ -647,13 +675,13 @@
             on:click|stopPropagation={handleRepost}
             disabled={repostActionLoading}
             class={`${baseActionClass} hover:text-emerald-400 hover:bg-emerald-400/5 ${
-              isReposted ? 'text-emerald-400/80' : ''
+              isReposted ? 'text-emerald-400/80' : 'text-text-muted'
             }`}
             title="Repost"
           >
             <RepostIcon size={18} color="currentColor" strokeWidth={1.75} />
-            {#if isReposted}
-              <span class="text-xs font-medium">1</span>
+            {#if displayRepostCount > 0}
+              <span class="text-xs font-medium">{displayRepostCount}</span>
             {/if}
           </button>
 
@@ -662,13 +690,13 @@
             on:click|stopPropagation={handleZap}
             disabled={zapLoading}
             class={`${baseActionClass} hover:text-yellow-400 hover:bg-yellow-400/5 ${
-              isZapped ? 'text-yellow-400/80' : ''
+              isZapped ? 'text-yellow-400/80' : 'text-text-muted'
             }`}
-            title="Zap {zapAmount > 0 ? zapAmount + ' sats' : ''}"
+            title="Zap {displayZapAmount > 0 ? displayZapAmount + ' sats' : ''}"
           >
             <ZapIcon size={18} color="currentColor" strokeWidth={1.75} />
-            {#if zapAmount > 0}
-              <span class="text-xs font-medium">{zapAmount}</span>
+            {#if displayZapAmount > 0}
+              <span class="text-xs font-medium">{Math.round(displayZapAmount)}</span>
             {/if}
           </button>
 

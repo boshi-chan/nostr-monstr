@@ -25,6 +25,12 @@ import { feedFilters } from '$stores/feedFilters'
 import type { NostrEvent } from '$types/nostr'
 import { NDKEvent, type NDKSubscriptionOptions } from '@nostr-dev-kit/ndk'
 import { parseContent, isReply, isRepostEvent } from './content'
+import {
+  queueEngagementHydration,
+  incrementLikeCount,
+  incrementRepostCount,
+} from '$lib/engagement'
+import { persistInteractionsSnapshot } from '$lib/interaction-cache'
 
 const subscriptionRefs = new Map<string, any>()
 const eventCache = new Map<string, NostrEvent>()
@@ -76,6 +82,25 @@ function setsEqual(a: Set<string>, b: Set<string>): boolean {
     }
   }
   return true
+}
+
+function collectEngagementTargets(event: NostrEvent): string[] {
+  const targets = new Set<string>()
+  targets.add(event.id)
+
+  if (isRepostEvent(event)) {
+    try {
+      const parsed = parseContent(event)
+      const nestedId = parsed.repostId ?? parsed.nestedEvent?.id ?? null
+      if (nestedId) {
+        targets.add(nestedId)
+      }
+    } catch (err) {
+      console.warn('Failed to parse repost while collecting engagement targets:', err)
+    }
+  }
+
+  return Array.from(targets)
 }
 
 /**
@@ -160,6 +185,12 @@ function flushPendingEvents(): void {
   }
 
   if (eventsToMerge.length > 0) {
+    const engagementIds: string[] = []
+    for (const event of eventsToMerge) {
+      engagementIds.push(...collectEngagementTargets(event))
+    }
+    queueEngagementHydration(engagementIds)
+
     unfilteredFeedEvents.update(existing => {
       const combined = [...eventsToMerge, ...existing]
       combined.sort((a, b) => b.created_at - a.created_at)
@@ -888,6 +919,7 @@ export function getEventById(id: string): NostrEvent | undefined {
 export async function fetchEventById(id: string): Promise<NostrEvent | null> {
   const cached = getEventById(id)
   if (cached) {
+    queueEngagementHydration(collectEngagementTargets(cached))
     return cached
   }
 
@@ -913,6 +945,7 @@ export async function fetchEventById(id: string): Promise<NostrEvent | null> {
     const raw = (event as NDKEvent).rawEvent?.() ?? (event as unknown as NostrEvent)
     eventCache.set(raw.id, raw)
     void fetchUserMetadata(raw.pubkey)
+    queueEngagementHydration(collectEngagementTargets(raw))
 
     return raw
   } catch (err) {
@@ -1077,6 +1110,8 @@ export async function publishReaction(eventId: string, emoji: string = '+'): Pro
 
   await ndkEvent.sign()
   await ndkEvent.publish()
+
+  incrementLikeCount(eventId, 1)
 }
 
 /**
@@ -1101,6 +1136,8 @@ export async function publishRepost(event: NostrEvent): Promise<void> {
 
   await ndkEvent.sign()
   await ndkEvent.publish()
+
+  incrementRepostCount(event.id, 1)
 }
 
 /**
@@ -1210,6 +1247,8 @@ export async function loadUserInteractions(): Promise<void> {
     }
     zappedEvents.set(zappedEventMap)
     console.log(`Loaded ${zappedEventMap.size} zapped events`)
+
+    persistInteractionsSnapshot()
   } catch (err) {
     console.error('Failed to load user interactions:', err)
   }

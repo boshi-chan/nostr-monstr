@@ -17,10 +17,16 @@
     subscribeToLongReadsFeed,
     subscribeToLongReadsFollowingFeed,
     subscribeToLongReadsCirclesFeed,
+    loadUserInteractions,
   } from '$lib/feed-ndk'
   import { startNotificationListener, stopNotificationListener } from '$lib/notifications'
   import { hydrateWalletState } from '$lib/wallet'
   import { initWalletLifecycle } from '$lib/wallet/lifecycle'
+  import {
+    hydrateInteractionsFromCache,
+    startInteractionPersistence,
+    stopInteractionPersistence,
+  } from '$lib/interaction-cache'
 
   // force reactivity for feedSource
   $: $feedSource
@@ -47,8 +53,17 @@
     }
   })
 
+  onMount(() => {
+    startInteractionPersistence()
+    return () => {
+      stopInteractionPersistence()
+    }
+  })
+
   // Track last feed source to avoid duplicate subscriptions
   let lastFeedSource: string | null = null
+  let interactionsLoadedFor: string | null = null
+  let interactionCacheHydratedFor: string | null = null
 
   // switching tabs changes subscription here
   // Following AI_Guidelines: Be explicit about reactive dependencies
@@ -113,6 +128,10 @@
 
   // manage notifications and cleanup on logout
   $: if ($isAuthenticated && $currentUser?.pubkey) {
+    if (interactionCacheHydratedFor !== $currentUser.pubkey) {
+      hydrateInteractionsFromCache($currentUser.pubkey)
+      interactionCacheHydratedFor = $currentUser.pubkey
+    }
     startNotificationListener($currentUser.pubkey)
   } else {
     stopNotificationListener()
@@ -120,6 +139,19 @@
     clearFeed()
     following.set(new Set())
     circles.set(new Set())
+    interactionCacheHydratedFor = null
+  }
+
+  // Load historical interactions (likes, reposts, zaps) once per session per user
+  $: if ($isInitialized && $isAuthenticated && $currentUser?.pubkey) {
+    if (interactionsLoadedFor !== $currentUser.pubkey) {
+      interactionsLoadedFor = $currentUser.pubkey
+      loadUserInteractions().catch(err => {
+        console.error('Failed to load user interactions:', err)
+      })
+    }
+  } else {
+    interactionsLoadedFor = null
   }
 </script>
 
