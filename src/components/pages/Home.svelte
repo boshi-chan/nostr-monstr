@@ -57,7 +57,7 @@ let activeFeed: FeedSource = 'following'
             on:click={() => setActiveFeed(tab.id)}
             aria-label={tab.label}
           >
-            <svelte:component this={tab.icon} size={16} />
+            <svelte:component this={tab.icon} size={20} strokeWidth={2} />
             <span class="hidden md:inline">{tab.label}</span>
           </button>
         {/each}
@@ -71,7 +71,7 @@ let activeFeed: FeedSource = 'following'
         title="Search"
         aria-label="Search"
       >
-        <SearchIcon size={18} color="currentColor" strokeWidth={1.6} />
+        <SearchIcon size={20} color="currentColor" strokeWidth={2} />
       </button>
     </div>
 

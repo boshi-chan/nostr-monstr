@@ -19,7 +19,7 @@
   $: isMessagesTab = $activeRoute.type === 'page' && $activeRoute.tab === 'messages'
 </script>
 
-<div class="flex h-screen w-screen flex-col bg-dark">
+<div class="flex h-screen w-screen flex-col bg-dark" style="height: 100dvh;">
   <WalletStatusBar />
   <div class="flex flex-1 flex-col overflow-hidden md:flex-row">
     <!-- Left sidebar for desktop -->
@@ -28,7 +28,7 @@
     </div>
 
     <!-- Main content -->
-    <main class={`flex-1 bg-transparent ${isMessagesTab ? 'overflow-hidden pb-16 md:pb-0' : 'overflow-y-auto'}`}>
+    <main class={`flex-1 bg-transparent ${isMessagesTab ? 'overflow-hidden pb-20 md:pb-0' : 'overflow-y-auto pb-20 md:pb-0'}`}>
       {#if $activeRoute.type === 'page'}
         {#if $activeRoute.tab === 'home'}
           <Home />

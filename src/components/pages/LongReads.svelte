@@ -57,7 +57,7 @@
             }`}
             on:click={() => setActiveFeed(tab.id)}
           >
-            <svelte:component this={tab.icon} size={16} />
+            <svelte:component this={tab.icon} size={20} strokeWidth={2} />
             <span>{tab.label}</span>
           </button>
         {/each}

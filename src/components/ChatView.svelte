@@ -4,6 +4,7 @@
   import type { DirectMessage } from '$types/dm'
   import { getCurrentNDKUser } from '$lib/ndk'
   import { getDisplayName, getAvatarUrl } from '$lib/metadata'
+  import { openProfile } from '$stores/router'
   import InfoIcon from 'lucide-svelte/icons/info'
   import MessageCircleMore from 'lucide-svelte/icons/message-circle-more'
 
@@ -72,26 +73,34 @@
   function isOwnMessage(senderPubkey: string) {
     return senderPubkey === currentUser?.pubkey
   }
+
+  function handleProfileClick(pubkey: string) {
+    openProfile(pubkey, 'messages')
+  }
 </script>
 
 <div class="flex h-full flex-col overflow-hidden bg-dark">
   {#if $activeConversationData}
     <div class="flex-shrink-0 border-b border-dark-border/30 bg-dark-light/40 px-4 py-3 md:px-6 md:py-4">
       <div class="flex items-center justify-between">
-        <div class="flex items-center gap-3">
+        <button
+          type="button"
+          on:click={() => $activeConversationData.participantPubkey && handleProfileClick($activeConversationData.participantPubkey)}
+          class="flex items-center gap-3 cursor-pointer transition-opacity hover:opacity-80"
+        >
           {#if $activeConversationData.participantPubkey}
             {#if getSenderAvatar($activeConversationData.participantPubkey)}
-              <img src={getSenderAvatar($activeConversationData.participantPubkey)} class="h-10 w-10 rounded-full object-cover" />
+              <img src={getSenderAvatar($activeConversationData.participantPubkey)} alt={getSenderName($activeConversationData.participantPubkey)} class="h-10 w-10 rounded-full object-cover" />
             {:else}
               <div class="flex h-10 w-10 items-center justify-center rounded-full bg-primary/20 text-sm font-semibold text-primary">{getSenderInitial($activeConversationData.participantPubkey)}</div>
             {/if}
 
-            <div class="min-w-0">
+            <div class="min-w-0 text-left">
               <h2 class="text-sm font-semibold text-text-soft truncate">{getSenderName($activeConversationData.participantPubkey)}</h2>
               <p class="text-xs text-text-muted truncate">@{$activeConversationData.participantPubkey.slice(0, 8)}</p>
             </div>
           {/if}
-        </div>
+        </button>
         <button class="flex-shrink-0 rounded-full p-2 text-text-muted transition-colors hover:bg-dark-light/60 hover:text-text-soft"><InfoIcon class="h-5 w-5" /></button>
       </div>
     </div>
@@ -115,18 +124,28 @@
             {/if}
 
             <div class={`flex gap-2 ${isOwnMessage(group.sender) ? 'flex-row-reverse' : ''}`}>
-              <div class="mt-auto flex-shrink-0">
+              <button
+                type="button"
+                on:click={() => handleProfileClick(group.sender)}
+                class="mt-auto flex-shrink-0 cursor-pointer transition-opacity hover:opacity-80"
+              >
                 {#if getSenderAvatar(group.sender)}
-                  <img src={getSenderAvatar(group.sender)} class="h-8 w-8 rounded-full object-cover" />
+                  <img src={getSenderAvatar(group.sender)} alt={getSenderName(group.sender)} class="h-8 w-8 rounded-full object-cover" />
                 {:else}
                   <div class="flex h-8 w-8 items-center justify-center rounded-full bg-primary/20 text-xs font-semibold text-primary">{getSenderInitial(group.sender)}</div>
                 {/if}
-              </div>
+              </button>
 
               <div class={`flex w-full max-w-[65%] flex-col gap-1 ${isOwnMessage(group.sender) ? 'items-end' : 'items-start'}`}>
                 {#each group.messages as message, messageIndex (`${message.id}-${messageIndex}`)}
                   {#if !isOwnMessage(group.sender) && group.messages.indexOf(message) === 0}
-                    <p class="px-3 text-xs text-text-muted">{getSenderName(group.sender)}</p>
+                    <button
+                      type="button"
+                      on:click={() => handleProfileClick(group.sender)}
+                      class="px-3 text-xs text-text-muted cursor-pointer hover:text-text-soft transition-colors"
+                    >
+                      {getSenderName(group.sender)}
+                    </button>
                   {/if}
 
                   <div class={`rounded-3xl px-4 py-2 text-sm leading-relaxed break-words overflow-wrap-anywhere ${isOwnMessage(group.sender) ? 'bg-primary text-white' : 'bg-dark-light/60 text-text-soft'} ${message.failed ? 'opacity-50' : ''}`}>

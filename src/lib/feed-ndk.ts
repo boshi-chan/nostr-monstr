@@ -43,6 +43,7 @@ const SUBSCRIPTION_TIMEOUT = 8000 // 8 seconds
 const MAX_RETRIES = 2
 const RETRY_DELAY = 1000 // 1 second
 const HEX_PUBKEY_REGEX = /^[0-9a-f]{64}$/i
+const MAX_CIRCLE_AUTHORS = 400
 
 function isHexPubkey(value: unknown): value is string {
   return typeof value === 'string' && HEX_PUBKEY_REGEX.test(value)
@@ -56,6 +57,25 @@ function sanitizePubkeySet(values: Iterable<string>): Set<string> {
     }
   }
   return sanitized
+}
+
+function limitAuthors(values: Iterable<string>, limit = MAX_CIRCLE_AUTHORS): string[] {
+  const result: string[] = []
+  for (const value of values) {
+    if (result.length >= limit) break
+    result.push(value)
+  }
+  return result
+}
+
+function setsEqual(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false
+  for (const value of a) {
+    if (!b.has(value)) {
+      return false
+    }
+  }
+  return true
 }
 
 /**
@@ -382,6 +402,52 @@ function subscribeWithFilter(
   })
 }
 
+function stopSubscriptionsByLabel(label: FeedSource): void {
+  const idsToRemove: string[] = []
+  for (const [subId, sub] of subscriptionRefs.entries()) {
+    if (subId.startsWith(`${label}:`)) {
+      sub?.stop?.()
+      subscriptionRefs.delete(subId)
+      idsToRemove.push(subId)
+    }
+  }
+
+  if (idsToRemove.length > 0) {
+    activeSubscriptions.update(subs => {
+      const next = new Set(subs)
+      for (const id of idsToRemove) {
+        next.delete(id)
+      }
+      return next
+    })
+  }
+}
+
+function startCirclesSubscription(authors: string[], reason: 'cached' | 'fallback' | 'fresh'): void {
+  if (authors.length === 0) return
+
+  const limitedAuthors = limitAuthors(authors)
+  const sinceWindow = reason === 'fallback' ? 7 : 14
+
+  console.log(
+    `⚡ Subscribing to circles feed with ${limitedAuthors.length} authors (${reason})`
+  )
+
+  stopSubscriptionsByLabel('circles')
+
+  subscribeWithFilter(
+    {
+      authors: limitedAuthors,
+      kinds: [1, 6, 16],
+      limit: 250,
+      since: Math.floor(Date.now() / 1000) - 86400 * sinceWindow,
+    },
+    'circles'
+  )
+
+  feedLoading.set(false)
+}
+
 async function ensureFollowing(pubkey: string): Promise<Set<string>> {
   const existing = get(following)
   if (existing.size > 0) {
@@ -506,50 +572,50 @@ export async function subscribeToCirclesFeed(): Promise<void> {
       return
     }
 
-    // Check if we have cached circles to use immediately
-    const cache = get(circlesCache)
-    const cached = cache.get(user.pubkey)
-    const hasCachedCircles = cached && cached.pubkeys.size > 0
+    const liveCircles = get(circles)
+    const cacheEntry = get(circlesCache).get(user.pubkey)
+    let initialAuthorSet: Set<string> = liveCircles.size > 0
+      ? new Set(liveCircles)
+      : cacheEntry?.pubkeys
+        ? new Set(cacheEntry.pubkeys)
+        : new Set()
 
-    if (hasCachedCircles) {
-      // Use cached circles immediately - instant load!
-      console.log(`⚡ Using ${cached.pubkeys.size} cached circles for instant load`)
-      const authors = Array.from(cached.pubkeys)
-
-      subscribeWithFilter(
-        {
-          authors,
-          kinds: [1, 6, 16],
-          limit: 250,
-          since: Math.floor(Date.now() / 1000) - 86400 * 14,
-        },
-        'circles'
-      )
-
-      // Refresh circles in background for next time
-      void ensureCircles(followSet, user.pubkey)
+    if (initialAuthorSet.size > 0) {
+      startCirclesSubscription(Array.from(initialAuthorSet), 'cached')
     } else {
-      // No cache - need to fetch circles first, but do it fast
-      console.log('⏳ Fetching circles for first time...')
-      const circleSet = await ensureCircles(followSet, user.pubkey)
-
-      const authors = Array.from(circleSet)
-      if (authors.length === 0) {
-        feedLoading.set(false)
-        feedError.set('No second-degree contacts yet')
-        return
+      const fallbackAuthors = limitAuthors(followSet)
+      if (fallbackAuthors.length > 0) {
+        initialAuthorSet = new Set(fallbackAuthors)
+        console.log('⌛ Circles cache empty — using following fallback while graph builds')
+        startCirclesSubscription(fallbackAuthors, 'fallback')
       }
-
-      subscribeWithFilter(
-        {
-          authors,
-          kinds: [1, 6, 16],
-          limit: 250,
-          since: Math.floor(Date.now() / 1000) - 86400 * 14,
-        },
-        'circles'
-      )
     }
+
+    const initialSnapshot = new Set(initialAuthorSet)
+
+    void ensureCircles(followSet, user.pubkey)
+      .then(circleSet => {
+        if (circleSet.size === 0) {
+          if (initialSnapshot.size === 0) {
+            feedLoading.set(false)
+            feedError.set('No second-degree contacts yet')
+          }
+          return
+        }
+
+        if (setsEqual(circleSet, initialSnapshot)) {
+          return
+        }
+
+        startCirclesSubscription(Array.from(circleSet), 'fresh')
+      })
+      .catch(err => {
+        console.error('Failed to refresh circles graph:', err)
+        if (initialSnapshot.size === 0) {
+          feedLoading.set(false)
+        }
+        feedError.set(err instanceof Error ? err.message : String(err))
+      })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('Failed to subscribe to circles feed:', err)

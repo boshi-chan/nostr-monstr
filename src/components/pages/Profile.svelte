@@ -12,11 +12,13 @@
   import type { NostrEvent } from '$types/nostr'
   import type { User } from '$types/user'
   import type { UserMetadata } from '$types/user'
-  import { activeRoute, openPost, openProfile, goBack } from '$stores/router'
+  import { activeRoute, openPost, openProfile, goBack, navigateToPage } from '$stores/router'
   import type { NavTab } from '$stores/nav'
+  import { activeConversation } from '$stores/messages'
   import ChevronLeftIcon from 'lucide-svelte/icons/chevron-left'
   import SearchIcon from 'lucide-svelte/icons/search'
   import XIcon from 'lucide-svelte/icons/x'
+  import MailIcon from 'lucide-svelte/icons/mail'
 
   export let pubkey: string | null = null
   export let originTab: NavTab | null = null
@@ -280,6 +282,14 @@
     if (!pubkey) return
     openProfile(pubkey, getOriginTab())
   }
+
+  function handleOpenDM(): void {
+    if (!resolvedPubkey) return
+    // Set the active conversation to this user's pubkey
+    activeConversation.set(resolvedPubkey)
+    // Navigate to messages tab
+    navigateToPage('messages')
+  }
 </script>
 
 {#if targetPubkey}
@@ -337,7 +347,18 @@
 
             <div class="flex flex-col gap-3 md:items-end">
               {#if !isOwnProfile && resolvedPubkey}
-                <FollowButton pubkey={resolvedPubkey} size="md" />
+                <div class="flex gap-2">
+                  <button
+                    type="button"
+                    on:click={handleOpenDM}
+                    class="flex items-center justify-center gap-2 rounded-xl border border-dark-border/70 bg-dark px-4 py-2 text-sm font-medium text-text-soft transition-colors duration-200 hover:border-primary/60 hover:bg-dark-light hover:text-white touch-manipulation"
+                    title="Send message"
+                  >
+                    <MailIcon class="h-4 w-4" />
+                    <span class="hidden md:inline">Message</span>
+                  </button>
+                  <FollowButton pubkey={resolvedPubkey} size="md" />
+                </div>
               {/if}
               <div class="flex items-center gap-3 md:gap-6 rounded-2xl border border-dark-border/70 bg-dark px-3 md:px-6 py-3 md:py-4 shadow-md">
                 <div class="flex-1 text-center md:text-left">

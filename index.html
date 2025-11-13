@@ -3,10 +3,35 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#242C34" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="description" content="Monstr - Snappy Nostr client with Monero Embers" />
     <title>Monstr</title>
+    <style>
+      /* Support for iOS safe areas and dynamic viewport */
+      :root {
+        --sat: env(safe-area-inset-top);
+        --sar: env(safe-area-inset-right);
+        --sab: env(safe-area-inset-bottom);
+        --sal: env(safe-area-inset-left);
+      }
+
+      /* Prevent iOS bounce/overscroll */
+      html, body {
+        overscroll-behavior: none;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-x pan-y;
+      }
+
+      /* Support for dynamic viewport height (handles iOS Safari address bar) */
+      @supports (height: 100dvh) {
+        html {
+          height: 100dvh;
+        }
+      }
+    </style>
   </head>
   <body class="bg-dark text-white">
     <div id="app"></div>

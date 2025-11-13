@@ -4,6 +4,7 @@
   import { metadataCache } from '$stores/feed'
   import type { Conversation } from '$types/dm'
   import { loadConversation, loadConversations } from '$lib/messaging-simple'
+  import { openProfile } from '$stores/router'
   import SearchIcon from 'lucide-svelte/icons/search'
 
   onMount(() => {
@@ -97,6 +98,11 @@
     if (minutes > 0) return `${minutes}m ago`
     return 'Just now'
   }
+
+  function handleProfileClick(event: MouseEvent, pubkey: string) {
+    event.stopPropagation()
+    openProfile(pubkey, 'messages')
+  }
 </script>
 
 <div class="flex h-full flex-col bg-dark-light/40 md:border-r md:border-dark-border/50">
@@ -134,7 +140,11 @@
             }`}
           >
             <div class="flex items-start gap-3">
-              <div class="relative mt-0.5 flex-shrink-0">
+              <button
+                type="button"
+                on:click={(e) => conversation.participantPubkey && handleProfileClick(e, conversation.participantPubkey)}
+                class="relative mt-0.5 flex-shrink-0 cursor-pointer transition-opacity hover:opacity-80"
+              >
                 {#if getAvatarUrl(conversation)}
                   <img
                     src={getAvatarUrl(conversation)}
@@ -150,13 +160,17 @@
                 {#if ($unreadCounts.get(conversation.id) ?? 0) > 0}
                   <div class="absolute right-0 top-0 h-3 w-3 rounded-full bg-primary shadow-md" />
                 {/if}
-              </div>
+              </button>
 
               <div class="min-w-0 flex-1">
                 <div class="flex items-baseline justify-between gap-2">
-                  <h3 class="truncate text-sm font-semibold text-text-soft">
+                  <button
+                    type="button"
+                    on:click={(e) => conversation.participantPubkey && handleProfileClick(e, conversation.participantPubkey)}
+                    class="truncate text-sm font-semibold text-text-soft cursor-pointer hover:text-white transition-colors"
+                  >
                     {getDisplayName(conversation)}
-                  </h3>
+                  </button>
                   <span class="flex-shrink-0 text-xs text-text-muted">
                     {formatTime(conversation.lastUpdated)}
                   </span>

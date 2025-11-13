@@ -302,6 +302,10 @@
     historyError = null
     try {
       transactions = await getTransactionHistory()
+      console.log('📜 Loaded transaction history:', transactions.length, 'transactions')
+      if (transactions.length > 0) {
+        console.log('First transaction:', transactions[0])
+      }
     } catch (err) {
       console.error('Failed to load transaction history', err)
       historyError = err instanceof Error ? err.message : 'Unable to load transaction history.'
@@ -340,13 +344,21 @@
     const outgoingTransfer = tx.getOutgoingTransfer?.()
 
     if (direction === 'in' && incomingTransfers.length > 0) {
-      return incomingTransfers.reduce((sum: number, transfer: any) => {
-        return sum + (transfer.getAmount?.() || 0)
-      }, 0)
+      // Handle BigInt amounts from Monero
+      const totalBigInt = incomingTransfers.reduce((sum: bigint, transfer: any) => {
+        const amount = transfer.getAmount?.() || 0n
+        // Convert to BigInt if it's a number
+        const amountBigInt = typeof amount === 'bigint' ? amount : BigInt(amount)
+        return sum + amountBigInt
+      }, 0n)
+      // Convert BigInt to number
+      return Number(totalBigInt)
     }
 
     if (direction === 'out' && outgoingTransfer) {
-      return outgoingTransfer.getAmount?.() || 0
+      const amount = outgoingTransfer.getAmount?.() || 0
+      // Handle BigInt
+      return typeof amount === 'bigint' ? Number(amount) : Number(amount)
     }
 
     return 0
@@ -809,7 +821,7 @@
                     {@const direction = getTxDirection(tx)}
                     {@const amount = getTxAmount(tx)}
                     {@const hash = getTxHash(tx)}
-                    {@const timestamp = tx.getTimestamp?.() || null}
+                    {@const timestamp = tx.getTimestamp?.() || tx.getBlock?.()?.getTimestamp?.() || null}
                     {@const isConfirmed = tx.getIsConfirmed?.() || false}
                     {@const confirmations = tx.getNumConfirmations?.() || 0}
 

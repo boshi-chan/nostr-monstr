@@ -98,7 +98,7 @@
             <input
               bind:this={searchInput}
               type="text"
-              placeholder="Search posts or users..."
+              placeholder="Search posts, users, npubs, hashtags..."
               value={$searchQuery}
               on:input={handleInputChange}
               class="w-full bg-transparent text-lg text-text-soft placeholder-text-muted/50 outline-none"
@@ -209,9 +209,16 @@
                       <p class="text-sm font-semibold text-text-soft">
                         {('name' in result.data && result.data.name) || 'Anon'}
                       </p>
-                      <p class="text-xs text-text-muted truncate">
-                        {result.data.pubkey.slice(0, 16)}...
-                      </p>
+                      {#if result.data && 'nip05' in result.data && result.data.nip05}
+                        <p class="text-xs text-primary/80 truncate flex items-center gap-1">
+                          <span class="opacity-60">✓</span>
+                          {result.data.nip05}
+                        </p>
+                      {:else}
+                        <p class="text-xs text-text-muted truncate">
+                          {result.data.pubkey.slice(0, 16)}...
+                        </p>
+                      {/if}
                       {#if result.data && 'about' in result.data && result.data.about}
                         <p class="text-xs text-text-muted/70 line-clamp-1 mt-1">
                           {result.data.about}

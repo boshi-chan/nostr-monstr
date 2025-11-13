@@ -709,15 +709,53 @@ export async function getTransactionHistory(): Promise<any[]> {
   try {
     // Fetch all transactions (incoming and outgoing)
     const txs = await wallet.getTxs()
+    console.log('🔍 Raw txs from wallet.getTxs():', txs)
+    console.log('🔍 Number of transactions:', txs?.length || 0)
+
+    if (!txs || txs.length === 0) {
+      console.warn('⚠️ No transactions found in wallet')
+      return []
+    }
+
+    // Log first transaction to inspect available methods
+    if (txs.length > 0) {
+      console.log('🔍 First transaction methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(txs[0])))
+      console.log('🔍 First transaction sample:', {
+        hash: txs[0].getHash?.(),
+        height: txs[0].getHeight?.(),
+        timestamp: txs[0].getTimestamp?.(),
+        block: txs[0].getBlock?.(),
+        isConfirmed: txs[0].getIsConfirmed?.(),
+      })
+    }
 
     // Sort by timestamp (most recent first)
-    return Array.from(txs).sort((a, b) => {
-      const timeA = a.getTimestamp() || 0
-      const timeB = b.getTimestamp() || 0
+    // Try different timestamp methods
+    const sorted = Array.from(txs).sort((a, b) => {
+      let timeA = 0
+      let timeB = 0
+
+      // Try getTimestamp first
+      if (typeof a.getTimestamp === 'function') {
+        timeA = a.getTimestamp() || 0
+      } else if (a.getBlock?.()?.getTimestamp) {
+        // Try getting timestamp from block
+        timeA = a.getBlock().getTimestamp() || 0
+      }
+
+      if (typeof b.getTimestamp === 'function') {
+        timeB = b.getTimestamp() || 0
+      } else if (b.getBlock?.()?.getTimestamp) {
+        timeB = b.getBlock().getTimestamp() || 0
+      }
+
       return timeB - timeA
     })
+
+    console.log('✅ Returning', sorted.length, 'sorted transactions')
+    return sorted
   } catch (err) {
-    console.error('Failed to fetch transaction history:', err)
+    console.error('❌ Failed to fetch transaction history:', err)
     return []
   }
 }

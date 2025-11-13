@@ -2,10 +2,12 @@
   import { currentUser } from '$stores/auth'
   import { walletState, showWallet } from '$stores/wallet'
   import { metadataCache } from '$stores/feed'
-  import { getAvatarUrl, getNip05Display } from '$lib/metadata'
+  import { getAvatarUrl, getNip05Display, fetchUserMetadata } from '$lib/metadata'
   import { setWalletSharePreference, getAvailableNodes, setActiveNode } from '$lib/wallet'
   import { getRelaysFromNIP65, publishRelays, getDefaultRelays, isValidRelayUrl, type RelayConfig } from '$lib/relays'
+  import { updateProfileMetadata, type EditableProfileFields } from '$lib/profile'
   import { onMount } from 'svelte'
+  import { get } from 'svelte/store'
   import UserIcon from '../icons/UserIcon.svelte'
   import ServerIcon from '../icons/ServerIcon.svelte'
   import EmberIcon from '../icons/EmberIcon.svelte'
@@ -18,10 +20,33 @@
 
   let activeTab: SettingsTab = 'profile'
 
-  // Profile state
-  // Following AI_Guidelines: Extract store value for reactivity
+  // Profile editor state
+  let isEditingProfile = false
+  let profileSaving = false
+  let profileError: string | null = null
+  let profileSuccess: string | null = null
+  let profileDisplayNameInput = ''
+  let profileUsernameInput = ''
+  let profileAboutInput = ''
+  let profileWebsiteInput = ''
+  let profileNip05Input = ''
+  let profileAvatarInput = ''
+  let profileBannerInput = ''
+  let profileLud16Input = ''
+  let profileLud06Input = ''
+  let profileMoneroAddressInput = ''
+
+  // Wallet share preference mirror
   let shareAddress = false
   $: shareAddress = $walletState.shareAddress
+
+  // Ensure the current user's metadata is loaded before showing settings
+  $: if ($currentUser?.pubkey) {
+    const cachedMetadata = $metadataCache.get($currentUser.pubkey)
+    if (!cachedMetadata || Object.keys(cachedMetadata).length === 0) {
+      void fetchUserMetadata($currentUser.pubkey)
+    }
+  }
 
   async function handleShareToggle(event: Event): Promise<void> {
     const input = event.currentTarget as HTMLInputElement
@@ -31,6 +56,198 @@
       console.error('Failed to update share preference', err)
       // Revert checkbox on error
       input.checked = !input.checked
+    }
+  }
+
+  function resetProfileForm(): void {
+    profileDisplayNameInput = ''
+    profileUsernameInput = ''
+    profileAboutInput = ''
+    profileWebsiteInput = ''
+    profileNip05Input = ''
+    profileAvatarInput = ''
+    profileBannerInput = ''
+    profileLud16Input = ''
+    profileLud06Input = ''
+    profileMoneroAddressInput = ''
+  }
+
+  function hydrateProfileForm(): void {
+    const user = get(currentUser)
+    if (!user?.pubkey) {
+      resetProfileForm()
+      return
+    }
+
+    const metadata = get(metadataCache).get(user.pubkey)
+    profileDisplayNameInput = metadata?.display_name ?? user.display_name ?? user.name ?? ''
+    profileUsernameInput = metadata?.name ?? user.name ?? ''
+    profileAboutInput = metadata?.about ?? ''
+    profileWebsiteInput = metadata?.website ?? ''
+    profileNip05Input = metadata?.nip05 ?? ''
+    profileAvatarInput = metadata?.picture ?? ''
+    profileBannerInput = metadata?.banner ?? ''
+    profileLud16Input = metadata?.lud16 ?? ''
+    profileLud06Input = metadata?.lud06 ?? ''
+    profileMoneroAddressInput = metadata?.monero_address ?? ''
+  }
+
+  function startProfileEdit(): void {
+    const user = get(currentUser)
+    if (!user?.pubkey) {
+      profileError = 'You must be logged in to edit your profile.'
+      return
+    }
+
+    hydrateProfileForm()
+    profileError = null
+    profileSuccess = null
+    isEditingProfile = true
+  }
+
+  function cancelProfileEdit(): void {
+    resetProfileForm()
+    profileError = null
+    profileSuccess = null
+    profileSaving = false
+    isEditingProfile = false
+  }
+
+  function collectProfilePayload(): EditableProfileFields {
+    return {
+      display_name: profileDisplayNameInput,
+      name: profileUsernameInput,
+      about: profileAboutInput,
+      website: profileWebsiteInput,
+      nip05: profileNip05Input,
+      picture: profileAvatarInput,
+      banner: profileBannerInput,
+      lud16: profileLud16Input,
+      lud06: profileLud06Input,
+      monero_address: profileMoneroAddressInput
+    }
+  }
+
+  function normalizeProfileForm(form: EditableProfileFields): EditableProfileFields {
+    const cleaned: EditableProfileFields = { ...form }
+    const fields: (keyof EditableProfileFields)[] = [
+      'display_name',
+      'name',
+      'about',
+      'website',
+      'nip05',
+      'picture',
+      'banner',
+      'lud16',
+      'lud06',
+      'monero_address'
+    ]
+
+    for (const key of fields) {
+      const value = cleaned[key]
+      if (typeof value === 'string') {
+        const trimmed = value.trim()
+        if (trimmed.length === 0) {
+          delete cleaned[key]
+        } else if (key === 'about') {
+          cleaned[key] = trimmed
+        } else {
+          cleaned[key] = trimmed
+        }
+      }
+    }
+
+    if (cleaned.website) {
+      const hasProtocol = /^https?:\/\//i.test(cleaned.website)
+      cleaned.website = hasProtocol ? cleaned.website : `https://${cleaned.website}`
+    }
+
+    if (cleaned.nip05) {
+      cleaned.nip05 = cleaned.nip05.toLowerCase()
+    }
+
+    return cleaned
+  }
+
+  function validateProfileForm(form: EditableProfileFields): string | null {
+    if (form.display_name && form.display_name.length > 80) {
+      return 'Display name must be 80 characters or less'
+    }
+
+    if (form.name && form.name.length > 64) {
+      return 'Username must be 64 characters or less'
+    }
+
+    if (form.about && form.about.length > 1024) {
+      return 'Bio must be 1024 characters or less'
+    }
+
+    if (form.website) {
+      try {
+        const url = new URL(form.website)
+        if (!['http:', 'https:'].includes(url.protocol)) {
+          return 'Website must use http or https'
+        }
+      } catch {
+        return 'Website must be a valid URL'
+      }
+    }
+
+    if (form.nip05 && !/^[^@]+@[^@]+\.[^@]+$/.test(form.nip05)) {
+      return 'NIP-05 must look like user@example.com'
+    }
+
+    if (form.lud16 && !/^[^@]+@[^@]+\.[^@]+$/.test(form.lud16)) {
+      return 'LUD-16 must look like user@example.com'
+    }
+
+    if (form.lud06 && !form.lud06.toLowerCase().startsWith('lnurl')) {
+      return 'LUD-06 must start with lnurl'
+    }
+
+    if (form.monero_address && form.monero_address.length < 95) {
+      return 'Monero addresses should be full-length subaddresses'
+    }
+
+    if (form.monero_address && !/^[123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]+$/.test(form.monero_address)) {
+      return 'Monero address can only contain Base58 characters'
+    }
+
+    return null
+  }
+
+  async function handleProfileSubmit(event: Event): Promise<void> {
+    event.preventDefault()
+    if (profileSaving) return
+
+    const user = get(currentUser)
+    if (!user?.pubkey) {
+      profileError = 'You must be logged in to update your profile.'
+      return
+    }
+
+    const payload = normalizeProfileForm(collectProfilePayload())
+    const validationMessage = validateProfileForm(payload)
+    if (validationMessage) {
+      profileError = validationMessage
+      return
+    }
+
+    try {
+      profileSaving = true
+      profileError = null
+      profileSuccess = null
+
+      await updateProfileMetadata(payload)
+
+      profileSuccess = 'Profile updated and broadcast to relays.'
+      isEditingProfile = false
+      resetProfileForm()
+      setTimeout(() => (profileSuccess = null), 4000)
+    } catch (err) {
+      profileError = err instanceof Error ? err.message : 'Failed to update profile'
+    } finally {
+      profileSaving = false
     }
   }
 
@@ -297,13 +514,15 @@
       {@const metadata = $metadataCache.get($currentUser.pubkey)}
       {@const avatarUrl = getAvatarUrl(metadata)}
       {@const nip05 = getNip05Display(metadata?.nip05)}
+      {@const profileName = metadata?.display_name || metadata?.name || $currentUser.name || 'Anonymous'}
+      {@const handleLabel = nip05 || (metadata?.name ? `@${metadata.name}` : `${$currentUser.pubkey.slice(0, 12)}...`)}
 
       <div class="max-w-3xl mx-auto space-y-6">
         <section class="surface-card flex flex-col gap-6 p-6 md:flex-row md:items-center md:justify-between">
           <div class="flex items-center gap-4">
             <div class="h-16 w-16 overflow-hidden rounded-2xl bg-primary/10 text-2xl font-bold text-primary">
               {#if avatarUrl}
-                <img src={avatarUrl} alt={$currentUser.name} class="h-full w-full object-cover" />
+                <img src={avatarUrl} alt={profileName} class="h-full w-full object-cover" />
               {:else}
                 <div class="flex h-full w-full items-center justify-center">
                   {$currentUser.pubkey.slice(0, 2).toUpperCase()}
@@ -311,35 +530,271 @@
               {/if}
             </div>
             <div>
-              <h3 class="text-lg font-semibold text-text-soft">{$currentUser.name || 'Anonymous'}</h3>
-              <p class="text-sm text-text-muted">{nip05 || $currentUser.pubkey.slice(0, 12)}...</p>
+              <h3 class="text-lg font-semibold text-text-soft">{profileName}</h3>
+              <p class="text-sm text-text-muted">{handleLabel}</p>
             </div>
           </div>
 
           <button
             type="button"
-            class="rounded-full border border-dark-border/70 px-5 py-2 text-sm font-medium text-text-soft transition-colors hover:border-primary/60 hover:text-white"
+            class={`rounded-full border px-5 py-2 text-sm font-medium transition-colors ${
+              isEditingProfile
+                ? 'border-primary/70 text-primary hover:bg-primary/10'
+                : 'border-dark-border/70 text-text-soft hover:border-primary/60 hover:text-white'
+            }`}
+            on:click={isEditingProfile ? cancelProfileEdit : startProfileEdit}
+            aria-pressed={isEditingProfile}
+            disabled={profileSaving}
           >
-            Edit Profile
+            {isEditingProfile ? 'Close Editor' : 'Edit Profile'}
           </button>
         </section>
 
-        <section class="surface-card p-6">
-          <h4 class="text-sm font-semibold uppercase tracking-[0.3em] text-text-muted mb-4">Nostr Identity</h4>
-          <div class="space-y-4">
+        <section class="surface-card p-6 space-y-6">
+          <div class="space-y-1">
+            <h4 class="text-sm font-semibold uppercase tracking-[0.3em] text-text-muted">Nostr Identity</h4>
+            <p class="text-sm text-text-muted/80">Manage your NIP-01 metadata so every Nostr client shows the same profile.</p>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-2">
             <div>
               <label class="text-xs uppercase tracking-[0.25em] text-text-muted">Public Key</label>
               <p class="mt-2 break-all text-sm text-text-soft/80 font-mono bg-dark/50 rounded-lg border border-dark-border/60 p-3">
                 {$currentUser.pubkey}
               </p>
             </div>
-            {#if nip05}
+            <div>
+              <label class="text-xs uppercase tracking-[0.25em] text-text-muted">NIP-05 Verification</label>
+              <p class="mt-2 text-sm text-text-soft/80 bg-dark/50 rounded-lg border border-dark-border/60 p-3">
+                {nip05 || 'Not set'}
+              </p>
+            </div>
+          </div>
+
+          <div class="border-t border-dark-border/60 pt-6 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <label class="text-xs uppercase tracking-[0.25em] text-text-muted">NIP-05 Verification</label>
-                <p class="mt-2 text-sm text-text-soft/80 bg-dark/50 rounded-lg border border-dark-border/60 p-3">
-                  {nip05}
-                </p>
+                <p class="text-base font-semibold text-text-soft">Profile Metadata</p>
+                <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Writes kind 0 events to your relays</p>
               </div>
+              {#if isEditingProfile}
+                <span class="rounded-full border border-primary/40 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.25em] text-primary">
+                  Editing
+                </span>
+              {/if}
+            </div>
+
+            {#if profileError}
+              <div class="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-sm text-red-200" role="alert">
+                {profileError}
+              </div>
+            {/if}
+
+            {#if profileSuccess}
+              <div class="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm text-emerald-200" role="status">
+                {profileSuccess}
+              </div>
+            {/if}
+
+            {#if isEditingProfile}
+              <form class="space-y-5" on:submit|preventDefault={handleProfileSubmit}>
+                <div class="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label class="mb-1 block text-sm font-medium text-text-soft">Display Name</label>
+                    <input
+                      type="text"
+                      maxlength="80"
+                      autocomplete="name"
+                      bind:value={profileDisplayNameInput}
+                      class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
+                      placeholder="Jane Doe"
+                      disabled={profileSaving}
+                    />
+                    <p class="mt-1 text-xs text-text-muted">Shown prominently across feeds.</p>
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-sm font-medium text-text-soft">Username (NIP-01 name)</label>
+                    <input
+                      type="text"
+                      maxlength="64"
+                      autocomplete="username"
+                      bind:value={profileUsernameInput}
+                      class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
+                      placeholder="janedoe"
+                      disabled={profileSaving}
+                    />
+                    <p class="mt-1 text-xs text-text-muted">Lowercase handle stored in metadata.</p>
+                  </div>
+                </div>
+
+                <div>
+                  <label class="mb-1 block text-sm font-medium text-text-soft">Bio</label>
+                  <textarea
+                    rows="4"
+                    maxlength="1024"
+                    bind:value={profileAboutInput}
+                    class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
+                    placeholder="Share what you do, what you care about, or how to reach you."
+                    disabled={profileSaving}
+                  />
+                </div>
+
+                <div class="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label class="mb-1 block text-sm font-medium text-text-soft">Website</label>
+                    <input
+                      type="url"
+                      autocomplete="url"
+                      bind:value={profileWebsiteInput}
+                      class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
+                      placeholder="https://example.com"
+                      disabled={profileSaving}
+                    />
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-sm font-medium text-text-soft">NIP-05 Identifier</label>
+                    <input
+                      type="text"
+                      bind:value={profileNip05Input}
+                      class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
+                      placeholder="you@example.com"
+                      disabled={profileSaving}
+                    />
+                    <p class="mt-1 text-xs text-text-muted">Requires DNS TXT record on your domain.</p>
+                  </div>
+                </div>
+
+                <div class="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label class="mb-1 block text-sm font-medium text-text-soft">Avatar URL</label>
+                    <input
+                      type="url"
+                      bind:value={profileAvatarInput}
+                      class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
+                      placeholder="https://cdn.example.com/avatar.png"
+                      disabled={profileSaving}
+                    />
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-sm font-medium text-text-soft">Banner URL</label>
+                    <input
+                      type="url"
+                      bind:value={profileBannerInput}
+                      class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
+                      placeholder="https://cdn.example.com/banner.jpg"
+                      disabled={profileSaving}
+                    />
+                  </div>
+                </div>
+
+                <div class="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label class="mb-1 block text-sm font-medium text-text-soft">Lightning Address (LUD-16)</label>
+                    <input
+                      type="text"
+                      bind:value={profileLud16Input}
+                      class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
+                      placeholder="name@wallet.com"
+                      disabled={profileSaving}
+                    />
+                  </div>
+                  <div>
+                    <label class="mb-1 block text-sm font-medium text-text-soft">LNURL (LUD-06)</label>
+                    <input
+                      type="text"
+                      bind:value={profileLud06Input}
+                      class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
+                      placeholder="lnurl1..."
+                      disabled={profileSaving}
+                    />
+                  </div>
+                  <div class="md:col-span-2">
+                    <label class="mb-1 block text-sm font-medium text-text-soft">Ember Monero Address</label>
+                    <input
+                      type="text"
+                      inputmode="text"
+                      spellcheck="false"
+                      bind:value={profileMoneroAddressInput}
+                      class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70 font-mono"
+                      placeholder="8B... full integrated or subaddress"
+                      disabled={profileSaving}
+                    />
+                    <p class="mt-1 text-xs text-text-muted">Published at metadata key <code>monero_address</code> for Embers.</p>
+                  </div>
+                </div>
+
+                <div class="flex flex-wrap justify-end gap-3">
+                  <button
+                    type="button"
+                    class="rounded-full border border-dark-border/70 px-5 py-2 text-sm font-medium text-text-soft transition-colors hover:border-primary/60 hover:text-white disabled:opacity-50"
+                    on:click={cancelProfileEdit}
+                    disabled={profileSaving}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    class="rounded-full bg-primary px-6 py-2 text-sm font-semibold text-dark transition-colors hover:bg-primary/90 disabled:opacity-60"
+                    disabled={profileSaving}
+                  >
+                    {profileSaving ? 'Saving...' : 'Save Profile'}
+                  </button>
+                </div>
+              </form>
+            {:else}
+              <dl class="grid gap-4 md:grid-cols-2">
+                <div>
+                  <dt class="text-xs uppercase tracking-[0.25em] text-text-muted">Display Name</dt>
+                  <dd class="mt-2 text-sm text-text-soft">{metadata?.display_name || metadata?.name || 'Not set'}</dd>
+                </div>
+                <div>
+                  <dt class="text-xs uppercase tracking-[0.25em] text-text-muted">Username (name)</dt>
+                  <dd class="mt-2 text-sm text-text-soft">{metadata?.name || 'Not set'}</dd>
+                </div>
+                <div class="md:col-span-2">
+                  <dt class="text-xs uppercase tracking-[0.25em] text-text-muted">Bio</dt>
+                  <dd class="mt-2 whitespace-pre-line rounded-lg border border-dark-border/60 bg-dark/40 p-3 text-sm text-text-soft/90">
+                    {metadata?.about || 'Not set'}
+                  </dd>
+                </div>
+                <div>
+                  <dt class="text-xs uppercase tracking-[0.25em] text-text-muted">Website</dt>
+                  <dd class="mt-2 text-sm">
+                    {#if metadata?.website}
+                      <a
+                        href={metadata.website}
+                        target="_blank"
+                        rel="noreferrer"
+                        class="text-primary hover:underline break-all"
+                      >
+                        {metadata.website}
+                      </a>
+                    {:else}
+                      <span class="text-text-muted">Not set</span>
+                    {/if}
+                  </dd>
+                </div>
+                <div>
+                  <dt class="text-xs uppercase tracking-[0.25em] text-text-muted">Avatar URL</dt>
+                  <dd class="mt-2 break-all text-sm text-text-soft/90">{metadata?.picture || 'Not set'}</dd>
+                </div>
+                <div>
+                  <dt class="text-xs uppercase tracking-[0.25em] text-text-muted">Banner URL</dt>
+                  <dd class="mt-2 break-all text-sm text-text-soft/90">{metadata?.banner || 'Not set'}</dd>
+                </div>
+                <div>
+                  <dt class="text-xs uppercase tracking-[0.25em] text-text-muted">LUD-16</dt>
+                  <dd class="mt-2 text-sm text-text-soft/90">{metadata?.lud16 || 'Not set'}</dd>
+                </div>
+                <div>
+                  <dt class="text-xs uppercase tracking-[0.25em] text-text-muted">LUD-06</dt>
+                  <dd class="mt-2 break-all text-sm text-text-soft/90">{metadata?.lud06 || 'Not set'}</dd>
+                </div>
+                <div class="md:col-span-2">
+                  <dt class="text-xs uppercase tracking-[0.25em] text-text-muted">Monero Address</dt>
+                  <dd class="mt-2 break-all text-sm font-mono text-text-soft/90">{metadata?.monero_address || 'Not set'}</dd>
+                </div>
+              </dl>
             {/if}
           </div>
         </section>
