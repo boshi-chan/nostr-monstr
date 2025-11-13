@@ -11,11 +11,10 @@
   import {
     publishReaction,
     publishRepost,
-    publishZapRequest,
     getEventById,
     fetchEventById,
   } from '$lib/feed-ndk'
-  import { getDisplayName, getAvatarUrl, getNip05Display } from '$lib/metadata'
+  import { getDisplayName, getAvatarUrl, getNip05Display, fetchUserMetadata } from '$lib/metadata'
   import { formatDate } from '$lib/utils'
   import { parseContent } from '$lib/content'
   import type { NostrEvent } from '$types/nostr'
@@ -35,6 +34,7 @@
   import { nip19 } from 'nostr-tools'
   import { showEmberModal, emberTarget } from '$stores/wallet'
   import { emberTotals, ensureEmberTotal } from '$stores/ember'
+  import { openZapModal } from '$stores/nwc'
 
   export let event: NostrEvent
   export let onSelect: ((event: NostrEvent) => void) | undefined = undefined
@@ -121,6 +121,15 @@
   let formattedTime = ''
   $: formattedTime = formatDate(actionableEvent.created_at)
 
+  // Fetch metadata for all mentioned users
+  $: if (parsed.mentions.length > 0) {
+    for (const mention of parsed.mentions) {
+      if (mention.pubkey && !$metadataCache.has(mention.pubkey)) {
+        void fetchUserMetadata(mention.pubkey)
+      }
+    }
+  }
+
   let parentEvent: NostrEvent | null = null
   let parentLoading = false
   let parentFetchAttempted = false
@@ -177,19 +186,13 @@
     showCompose.set(true)
   }
 
-  async function handleZap() {
-    if (zapLoading) return
-    try {
-      zapLoading = true
-      // For now, just track it - full zap requires LNURL
-      const amount = 21 // sats
-      zappedEvents.update(map => new Map(map).set(actionableEvent.id, amount))
-      await publishZapRequest(actionableEvent.id, amount, 'wss://relay.damus.io')
-    } catch (err) {
-      console.error('Zap failed:', err)
-    } finally {
-      zapLoading = false
-    }
+  function handleZap() {
+    // Open zap modal with event details
+    openZapModal({
+      eventId: actionableEvent.id,
+      recipientPubkey: actionableEvent.pubkey,
+      recipientName: displayName,
+    })
   }
 
   function resolveMoneroAddress(): string | null {
@@ -435,7 +438,13 @@
         }}
       >
         {#if avatarUrl}
-          <img src={avatarUrl} alt={displayLabel} class="h-full w-full rounded-full object-cover" />
+          <img
+            src={avatarUrl}
+            alt={displayLabel}
+            class="h-full w-full rounded-full object-cover"
+            loading="lazy"
+            decoding="async"
+          />
         {:else}
           <div class="flex h-full w-full items-center justify-center rounded-full bg-primary/20 text-sm font-bold text-primary">
             {initials}

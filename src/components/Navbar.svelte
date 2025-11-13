@@ -10,7 +10,6 @@
   import BookOpenIcon from './icons/BookOpenIcon.svelte'
   import BellIcon from './icons/BellIcon.svelte'
   import SquarePenIcon from './icons/SquarePenIcon.svelte'
-  import SearchIcon from './icons/SearchIcon.svelte'
   import { unreadCount } from '$stores/notifications'
   import { showSearch } from '$stores/search'
 
@@ -112,16 +111,18 @@
     {/each}
   </div>
 
-  <!-- Compose button (mobile) -->
-  <button
-    on:click={handleCompose}
-    class="md:hidden relative flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-dark font-semibold transition-colors duration-200"
-    title="Compose"
-  >
-    <div class="flex h-5 w-5 items-center justify-center">
-      <SquarePenIcon size={17} color="currentColor" strokeWidth={1.6} />
-    </div>
-  </button>
+  <!-- Compose button (mobile) - Hidden since we have floating button on feed pages -->
+  {#if $activeTab !== 'home' && $activeTab !== 'long-reads'}
+    <button
+      on:click={handleCompose}
+      class="md:hidden relative flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-dark font-semibold transition-colors duration-200"
+      title="Compose"
+    >
+      <div class="flex h-5 w-5 items-center justify-center">
+        <SquarePenIcon size={17} color="currentColor" strokeWidth={1.6} />
+      </div>
+    </button>
+  {/if}
 
   <!-- Account button (mobile) -->
   <button
@@ -139,14 +140,17 @@
   </button>
 
   <!-- Desktop compose & account -->
-  <div class="hidden md:flex md:mt-auto md:w-full md:flex-col md:items-center md:gap-3 md:pb-4">
-    <button
-      on:click={handleCompose}
-      class="w-12 h-12 flex items-center justify-center rounded-xl bg-primary text-dark transition-colors duration-200 hover:bg-primary/90"
-      title="Compose"
-    >
-      <SquarePenIcon size={22} color="currentColor" strokeWidth={1.75} />
-    </button>
+  <div class="hidden md:flex md:mt-auto md:w-full md:flex-col md:items-center md:gap-6 md:pb-4">
+    <!-- Hide compose button on feed pages (floating button will show instead) -->
+    {#if $activeTab !== 'home' && $activeTab !== 'long-reads'}
+      <button
+        on:click={handleCompose}
+        class="w-12 h-12 flex items-center justify-center rounded-xl bg-primary text-dark transition-colors duration-200 hover:bg-primary/90"
+        title="Compose"
+      >
+        <SquarePenIcon size={22} color="currentColor" strokeWidth={1.75} />
+      </button>
+    {/if}
 
     <div class="relative">
       <button

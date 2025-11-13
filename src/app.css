@@ -91,6 +91,17 @@
     backdrop-filter: blur(18px);
     background-color: rgba(21, 29, 39, 0.72);
   }
+
+  /* Better avatar rendering */
+  img[class*="rounded-full"] {
+    aspect-ratio: 1 / 1;
+    object-position: center;
+    image-rendering: smooth;
+    image-rendering: -webkit-optimize-contrast;
+    backface-visibility: hidden;
+    transform: translateZ(0);
+    -webkit-font-smoothing: subpixel-antialiased;
+  }
 }
 
 #app {

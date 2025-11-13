@@ -14,7 +14,7 @@
   $: status = (() => {
     if (!$walletState.hasWallet) {
       return {
-        label: 'Set up your Monstr wallet to send Embers',
+        label: 'Set up your Ember wallet to send Embers',
         tone: 'text-amber-200',
         dot: 'bg-amber-300 animate-pulse',
       }

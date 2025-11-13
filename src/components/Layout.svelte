@@ -1,10 +1,12 @@
 <script lang="ts">
   import Navbar from './Navbar.svelte'
   import Compose from './Compose.svelte'
+  import FloatingComposeButton from './FloatingComposeButton.svelte'
   import SearchModal from './SearchModal.svelte'
   import WalletModal from './WalletModal.svelte'
   import WalletStatusBar from './WalletStatusBar.svelte'
   import EmberModal from './EmberModal.svelte'
+  import ZapModal from './ZapModal.svelte'
   import Home from './pages/Home.svelte'
   import LongReads from './pages/LongReads.svelte'
   import Messages from './pages/Messages.svelte'
@@ -58,12 +60,14 @@
     <Navbar />
   </div>
 
-  <!-- Compose modal -->
+  <!-- Floating compose button (only on feed pages) -->
+  <FloatingComposeButton />
+
+  <!-- Modals -->
   <Compose />
+  <ZapModal />
   <WalletModal />
   <EmberModal />
-
-  <!-- Search modal -->
   <SearchModal />
 </div>
 
