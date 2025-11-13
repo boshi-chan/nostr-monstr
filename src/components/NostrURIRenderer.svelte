@@ -108,7 +108,7 @@
 </script>
 
 <!-- Render text with inline URI buttons -->
-{#each parts as part (part.content)}
+{#each parts as part, index (`${part.type}-${index}`)}
   {#if part.type === 'text'}
     <span>{part.content}</span>
   {:else if part.uri && part.type === 'uri'}

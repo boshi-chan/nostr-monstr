@@ -1,6 +1,6 @@
 <script lang="ts">
   import { activeConversationData, messageState } from '$stores/messages'
-  import { sendDirectMessage } from '$lib/messaging'
+  import { sendDirectMessage } from '$lib/messaging-simple'
   import SendIcon from 'lucide-svelte/icons/send'
 
   let messageInput: HTMLTextAreaElement
@@ -40,11 +40,7 @@
     try {
       messageState.update(s => ({ ...s, isSending: true, error: null }))
 
-      await sendDirectMessage(
-        $activeConversationData.participantPubkey,
-        inputValue.trim(),
-        { encryptionMode: $messageState.encryptionMode as 'nip17' | 'nip4' }
-      )
+      await sendDirectMessage($activeConversationData.participantPubkey, inputValue.trim())
 
       // Clear input
       inputValue = ''
@@ -111,36 +107,6 @@
     </button>
   </div>
 
-  <!-- Encryption mode selector -->
-  <div class="mt-3 flex items-center justify-between">
-    <div class="flex items-center gap-2">
-      <button
-        type="button"
-        on:click={() => messageState.update(s => ({ ...s, encryptionMode: s.encryptionMode === 'nip17' ? 'nip4' : 'nip17' }))}
-        class="group flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs transition-colors hover:bg-dark-light/40"
-        title="Toggle encryption mode"
-      >
-        <span class={`${$messageState.encryptionMode === 'nip17' ? 'text-primary' : 'text-text-muted'}`}>
-          {#if $messageState.encryptionMode === 'nip17'}
-            🛡️
-          {:else}
-            🔓
-          {/if}
-        </span>
-        <span class="font-medium text-text-soft">
-          {$messageState.encryptionMode === 'nip17' ? 'Gift Wrap (NIP-17)' : 'Legacy (NIP-04)'}
-        </span>
-      </button>
-    </div>
-
-    <div class="text-xs text-text-muted/60">
-      {#if $messageState.encryptionMode === 'nip17'}
-        <span class="text-primary/80">Maximum privacy</span>
-      {:else}
-        <span class="text-orange-400/80">Backward compatible</span>
-      {/if}
-    </div>
-  </div>
 </div>
 
 <style>
@@ -152,3 +118,4 @@
     cursor: not-allowed;
   }
 </style>
+

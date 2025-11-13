@@ -16,8 +16,10 @@
 
   $: {
     if (messagesContainer && $conversationMessages.length > 0) {
+      const target = messagesContainer
       setTimeout(() => {
-        messagesContainer.scrollTop = messagesContainer.scrollHeight
+        if (!target) return
+        target.scrollTop = target.scrollHeight
       }, 100)
     }
   }
@@ -105,7 +107,7 @@
         </div>
       {:else}
         <div class="space-y-4">
-          {#each groupMessages($conversationMessages) as group (group.messages[0].id)}
+          {#each groupMessages($conversationMessages) as group, groupIndex (`${group.sender}-${group.messages[0]?.id ?? groupIndex}-${groupIndex}`)}
             {#if shouldShowTimestamp(group.messages, 0)}
               <div class="flex items-center justify-center py-2">
                 <div class="rounded-full bg-dark-light/40 px-3 py-1 text-xs text-text-muted">{formatGroupTime(group.messages[0].createdAt)}</div>
@@ -122,7 +124,7 @@
               </div>
 
               <div class={`flex w-full max-w-[65%] flex-col gap-1 ${isOwnMessage(group.sender) ? 'items-end' : 'items-start'}`}>
-                {#each group.messages as message (message.id)}
+                {#each group.messages as message, messageIndex (`${message.id}-${messageIndex}`)}
                   {#if !isOwnMessage(group.sender) && group.messages.indexOf(message) === 0}
                     <p class="px-3 text-xs text-text-muted">{getSenderName(group.sender)}</p>
                   {/if}

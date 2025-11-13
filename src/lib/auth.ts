@@ -8,6 +8,7 @@ import { getSetting, saveSetting } from './db'
 import { loginWithNIP07, logoutNDK } from './ndk'
 import type { User } from '$types/user'
 import type { NDKUser } from '@nostr-dev-kit/ndk'
+import { warmupMessagingPermissions, resetMessagingState } from '$lib/messaging-simple'
 
 /**
  * Convert NDK user to our User type
@@ -95,6 +96,7 @@ export async function loginWithExtension(): Promise<User> {
     await saveSetting('lastLogin', new Date().toISOString())
 
     currentUser.set(user)
+    void warmupMessagingPermissions()
 
     return user
   } catch (err) {
@@ -123,6 +125,7 @@ export async function restoreSession(): Promise<User | null> {
         // Verify it's the same user
         if (ndkUser.pubkey === savedUser.pubkey) {
           currentUser.set(savedUser)
+          void warmupMessagingPermissions()
           return savedUser
         }
       } catch (err) {
@@ -132,6 +135,7 @@ export async function restoreSession(): Promise<User | null> {
 
     // Fallback: Load user without signer (read-only mode)
     currentUser.set(savedUser)
+    void warmupMessagingPermissions()
     return savedUser
   } catch (err) {
     console.error('Failed to restore session:', err)
@@ -154,6 +158,7 @@ export async function logout(): Promise<void> {
   const { stopAllSubscriptions, clearFeed } = await import('./feed-ndk')
   stopAllSubscriptions()
   clearFeed()
+  resetMessagingState()
 
   // Clear all feed state stores
   console.log('🚪 Clearing all feed state')
@@ -175,6 +180,24 @@ export async function logout(): Promise<void> {
     userEventIds.set(new Set())
     following.set(new Set())
     circles.set(new Set())
+
+    const {
+      conversations,
+      conversationMetadata,
+      conversationMessages,
+      activeConversation,
+      unreadCounts,
+      messagesLoading,
+      messagesError,
+    } = await import('$stores/messages')
+
+    conversations.set(new Map())
+    conversationMetadata.set(new Map())
+    conversationMessages.set([])
+    activeConversation.set(null)
+    unreadCounts.set(new Map())
+    messagesLoading.set(false)
+    messagesError.set(null)
   } catch (err) {
     console.warn('Failed to clear feed stores:', err)
   }

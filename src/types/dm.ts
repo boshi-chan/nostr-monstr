@@ -19,16 +19,16 @@ export interface DirectMessage {
  * Represents a 1-to-1 or group conversation
  */
 export interface Conversation {
-  id: string // pubkey for 1-to-1, generated ID for groups
+  id: string
   type: 'direct' | 'group'
-  participantPubkey?: string // for direct conversations
-  participantName?: string // cached from metadata
-  participantAvatar?: string // cached avatar URL
+  participantPubkey?: string
+  participantName?: string
+  participantAvatar?: string
   lastMessage?: DirectMessage
-  lastMessagePreview?: string // truncated preview for list
-  unreadCount: number
-  lastUpdated: number
-  isSelected?: boolean
+  lastMessagePreview?: string
+  lastMessageAt?: number
+  lastUpdated?: number
+  unreadCount?: number
 }
 
 /**
@@ -53,5 +53,4 @@ export interface MessageState {
   isLoading: boolean
   isSending: boolean
   error: string | null
-  encryptionMode: 'nip17' | 'nip4' // default to nip17 (gift wrap)
 }

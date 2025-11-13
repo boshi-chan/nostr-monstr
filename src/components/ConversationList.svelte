@@ -1,47 +1,38 @@
 <script lang="ts">
-  import { conversationMetadata, activeConversation, unreadCounts } from '$stores/messages'
+  import { onMount } from 'svelte'
+  import { conversations, conversationMetadata, activeConversation, unreadCounts } from '$stores/messages'
   import { metadataCache } from '$stores/feed'
   import type { Conversation } from '$types/dm'
-  import { loadConversation } from '$lib/messaging'
+  import { loadConversation, loadConversations } from '$lib/messaging-simple'
   import SearchIcon from 'lucide-svelte/icons/search'
 
-
-  import { onMount } from 'svelte'
-import { loadConversations } from '$lib/messaging'
-
-onMount(() => {
-  loadConversations()
-})
-
+  onMount(() => {
+    loadConversations().catch(err => console.error('DM bootstrap failed:', err))
+  })
 
   let searchQuery = ''
-  let filteredConversations: Conversation[] = []
+  let filtered: Conversation[] = []
 
   $: {
-    // Use conversationMetadata for display info
-    const convArray = Array.from($conversationMetadata.values())
-    if (!searchQuery.trim()) {
-      filteredConversations = convArray.sort((a, b) => b.lastUpdated - a.lastUpdated)
-    } else {
-      const query = searchQuery.toLowerCase()
-      filteredConversations = convArray
-        .filter(
-          conv =>
-            (conv.participantName?.toLowerCase().includes(query) ?? false) ||
-            (conv.participantPubkey?.toLowerCase().includes(query) ?? false) ||
-            (conv.lastMessagePreview?.toLowerCase().includes(query) ?? false)
+    const list = Array.from($conversationMetadata.values())
+    const query = searchQuery.trim().toLowerCase()
+    filtered = list
+      .filter(conv => {
+        if (!query) return true
+        return (
+          conv.participantName?.toLowerCase().includes(query) ||
+          conv.participantPubkey?.toLowerCase().includes(query) ||
+          conv.lastMessagePreview?.toLowerCase().includes(query)
         )
-        .sort((a, b) => b.lastUpdated - a.lastUpdated)
-    }
+      })
+      .sort((a, b) => b.lastUpdated - a.lastUpdated)
   }
 
   async function handleSelectConversation(conv: Conversation) {
     activeConversation.set(conv.id)
-    // Load messages for this conversation
     if (conv.participantPubkey) {
       await loadConversation(conv.participantPubkey)
     }
-    // Clear unread count
     unreadCounts.update(counts => {
       const next = new Map(counts)
       next.set(conv.id, 0)
@@ -56,7 +47,7 @@ onMount(() => {
       if (metadata?.name) return metadata.name
       return conv.participantPubkey.slice(0, 12) + '...'
     }
-    return 'Unknown'
+    return 'Conversation'
   }
 
   function getDisplayUsername(conv: Conversation): string {
@@ -82,27 +73,25 @@ onMount(() => {
   }
 
   function getAvatarInitial(conv: Conversation): string {
-    const name = getDisplayName(conv)
-    return name.charAt(0).toUpperCase()
+    return getDisplayName(conv).charAt(0).toUpperCase()
   }
 
-  function truncatePreview(text: string | undefined, maxLength: number = 50): string {
-    if (!text) return 'No messages yet'
-    if (text.length > maxLength) {
-      return text.slice(0, maxLength) + '...'
-    }
-    return text
+  function preview(conv: Conversation): string {
+    const list = $conversations.get(conv.id)
+    if (!list?.length) return 'No messages yet'
+    const last = list[list.length - 1]
+    const base = last.content || (last.failed ? '[Failed to decrypt]' : '')
+    if (!base) return 'No messages yet'
+    return base.length > 80 ? `${base.slice(0, 80)}…` : base
   }
 
   function formatTime(timestamp: number): string {
-    // Nostr timestamps are in seconds, convert to milliseconds
-    const timestampMs = timestamp * 1000
-    const now = Date.now()
-    const diff = now - timestampMs
+    if (!timestamp) return ''
+    const ms = timestamp * 1000
+    const diff = Date.now() - ms
     const days = Math.floor(diff / (1000 * 60 * 60 * 24))
     const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
-
     if (days > 0) return `${days}d ago`
     if (hours > 0) return `${hours}h ago`
     if (minutes > 0) return `${minutes}m ago`
@@ -110,9 +99,7 @@ onMount(() => {
   }
 </script>
 
-<!-- Left panel: Conversation list -->
 <div class="flex h-full flex-col bg-dark-light/40 md:border-r md:border-dark-border/50">
-  <!-- Search header -->
   <div class="flex-shrink-0 border-b border-dark-border/30 p-4">
     <div class="relative">
       <SearchIcon class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
@@ -125,9 +112,8 @@ onMount(() => {
     </div>
   </div>
 
-  <!-- Conversations list -->
   <div class="flex-1 overflow-y-auto">
-    {#if filteredConversations.length === 0}
+    {#if filtered.length === 0}
       <div class="flex h-full items-center justify-center p-4 text-center">
         <div>
           <p class="text-sm text-text-muted">
@@ -140,7 +126,7 @@ onMount(() => {
       </div>
     {:else}
       <div class="divide-y divide-dark-border/20">
-        {#each filteredConversations as conversation (conversation.id)}
+        {#each filtered as conversation (conversation.id)}
           <button
             on:click={() => handleSelectConversation(conversation)}
             class={`w-full px-4 py-3 text-left transition-all duration-200 hover:bg-dark-light/60 ${
@@ -148,7 +134,6 @@ onMount(() => {
             }`}
           >
             <div class="flex items-start gap-3">
-              <!-- Avatar -->
               <div class="relative mt-0.5 flex-shrink-0">
                 {#if getAvatarUrl(conversation)}
                   <img
@@ -162,15 +147,12 @@ onMount(() => {
                   </div>
                 {/if}
 
-                <!-- Unread indicator -->
                 {#if ($unreadCounts.get(conversation.id) ?? 0) > 0}
                   <div class="absolute right-0 top-0 h-3 w-3 rounded-full bg-primary shadow-md" />
                 {/if}
               </div>
 
-              <!-- Content -->
               <div class="min-w-0 flex-1">
-                <!-- Name and timestamp -->
                 <div class="flex items-baseline justify-between gap-2">
                   <h3 class="truncate text-sm font-semibold text-text-soft">
                     {getDisplayName(conversation)}
@@ -180,16 +162,13 @@ onMount(() => {
                   </span>
                 </div>
 
-                <!-- Username -->
                 <p class="truncate text-xs text-text-muted">
                   {getDisplayUsername(conversation)}
                 </p>
 
-                <!-- Message preview -->
                 <p class="mt-1 truncate text-xs text-text-muted">
-                  {truncatePreview(conversation.lastMessagePreview || 'Encrypted message')}
+                  {preview(conversation)}
                 </p>
-                
               </div>
             </div>
           </button>
@@ -200,7 +179,6 @@ onMount(() => {
 </div>
 
 <style>
-  /* Scrollbar styling */
   :global(.conversation-list::-webkit-scrollbar) {
     width: 6px;
   }

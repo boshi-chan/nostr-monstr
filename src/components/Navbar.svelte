@@ -10,18 +10,22 @@
   import BookOpenIcon from './icons/BookOpenIcon.svelte'
   import BellIcon from './icons/BellIcon.svelte'
   import SquarePenIcon from './icons/SquarePenIcon.svelte'
+  import MessageIcon from './icons/MessageIcon.svelte'
   import { unreadCount } from '$stores/notifications'
   import { showSearch } from '$stores/search'
+  import { unreadCounts } from '$stores/messages'
 
   const tabs: { id: NavTab; label: string; icon: any }[] = [
     { id: 'home', label: 'Home', icon: HomeIcon },
     { id: 'long-reads', label: 'Long Reads', icon: BookOpenIcon },
-    // { id: 'messages', label: 'Messages', icon: MessageIcon }, // DISABLED - relay config needs fixing
+    { id: 'messages', label: 'Messages', icon: MessageIcon },
     { id: 'notifications', label: 'Notifications', icon: BellIcon },
   ]
 
   let desktopMenuOpen = false
   let mobileMenuOpen = false
+
+  $: unreadDMs = Array.from($unreadCounts.values()).reduce((total, count) => total + (count ?? 0), 0)
 
   function handleTabClick(tab: NavTab) {
     navigateToPage(tab)
@@ -105,6 +109,10 @@
         {#if tab.id === 'notifications' && $unreadCount > 0}
           <span class="absolute top-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-xs font-bold text-dark">
             {$unreadCount > 9 ? '9+' : $unreadCount}
+          </span>
+        {:else if tab.id === 'messages' && unreadDMs > 0}
+          <span class="absolute top-1 right-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[0.65rem] font-bold text-dark">
+            {unreadDMs > 9 ? '9+' : unreadDMs}
           </span>
         {/if}
       </button>
