@@ -16,9 +16,6 @@ function createInitialState(shareAddress = true): WalletState {
     customNodeUri: null,
     customNodeLabel: null,
     lastSyncedAt: null,
-    lastBackupAt: null,
-    remoteBackupAvailable: false,
-    backupStatus: 'idle',
     restoreHeight: null,
     shareAddress,
   }

@@ -85,7 +85,7 @@ export async function initiateCall(recipientPubkey: string): Promise<string> {
     currentCallId = callId
 
     // Get audio stream
-    console.log('📞 Requesting audio permission...')
+    logger.info('📞 Requesting audio permission...')
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
@@ -97,7 +97,7 @@ export async function initiateCall(recipientPubkey: string): Promise<string> {
     localStream = stream
 
     // Setup peer connection
-    console.log('📞 Setting up peer connection...')
+    logger.info('📞 Setting up peer connection...')
     peerConnection = new RTCPeerConnection(PEER_CONNECTION_CONFIG)
     setupPeerConnectionHandlers(peerConnection, callId)
 
@@ -109,7 +109,7 @@ export async function initiateCall(recipientPubkey: string): Promise<string> {
     })
 
     // Create offer
-    console.log('📞 Creating SDP offer...')
+    logger.info('📞 Creating SDP offer...')
     const offer = await peerConnection.createOffer({
       offerToReceiveAudio: true,
       offerToReceiveVideo: false,
@@ -121,7 +121,7 @@ export async function initiateCall(recipientPubkey: string): Promise<string> {
     const recipientMetadata = cache.get(recipientPubkey)
 
     // Create call request event
-    console.log('📞 Sending call request...')
+    logger.info('📞 Sending call request...')
     await publishCallRequest(callId, recipientPubkey, offer)
 
     // Update active call state
@@ -148,11 +148,11 @@ export async function initiateCall(recipientPubkey: string): Promise<string> {
       }
     }, CALL_TIMEOUT)
 
-    console.log('✓ Call request sent:', callId)
+    logger.info('✓ Call request sent:', callId)
     return callId
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : 'Failed to initiate call'
-    console.error('✗ Call initiation failed:', errorMsg)
+    logger.error('✗ Call initiation failed:', errorMsg)
     callError.set(errorMsg)
     await cleanupCall()
     throw err
@@ -179,7 +179,7 @@ export async function acceptCall(callId: string): Promise<void> {
       throw new Error('Invalid incoming call')
     }
 
-    console.log('📞 Accepting call:', callId)
+    logger.info('📞 Accepting call:', callId)
 
     // Get audio stream
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -227,7 +227,7 @@ export async function acceptCall(callId: string): Promise<void> {
     incomingCall.set(null)
 
     // Publish call accepted event
-    console.log('📞 Sending call accepted...')
+    logger.info('📞 Sending call accepted...')
     const offer = await peerConnection.createOffer({
       offerToReceiveAudio: true,
       offerToReceiveVideo: false,
@@ -236,10 +236,10 @@ export async function acceptCall(callId: string): Promise<void> {
 
     await publishCallAccepted(callId, incoming.callerPubkey, offer)
 
-    console.log('✓ Call accepted:', callId)
+    logger.info('✓ Call accepted:', callId)
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : 'Failed to accept call'
-    console.error('✗ Accept call failed:', errorMsg)
+    logger.error('✗ Accept call failed:', errorMsg)
     callError.set(errorMsg)
     await cleanupCall()
     throw err
@@ -256,7 +256,7 @@ export async function declineCall(callId: string, reason: string = 'user-decline
     const user = getCurrentNDKUser()
     if (!user?.pubkey) return
 
-    console.log('📞 Declining call:', callId, 'reason:', reason)
+    logger.info('📞 Declining call:', callId, 'reason:', reason)
 
     const incoming = get(incomingCall)
     if (incoming?.callId === callId) {
@@ -271,9 +271,9 @@ export async function declineCall(callId: string, reason: string = 'user-decline
       await endCall(callId)
     }
 
-    console.log('✓ Call declined:', callId)
+    logger.info('✓ Call declined:', callId)
   } catch (err) {
-    console.error('✗ Decline call failed:', err)
+    logger.error('✗ Decline call failed:', err)
   }
 }
 
@@ -285,7 +285,7 @@ export async function endCall(callId: string): Promise<void> {
     const call = get(activeCall)
     if (!call || call.id !== callId) return
 
-    console.log('📞 Ending call:', callId)
+    logger.info('📞 Ending call:', callId)
 
     const duration = Math.floor((Date.now() - call.initiatedAt) / 1000)
 
@@ -310,9 +310,9 @@ export async function endCall(callId: string): Promise<void> {
     })
 
     await cleanupCall()
-    console.log('✓ Call ended:', callId)
+    logger.info('✓ Call ended:', callId)
   } catch (err) {
-    console.error('✗ End call failed:', err)
+    logger.error('✗ End call failed:', err)
   }
 }
 
@@ -334,9 +334,9 @@ export async function toggleAudio(enabled: boolean): Promise<void> {
       return call
     })
 
-    console.log('🔊 Audio', enabled ? 'enabled' : 'disabled')
+    logger.info('🔊 Audio', enabled ? 'enabled' : 'disabled')
   } catch (err) {
-    console.error('✗ Toggle audio failed:', err)
+    logger.error('✗ Toggle audio failed:', err)
   }
 }
 
@@ -355,11 +355,11 @@ export async function handleIncomingCallRequest(event: NostrEvent): Promise<void
     const callId = content.callId
     const callerPubkey = event.pubkey
 
-    console.log('📞 Incoming call from:', callerPubkey.slice(0, 8))
+    logger.info('📞 Incoming call from:', callerPubkey.slice(0, 8))
 
     // Check if already in call
     if (get(activeCall)) {
-      console.log('📞 Declining - already in call')
+      logger.info('📞 Declining - already in call')
       await publishCallDeclined(callId, callerPubkey, 'busy')
       return
     }
@@ -378,9 +378,9 @@ export async function handleIncomingCallRequest(event: NostrEvent): Promise<void
       timeout: Date.now() + CALL_TIMEOUT,
     })
 
-    console.log('✓ Incoming call alert shown:', callId)
+    logger.info('✓ Incoming call alert shown:', callId)
   } catch (err) {
-    console.error('✗ Handle incoming call failed:', err)
+    logger.error('✗ Handle incoming call failed:', err)
   }
 }
 
@@ -395,7 +395,7 @@ export async function handleCallAccepted(event: NostrEvent): Promise<void> {
     const callId = content.callId
     if (callId !== currentCallId) return
 
-    console.log('📞 Call accepted by recipient')
+    logger.info('📞 Call accepted by recipient')
 
     if (!peerConnection) {
       throw new Error('Peer connection not initialized')
@@ -417,9 +417,9 @@ export async function handleCallAccepted(event: NostrEvent): Promise<void> {
       return call
     })
 
-    console.log('✓ Call accepted:', callId)
+    logger.info('✓ Call accepted:', callId)
   } catch (err) {
-    console.error('✗ Handle call accepted failed:', err)
+    logger.error('✗ Handle call accepted failed:', err)
   }
 }
 
@@ -440,9 +440,9 @@ export async function handleICECandidate(event: NostrEvent): Promise<void> {
     })
 
     await peerConnection.addIceCandidate(candidate)
-    console.log('📞 Added ICE candidate')
+    logger.info('📞 Added ICE candidate')
   } catch (err) {
-    console.error('✗ Handle ICE candidate failed:', err)
+    logger.error('✗ Handle ICE candidate failed:', err)
   }
 }
 
@@ -457,7 +457,7 @@ export async function handleCallDeclined(event: NostrEvent): Promise<void> {
     const callId = content.callId
     if (callId !== currentCallId) return
 
-    console.log('📞 Call declined:', content.reason)
+    logger.info('📞 Call declined:', content.reason)
 
     const reasonMap: Record<string, string> = {
       'user-declined': 'User declined',
@@ -469,7 +469,7 @@ export async function handleCallDeclined(event: NostrEvent): Promise<void> {
     callError.set(reasonMap[content.reason] || 'Call declined')
     await endCall(callId)
   } catch (err) {
-    console.error('✗ Handle call declined failed:', err)
+    logger.error('✗ Handle call declined failed:', err)
   }
 }
 
@@ -500,7 +500,7 @@ function setupPeerConnectionHandlers(pc: RTCPeerConnection, callId: string): voi
 
   // Connection state change
   pc.onconnectionstatechange = () => {
-    console.log('📞 Connection state:', pc.connectionState)
+    logger.info('📞 Connection state:', pc.connectionState)
 
     if (pc.connectionState === 'connected') {
       activeCall.update(call => {
@@ -520,16 +520,16 @@ function setupPeerConnectionHandlers(pc: RTCPeerConnection, callId: string): voi
       })
       void endCall(callId)
     } else if (pc.connectionState === 'disconnected') {
-      console.warn('📞 Connection disconnected')
+      logger.warn('📞 Connection disconnected')
     }
   }
 
   // ICE connection state
   pc.oniceconnectionstatechange = () => {
-    console.log('📞 ICE connection state:', pc.iceConnectionState)
+    logger.info('📞 ICE connection state:', pc.iceConnectionState)
 
     if (pc.iceConnectionState === 'failed') {
-      console.error('📞 ICE connection failed')
+      logger.error('📞 ICE connection failed')
       activeCall.update(call => {
         if (call) {
           call.state = 'failed'
@@ -543,7 +543,7 @@ function setupPeerConnectionHandlers(pc: RTCPeerConnection, callId: string): voi
 
   // Remote track
   pc.ontrack = event => {
-    console.log('📞 Received remote track:', event.track.kind)
+    logger.info('📞 Received remote track:', event.track.kind)
 
     activeCall.update(call => {
       if (call) {
@@ -556,13 +556,13 @@ function setupPeerConnectionHandlers(pc: RTCPeerConnection, callId: string): voi
     if (event.track.kind === 'audio') {
       const audio = new Audio()
       audio.srcObject = event.streams[0]
-      audio.play().catch(err => console.error('Failed to play audio:', err))
+      audio.play().catch(err => logger.error('Failed to play audio:', err))
     }
   }
 
   // Error
   pc.onerror = event => {
-    console.error('📞 Peer connection error:', event)
+    logger.error('📞 Peer connection error:', event)
   }
 }
 
@@ -602,9 +602,9 @@ async function cleanupCall(): Promise<void> {
     incomingCall.set(null)
     callError.set(null)
 
-    console.log('✓ Call cleanup complete')
+    logger.info('✓ Call cleanup complete')
   } catch (err) {
-    console.error('✗ Cleanup failed:', err)
+    logger.error('✗ Cleanup failed:', err)
   }
 }
 
@@ -770,3 +770,4 @@ async function publishCallEnded(
 }
 
 export { cleanupCall }
+

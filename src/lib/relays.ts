@@ -48,7 +48,7 @@ export async function getRelaysFromNIP65(): Promise<RelayConfig[]> {
 
     return relays
   } catch (err) {
-    console.error('Failed to fetch relays from NIP-65:', err)
+    logger.error('Failed to fetch relays from NIP-65:', err)
     return []
   }
 }
@@ -101,10 +101,10 @@ export async function publishRelays(relays: RelayConfig[]): Promise<void> {
     await event.sign(ndk.signer)
     await event.publish()
 
-    console.log('✓ Relays published successfully')
+    logger.info('✓ Relays published successfully')
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err)
-    console.error('Failed to publish relays:', errorMsg)
+    logger.error('Failed to publish relays:', errorMsg)
     throw new Error(`Failed to publish relays: ${errorMsg}`)
   }
 }
@@ -135,3 +135,4 @@ export function isValidRelayUrl(url: string): boolean {
     return false
   }
 }
+

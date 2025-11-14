@@ -53,7 +53,7 @@
     try {
       await setWalletSharePreference(input.checked)
     } catch (err) {
-      console.error('Failed to update share preference', err)
+      logger.error('Failed to update share preference', err)
       // Revert checkbox on error
       input.checked = !input.checked
     }
@@ -384,7 +384,7 @@
     try {
       await setActiveNode(nodeId)
     } catch (err) {
-      console.error('Failed to switch node:', err)
+      logger.error('Failed to switch node:', err)
     } finally {
       nodeBusy = null
     }
@@ -411,7 +411,7 @@
       nwcError = null
       nwcSuccess = null
 
-      const success = setNWCFromURI(nwcUri)
+      const success = await setNWCFromURI(nwcUri)
       if (!success) {
         throw new Error('Invalid NWC connection string')
       }
@@ -446,7 +446,7 @@
       nwcInfo = info
       nwcDataLoaded = true
     } catch (err) {
-      console.error('Failed to load NWC data:', err)
+      logger.error('Failed to load NWC data:', err)
     } finally {
       loadingNWCData = false
     }
@@ -1138,3 +1138,4 @@
     {/if}
   </div>
 </div>
+

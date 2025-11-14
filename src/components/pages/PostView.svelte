@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { onMount } from 'svelte'
   import { goBack, openPost, openProfile, openPostById } from '$stores/router'
   import type { NavTab } from '$stores/nav'
@@ -41,12 +41,12 @@
       }
 
       clickedEvent = event
-      console.log('Building complete thread for event:', event.id.slice(0, 8))
+      logger.info('Building complete thread for event:', event.id.slice(0, 8))
       threadContext = await buildCompleteThread(event)
-      console.log(`Thread loaded: ${threadContext.totalPostsInThread} posts`)
+      logger.info(`Thread loaded: ${threadContext.totalPostsInThread} posts`)
       hydrateThreadSlices(threadContext)
     } catch (err) {
-      console.error('Failed to load thread view', err)
+      logger.error('Failed to load thread view', err)
       error = 'Unable to load this thread right now.'
       hydrateThreadSlices(threadContext)
     } finally {
@@ -212,4 +212,5 @@
     scrollbar-width: thin;
   }
 </style>
+
 

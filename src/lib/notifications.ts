@@ -14,6 +14,7 @@ import type { NostrEvent } from '$types/nostr'
 import { getNDK } from '$lib/ndk'
 import type { NDKEvent, NDKFilter, NDKSubscription, NDKSubscriptionOptions } from '@nostr-dev-kit/ndk'
 import { EMBER_EVENT_KIND, EMBER_TAG, atomicToXmr, decodeEmberPayload } from '$lib/ember'
+import { normalizeEvent } from '$lib/event-validation'
 
 let notificationSubscription: NDKSubscription | null = null
 const processedNotifications = new Set<string>()
@@ -49,7 +50,8 @@ async function ensureUserEvents(pubkey: string): Promise<void> {
 
   const next = new Set(existing)
   for (const ndkEvent of results as Set<NDKEvent>) {
-    const raw = ndkEvent.rawEvent()
+    const raw = normalizeEvent(ndkEvent)
+    if (!raw) continue
     next.add(raw.id)
     notificationEventCache.set(raw.id, raw)
   }
@@ -74,7 +76,8 @@ async function getTargetEvent(eventId: string): Promise<NostrEvent | null> {
   )
 
   for (const ndkEvent of results as Set<NDKEvent>) {
-    const raw = ndkEvent.rawEvent()
+    const raw = normalizeEvent(ndkEvent)
+    if (!raw) continue
     notificationEventCache.set(eventId, raw)
     return raw
   }
@@ -170,12 +173,14 @@ export async function startNotificationListener(pubkey: string): Promise<void> {
     false
   )
 
-  notificationSubscription.on('event', (event: NostrEvent) => {
-    void processNotificationEvent(event, pubkey)
+  notificationSubscription.on('event', (event: NostrEvent | NDKEvent) => {
+    const raw = normalizeEvent(event)
+    if (!raw) return
+    void processNotificationEvent(raw, pubkey)
   })
 
   ;(notificationSubscription as any).on?.('error', (err: unknown) => {
-    console.warn('Notification listener error:', err)
+    logger.warn('Notification listener error:', err)
   })
 }
 
@@ -210,7 +215,7 @@ async function processNotificationEvent(event: NostrEvent, userPubkey: string): 
         break
     }
   } catch (err) {
-    console.warn('Error processing notification:', err)
+    logger.warn('Error processing notification:', err)
   }
 }
 
@@ -480,3 +485,4 @@ export function stopNotificationListener(): void {
   notificationEventCache.clear()
   // Note: Don't clear notifications - they persist in localStorage
 }
+

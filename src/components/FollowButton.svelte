@@ -28,7 +28,7 @@
       }
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)
-      console.error('Follow action failed:', err)
+      logger.error('Follow action failed:', err)
     } finally {
       isLoading = false
     }
@@ -68,3 +68,4 @@
     {/if}
   </div>
 {/if}
+

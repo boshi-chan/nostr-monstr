@@ -36,7 +36,7 @@ function getStorage(): Storage | null {
   try {
     return window.localStorage
   } catch (err) {
-    console.warn('Interaction cache storage unavailable:', err)
+    logger.warn('Interaction cache storage unavailable:', err)
     return null
   }
 }
@@ -49,7 +49,7 @@ export function hydrateInteractionsFromCache(pubkey: string): void {
   try {
     raw = storage.getItem(getStorageKey(pubkey))
   } catch (err) {
-    console.warn('Failed to access interaction cache:', err)
+    logger.warn('Failed to access interaction cache:', err)
     return
   }
 
@@ -75,7 +75,7 @@ export function hydrateInteractionsFromCache(pubkey: string): void {
       commentedThreads.set(new Set(parsed.comments))
     }
   } catch (err) {
-    console.warn('Failed to hydrate interaction cache:', err)
+    logger.warn('Failed to hydrate interaction cache:', err)
   } finally {
     suppressPersistence = false
   }
@@ -98,7 +98,7 @@ export function persistInteractionsSnapshot(): void {
   try {
     storage.setItem(getStorageKey(user.pubkey), JSON.stringify(snapshot))
   } catch (err) {
-    console.warn('Failed to persist interaction cache:', err)
+    logger.warn('Failed to persist interaction cache:', err)
   }
 }
 
@@ -139,3 +139,4 @@ export function stopInteractionPersistence(): void {
     persistTimeout = null
   }
 }
+

@@ -40,7 +40,7 @@ export async function getFollowingList(): Promise<Set<string>> {
 
     return follows
   } catch (err) {
-    console.error('Failed to fetch following list:', err)
+    logger.error('Failed to fetch following list:', err)
     return new Set()
   }
 }
@@ -78,10 +78,10 @@ async function publishContactsList(contacts: Set<string>): Promise<void> {
     await event.sign(ndk.signer)
     await event.publish()
 
-    console.log('✓ Contacts list published successfully')
+    logger.info('✓ Contacts list published successfully')
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err)
-    console.error('Failed to publish contacts:', errorMsg)
+    logger.error('Failed to publish contacts:', errorMsg)
     throw new Error(`Failed to publish contacts: ${errorMsg}`)
   }
 }
@@ -99,14 +99,14 @@ export async function followUser(pubkey: string): Promise<void> {
     let currentFollowing = get(following)
     
     if (currentFollowing.size === 0) {
-      console.log('Following list empty, fetching from relays...')
+      logger.info('Following list empty, fetching from relays...')
       currentFollowing = await getFollowingList()
       following.set(currentFollowing)
-      console.log(`✓ Loaded ${currentFollowing.size} existing follows from relays`)
+      logger.info(`✓ Loaded ${currentFollowing.size} existing follows from relays`)
     }
 
     if (currentFollowing.has(pubkey)) {
-      console.log('Already following this user')
+      logger.info('Already following this user')
       return
     }
 
@@ -128,10 +128,10 @@ export async function followUser(pubkey: string): Promise<void> {
     // Update store
     following.set(newFollowing)
 
-    console.log(`✓ Now following ${pubkey.slice(0, 8)}... (total: ${newFollowing.size})`)
+    logger.info(`✓ Now following ${pubkey.slice(0, 8)}... (total: ${newFollowing.size})`)
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err)
-    console.error('Failed to follow user:', errorMsg)
+    logger.error('Failed to follow user:', errorMsg)
     throw new Error(`Failed to follow user: ${errorMsg}`)
   }
 }
@@ -149,14 +149,14 @@ export async function unfollowUser(pubkey: string): Promise<void> {
     let currentFollowing = get(following)
     
     if (currentFollowing.size === 0) {
-      console.log('Following list empty, fetching from relays...')
+      logger.info('Following list empty, fetching from relays...')
       currentFollowing = await getFollowingList()
       following.set(currentFollowing)
-      console.log(`✓ Loaded ${currentFollowing.size} existing follows from relays`)
+      logger.info(`✓ Loaded ${currentFollowing.size} existing follows from relays`)
     }
 
     if (!currentFollowing.has(pubkey)) {
-      console.log('Not following this user')
+      logger.info('Not following this user')
       return
     }
 
@@ -178,10 +178,10 @@ export async function unfollowUser(pubkey: string): Promise<void> {
     // Update store
     following.set(newFollowing)
 
-    console.log(`✓ Unfollowed ${pubkey.slice(0, 8)}... (total: ${newFollowing.size})`)
+    logger.info(`✓ Unfollowed ${pubkey.slice(0, 8)}... (total: ${newFollowing.size})`)
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err)
-    console.error('Failed to unfollow user:', errorMsg)
+    logger.error('Failed to unfollow user:', errorMsg)
     throw new Error(`Failed to unfollow user: ${errorMsg}`)
   }
 }
@@ -201,3 +201,4 @@ export function getFollowCount(): number {
   const currentFollowing = get(following)
   return currentFollowing.size
 }
+

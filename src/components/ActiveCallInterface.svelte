@@ -16,7 +16,7 @@
       isEnding = true
       await endCall($activeCall.id)
     } catch (err) {
-      console.error('Failed to end call:', err)
+      logger.error('Failed to end call:', err)
     } finally {
       isEnding = false
     }
@@ -146,3 +146,4 @@
     animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
 </style>
+

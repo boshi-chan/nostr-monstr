@@ -25,7 +25,7 @@
       initialized = false
     } else if (!initialized) {
       initialized = true
-      loadConversations().catch(err => console.error('Failed to load conversations:', err))
+      loadConversations().catch(err => logger.error('Failed to load conversations:', err))
     }
   }
 
@@ -100,3 +100,4 @@
     }
   }
 </style>
+

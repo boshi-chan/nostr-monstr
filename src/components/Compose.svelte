@@ -36,7 +36,7 @@
       showCompose.set(false)
     } catch (err) {
       error = String(err)
-      console.error('Publish failed:', err)
+      logger.error('Publish failed:', err)
     } finally {
       loading = false
     }
@@ -182,3 +182,4 @@
     color: rgba(166, 166, 166, 0.5);
   }
 </style>
+

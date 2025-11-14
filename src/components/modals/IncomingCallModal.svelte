@@ -30,7 +30,7 @@
       isAccepting = true
       await acceptCall($incomingCall.callId)
     } catch (err) {
-      console.error('Failed to accept call:', err)
+      logger.error('Failed to accept call:', err)
     } finally {
       isAccepting = false
     }
@@ -42,7 +42,7 @@
       isDeclining = true
       await declineCall($incomingCall.callId, 'user-declined')
     } catch (err) {
-      console.error('Failed to decline call:', err)
+      logger.error('Failed to decline call:', err)
     } finally {
       isDeclining = false
     }
@@ -166,3 +166,4 @@
     animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;
   }
 </style>
+

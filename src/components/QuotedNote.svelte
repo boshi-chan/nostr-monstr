@@ -46,7 +46,7 @@
         break
       }
     } catch (err) {
-      console.warn('Failed to fetch quoted note', err)
+      logger.warn('Failed to fetch quoted note', err)
     } finally {
       loading = false
     }
@@ -154,4 +154,5 @@
     overflow: hidden;
   }
 </style>
+
 

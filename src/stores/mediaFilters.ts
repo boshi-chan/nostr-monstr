@@ -59,7 +59,7 @@ function loadMediaFilters(): MediaFilters {
       }
     }
   } catch (e) {
-    console.warn('Failed to load media filters from localStorage:', e)
+    logger.warn('Failed to load media filters from localStorage:', e)
   }
 
   return DEFAULT_FILTERS
@@ -74,7 +74,7 @@ mediaFilters.subscribe(value => {
     try {
       localStorage.setItem('mediaFilters', JSON.stringify(value))
     } catch (e) {
-      console.warn('Failed to save media filters to localStorage:', e)
+      logger.warn('Failed to save media filters to localStorage:', e)
     }
   }
 })
@@ -117,3 +117,4 @@ export function getMediaFilterForFeed(feedSource: FeedSource): MediaFilterSettin
 export function resetMediaFilters() {
   mediaFilters.set(DEFAULT_FILTERS)
 }
+

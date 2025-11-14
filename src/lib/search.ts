@@ -11,6 +11,7 @@ import type { NostrEvent } from '$types/nostr'
 import type { SearchResult } from '$stores/search'
 import type { NDKSubscriptionOptions } from '@nostr-dev-kit/ndk'
 import { nip19 } from 'nostr-tools'
+import { normalizeEvent } from '$lib/event-validation'
 
 /**
  * Search for posts by content, hashtags, or note ID
@@ -45,8 +46,9 @@ export async function searchPosts(query: string, limit: number = 50): Promise<No
 
       await new Promise<void>(resolve => {
         sub.on('event', (event: any) => {
-          const raw = event.rawEvent?.() ?? event
-          results.push(raw as NostrEvent)
+          const raw = normalizeEvent(event as NostrEvent)
+          if (!raw) return
+          results.push(raw)
         })
 
         sub.on('eose', () => {
@@ -80,8 +82,9 @@ export async function searchPosts(query: string, limit: number = 50): Promise<No
 
       await new Promise<void>(resolve => {
         sub.on('event', (event: any) => {
-          const raw = event.rawEvent?.() ?? event
-          results.push(raw as NostrEvent)
+          const raw = normalizeEvent(event as NostrEvent)
+          if (!raw) return
+          results.push(raw)
         })
 
         sub.on('eose', () => {
@@ -119,10 +122,11 @@ export async function searchPosts(query: string, limit: number = 50): Promise<No
 
       await new Promise<void>(resolve => {
         sub.on('event', (event: any) => {
-          const raw = event.rawEvent?.() ?? event
+          const raw = normalizeEvent(event as NostrEvent)
+          if (!raw) return
           if (!seen.has(raw.id)) {
             seen.add(raw.id)
-            results.push(raw as NostrEvent)
+            results.push(raw)
           }
         })
 
@@ -154,10 +158,11 @@ export async function searchPosts(query: string, limit: number = 50): Promise<No
 
     await new Promise<void>(resolve => {
       subscription.on('event', (event: any) => {
-        const raw = event.rawEvent?.() ?? event
+        const raw = normalizeEvent(event as NostrEvent)
+        if (!raw) return
         if (!seen.has(raw.id)) {
           seen.add(raw.id)
-          results.push(raw as NostrEvent)
+          results.push(raw)
         }
       })
 
@@ -184,7 +189,7 @@ export async function searchPosts(query: string, limit: number = 50): Promise<No
 
     return filtered.slice(0, limit)
   } catch (err) {
-    console.error('Post search error:', err)
+    logger.error('Post search error:', err)
     return []
   }
 }
@@ -319,7 +324,8 @@ export async function searchUsers(
 
     await new Promise<void>(resolve => {
       subscription.on('event', (event: any) => {
-        const raw = event.rawEvent?.() ?? event
+        const raw = normalizeEvent(event as NostrEvent)
+        if (!raw) return
         if (!seen.has(raw.pubkey)) {
           seen.add(raw.pubkey)
           try {
@@ -384,7 +390,7 @@ export async function searchUsers(
 
     return results.slice(0, limit)
   } catch (err) {
-    console.error('User search error:', err)
+    logger.error('User search error:', err)
     return []
   }
 }
@@ -422,7 +428,8 @@ export async function search(query: string): Promise<SearchResult[]> {
 
     return results
   } catch (err) {
-    console.error('Search error:', err)
+    logger.error('Search error:', err)
     return []
   }
 }
+

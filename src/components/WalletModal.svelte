@@ -1,14 +1,12 @@
 <script lang="ts">
   import { fade } from 'svelte/transition'
   import { walletState, showWallet } from '$stores/wallet'
-  import { currentUser } from '$stores/auth'
   import {
     initWallet,
     setActiveNode,
     saveCustomNode,
     clearCustomNode,
     refreshWallet,
-    restoreWalletFromNostr,
     sendMonero,
     deleteWallet,
     getTransactionHistory,
@@ -31,7 +29,6 @@
   let activePanel: 'overview' | 'deposit' | 'withdraw' | 'history' = 'overview'
   let error: string | null = null
   let loading = false
-  let restoreBusy = false
   let showSeedPhrase = false
   let recentWallet: WalletInfo | null = null
   let nodeBusy: string | null = null
@@ -102,7 +99,6 @@
     activePanel = 'overview'
     error = null
     loading = false
-    restoreBusy = false
     showSeedPhrase = false
     recentWallet = null
     nodeBusy = null
@@ -174,26 +170,10 @@
       importSeed = ''
       restoreHeightOverride = ''
     } catch (err) {
-      console.error('Wallet setup failed', err)
+      logger.error('Wallet setup failed', err)
       error = err instanceof Error ? err.message : 'Unable to set up wallet. Please try again.'
     } finally {
       loading = false
-    }
-  }
-
-  async function handleRestoreViaNostr(): Promise<void> {
-    restoreBusy = true
-    error = null
-    try {
-      const wallet = await restoreWalletFromNostr()
-      recentWallet = wallet
-      showSeedPhrase = true
-      importSeed = ''
-    } catch (err) {
-      console.error('Wallet restore failed', err)
-      error = err instanceof Error ? err.message : 'Unable to restore wallet. Please try again.'
-    } finally {
-      restoreBusy = false
     }
   }
 
@@ -202,7 +182,7 @@
     try {
       await refreshWallet()
     } catch (err) {
-      console.error('Wallet sync failed', err)
+      logger.error('Wallet sync failed', err)
       syncError = err instanceof Error ? err.message : 'Unable to refresh balance.'
     }
   }
@@ -214,7 +194,7 @@
     try {
       await setActiveNode(nodeId)
     } catch (err) {
-      console.error('Failed to switch node', err)
+      logger.error('Failed to switch node', err)
       error = 'Unable to switch node. Please try again.'
     } finally {
       nodeBusy = null
@@ -226,7 +206,7 @@
     try {
       await navigator.clipboard.writeText(value)
     } catch (err) {
-      console.error('Clipboard copy failed', err)
+      logger.error('Clipboard copy failed', err)
       error = `Unable to copy ${label}.`
     }
   }
@@ -267,7 +247,7 @@
       sendRecipientPubkey = ''
       sendNoteId = null
     } catch (err) {
-      console.error('Failed to send Ember payment', err)
+      logger.error('Failed to send Ember payment', err)
       sendError = err instanceof Error ? err.message : 'Unable to send payment. Please try again.'
     } finally {
       sendLoading = false
@@ -291,7 +271,7 @@
       })
       customFormTouched = false
     } catch (err) {
-      console.error('Failed to save custom node', err)
+      logger.error('Failed to save custom node', err)
       customNodeError =
         err instanceof Error ? err.message : 'Unable to save custom node. Check the URL and try again.'
     } finally {
@@ -309,7 +289,7 @@
       customNodeUri = ''
       customFormTouched = false
     } catch (err) {
-      console.error('Failed to remove custom node', err)
+      logger.error('Failed to remove custom node', err)
       customNodeError = err instanceof Error ? err.message : 'Unable to remove custom node.'
     } finally {
       customNodeBusy = false
@@ -354,11 +334,26 @@
       resetForm()
       showWallet.set(false)
     } catch (err) {
-      console.error('Failed to delete wallet', err)
+      logger.error('Failed to delete wallet', err)
       error = 'Unable to delete wallet. Please try again.'
     } finally {
       deleteBusy = false
     }
+  }
+
+  function downloadSeed(seed: string | null): void {
+    if (!seed || typeof window === 'undefined') return
+    const timestamp = new Date().toISOString().slice(0, 10)
+    const contents = `Monstr Ember Wallet Seed (${timestamp})\n\n${seed}\n`
+    const blob = new Blob([contents], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `ember-wallet-seed-${timestamp}.txt`
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    URL.revokeObjectURL(url)
   }
   async function generateDepositQr(address: string): Promise<void> {
     try {
@@ -366,7 +361,7 @@
       lastQrAddress = address
       depositQr = await qrToDataURL(address, { margin: 1, scale: 6 })
     } catch (err) {
-      console.error('Failed to generate deposit QR', err)
+      logger.error('Failed to generate deposit QR', err)
       qrError = 'Unable to generate QR code right now.'
       depositQr = null
     }
@@ -385,12 +380,12 @@
     historyError = null
     try {
       transactions = await getTransactionHistory()
-      console.log('📜 Loaded transaction history:', transactions.length, 'transactions')
+      logger.info('📜 Loaded transaction history:', transactions.length, 'transactions')
       if (transactions.length > 0) {
-        console.log('First transaction:', transactions[0])
+        logger.info('First transaction:', transactions[0])
       }
     } catch (err) {
-      console.error('Failed to load transaction history', err)
+      logger.error('Failed to load transaction history', err)
       historyError = err instanceof Error ? err.message : 'Unable to load transaction history.'
     } finally {
       loadingHistory = false
@@ -479,7 +474,7 @@
             {#if walletMode === 'setup'}
               Create or import a Monero wallet to send and receive tips.
             {:else if walletMode === 'pending'}
-              Your wallet is locked. Enter your PIN to unlock or restore a backup.
+              Your wallet is locked. Enter your PIN to unlock. There is no remote backup.
             {:else}
               Wallet ready. Select a node, copy your address, or lock when done.
             {/if}
@@ -549,23 +544,10 @@
             {loading ? 'Preparing wallet…' : activeTab === 'create' ? 'Create wallet' : 'Import wallet'}
           </button>
 
-          {#if $currentUser}
-            <button
-              class="mt-3 w-full rounded-2xl border border-primary/50 px-4 py-2 text-sm font-semibold text-primary transition hover:border-primary hover:bg-primary/10"
-              type="button"
-              on:click={handleRestoreViaNostr}
-              disabled={restoreBusy}
-            >
-              {restoreBusy ? 'Restoring…' : 'Restore from Nostr backup'}
-            </button>
-            <p class="mt-2 text-xs text-text-muted/80">
-              Secure your seed phrase offline—your wallet automatically unlocks on this device.
-            </p>
-          {:else}
-            <p class="mt-3 text-xs text-text-muted/75">
-              Log in with your Nostr key to sync a private wallet backup.
-            </p>
-          {/if}
+          <p class="mt-3 rounded-2xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-xs text-amber-100">
+            There is no remote backup. Write down your 25-word seed (or download it once created) or this wallet
+            cannot be recovered if the device is lost.
+          </p>
         {:else if walletMode === 'pending'}
           {#if $walletState.locked}
             <div class="rounded-2xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm text-amber-100 space-y-2">
@@ -574,7 +556,7 @@
                 Reminder: this is a hot wallet. Only keep small balances on this browser and never share your PIN.
               </p>
             </div>
-            <div class="flex flex-col gap-3 md:grid md:grid-cols-3">
+            <div class="flex flex-col gap-3 md:flex-row">
               <button
                 class="btn-primary flex-1 justify-center"
                 type="button"
@@ -584,14 +566,6 @@
                 {unlockBusy ? 'Unlocking…' : 'Unlock with PIN'}
               </button>
               <button
-                class="btn-secondary flex-1 justify-center"
-                type="button"
-                on:click={handleRestoreViaNostr}
-                disabled={restoreBusy}
-              >
-                {restoreBusy ? 'Restoring…' : 'Restore backup'}
-              </button>
-              <button
                 class="flex-1 rounded-2xl border border-dark-border/60 px-4 py-2 text-sm font-semibold text-text-soft transition hover:border-rose-400/60 hover:text-rose-200 disabled:opacity-50"
                 type="button"
                 on:click={handleDeleteWallet}
@@ -600,20 +574,15 @@
                 {deleteBusy ? 'Removing…' : 'Remove local wallet'}
               </button>
             </div>
+            <p class="text-xs text-text-muted/80">
+              Lost your PIN? Remove the wallet and re-import using the seed phrase you wrote down—there is no remote backup.
+            </p>
           {:else}
             <div class="rounded-2xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm text-amber-100 space-y-2">
-              <p>Your wallet setup is incomplete. Restore from backup or remove the local data to start fresh.</p>
+              <p>Your wallet setup is incomplete. Remove the local data and re-import using your seed phrase.</p>
             </div>
             <div class="flex flex-col gap-3 md:flex-row">
               <button
-                class="btn-primary flex-1 justify-center"
-                type="button"
-                on:click={handleRestoreViaNostr}
-                disabled={restoreBusy}
-              >
-                {restoreBusy ? 'Restoring…' : 'Restore backup'}
-              </button>
-              <button
                 class="flex-1 rounded-2xl border border-dark-border/60 px-4 py-2 text-sm font-semibold text-text-soft transition hover:border-rose-400/60 hover:text-rose-200 disabled:opacity-50"
                 type="button"
                 on:click={handleDeleteWallet}
@@ -622,6 +591,9 @@
                 {deleteBusy ? 'Removing…' : 'Remove local wallet'}
               </button>
             </div>
+            <p class="text-xs text-text-muted/80">
+              Recreate or import the wallet using your 25-word seed to continue.
+            </p>
           {/if}
         {:else}
           <div class="flex gap-2 rounded-2xl border border-dark-border/60 bg-dark/60 p-1 text-sm font-semibold text-text-muted">
@@ -783,30 +755,9 @@
               </div>
             </div>
 
-            <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4">
-              <div class="flex items-center justify-between">
-                <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Backup</p>
-                <span
-                  class={`rounded-full px-3 py-1 text-xs font-semibold ${
-                    $walletState.backupStatus === 'ok'
-                      ? 'bg-emerald-500/10 text-emerald-300'
-                      : $walletState.backupStatus === 'syncing'
-                      ? 'bg-primary/10 text-primary'
-                      : 'bg-amber-500/10 text-amber-200'
-                  }`}
-                >
-                  {$walletState.backupStatus === 'ok'
-                    ? 'Synced'
-                    : $walletState.backupStatus === 'syncing'
-                    ? 'Syncing'
-                    : 'Pending'}
-                </span>
-              </div>
-              <p class="mt-2 text-sm text-text-soft/90">
-                {$walletState.remoteBackupAvailable
-                  ? `Encrypted backup stored ${formatRelativeTime($walletState.lastBackupAt)} via your Nostr login.`
-                  : 'Log in with your Nostr key to keep a private backup in sync.'}
-              </p>
+            <div class="rounded-2xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-100">
+              No remote backups exist for this wallet. Write down your 25-word seed or download it below - losing it
+              means losing your Embers.
             </div>
 
             <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4">
@@ -822,16 +773,31 @@
               </div>
               {#if showSeedPhrase && displayMnemonic}
                 <p class="mt-3 break-words text-sm leading-relaxed text-text-soft/90">{displayMnemonic}</p>
-                <button
-                  type="button"
-                  class="mt-3 rounded-full border border-dark-border/60 px-4 py-2 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white"
-                  on:click={() => copyToClipboard(displayMnemonic, 'seed phrase')}
-                >
-                  Copy seed
-                </button>
+                <div class="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    class="rounded-full border border-dark-border/60 px-4 py-2 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white"
+                    on:click={() => copyToClipboard(displayMnemonic, 'seed phrase')}
+                  >
+                    Copy seed
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-full border border-dark-border/60 px-4 py-2 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white"
+                    on:click={() => downloadSeed(displayMnemonic)}
+                  >
+                    Download seed (.txt)
+                  </button>
+                </div>
+                <p class="mt-2 text-xs text-amber-200">
+                  Store this seed offline. Without it, this wallet cannot be recovered.
+                </p>
               {:else}
                 <p class="mt-3 text-sm text-text-muted">
                   Keep this phrase private. You'll need it if you ever reinstall the app or move wallets.
+                </p>
+                <p class="mt-2 text-xs text-amber-200">
+                  There is no remote backup. Reveal and record your seed before clearing this wallet.
                 </p>
               {/if}
             </div>
@@ -1059,3 +1025,4 @@
 {/if}
 
 <svelte:window on:keydown={handleKeydown} />
+

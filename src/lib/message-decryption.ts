@@ -32,7 +32,7 @@ export async function decryptMessage(event: NostrEvent): Promise<string | null> 
 
     // Must have a signer to decrypt (will prompt user)
     if (!signer) {
-      console.warn('Cannot decrypt: no signer available (user not authenticated)')
+      logger.warn('Cannot decrypt: no signer available (user not authenticated)')
       return null
     }
 
@@ -43,7 +43,7 @@ export async function decryptMessage(event: NostrEvent): Promise<string | null> 
     // Get our pubkey from signer
     const user = await signer.user()
     if (!user?.pubkey) {
-      console.warn('Cannot decrypt: failed to get user pubkey from signer')
+      logger.warn('Cannot decrypt: failed to get user pubkey from signer')
       return null
     }
 
@@ -59,64 +59,64 @@ export async function decryptMessage(event: NostrEvent): Promise<string | null> 
     }
 
     if (!otherPubkey) {
-      console.warn('Cannot determine message recipient/sender for decryption')
+      logger.warn('Cannot determine message recipient/sender for decryption')
       return null
     }
 
-    console.log(`📦 Decrypting message from ${otherPubkey.slice(0, 8)}...`)
+    logger.info(`📦 Decrypting message from ${otherPubkey.slice(0, 8)}...`)
 
     // Handle different encryption types
     let decrypted: string | null = null
 
     if (event.kind === DIRECT_MESSAGE_KIND) {
       // NIP-04 (legacy) - use signer's decrypt method
-      console.log('📦 NIP-04 decryption (will prompt signer)...')
+      logger.info('📦 NIP-04 decryption (will prompt signer)...')
       try {
         // This will prompt the user's signer!
         const counterpart = ndk.getUser({ pubkey: otherPubkey })
         decrypted = await signer.decrypt(counterpart, event.content)
-        console.log('✓ NIP-04 message decrypted')
+        logger.info('✓ NIP-04 message decrypted')
       } catch (err) {
-        console.error('Failed to decrypt NIP-04:', err)
+        logger.error('Failed to decrypt NIP-04:', err)
         return null
       }
     } else if (event.kind === NIP44_KIND) {
       // NIP-44 (modern) - use signer's decrypt method
-      console.log('📦 NIP-44 decryption (will prompt signer)...')
+      logger.info('📦 NIP-44 decryption (will prompt signer)...')
       try {
         // This will prompt the user's signer!
         const counterpart = ndk.getUser({ pubkey: otherPubkey })
         decrypted = await signer.decrypt(counterpart, event.content)
-        console.log('✓ NIP-44 message decrypted')
+        logger.info('✓ NIP-44 message decrypted')
       } catch (err) {
-        console.error('Failed to decrypt NIP-44:', err)
+        logger.error('Failed to decrypt NIP-44:', err)
         return null
       }
     } else if (event.kind === GIFTWRAP_KIND) {
       // NIP-17 / NIP-59 (giftwrap) - two-layer unwrapping
-      console.log('📦 NIP-17/59 giftwrap (will prompt signer)...')
+      logger.info('📦 NIP-17/59 giftwrap (will prompt signer)...')
       try {
         // Step 1: Verify we are the recipient
         const taggedRecipient = event.tags.find(t => t[0] === 'p')?.[1]
         
         if (!taggedRecipient) {
-          console.warn('Gift wrap missing recipient tag')
+          logger.warn('Gift wrap missing recipient tag')
           return null
         }
         
         if (taggedRecipient !== user.pubkey) {
-          console.warn('Gift wrap not addressed to us')
+          logger.warn('Gift wrap not addressed to us')
           return null
         }
         
-        console.log(`📦 Decrypting gift wrap addressed to us (ephemeral sender: ${event.pubkey.slice(0, 8)})`)
+        logger.info(`📦 Decrypting gift wrap addressed to us (ephemeral sender: ${event.pubkey.slice(0, 8)})`)
         
         // Step 2: Decrypt outer gift wrap
         // CRITICAL: The gift wrap is encrypted TO US (the recipient)
         // We use OUR pubkey to decrypt, not the ephemeral sender key
         const recipient = ndk.getUser({ pubkey: user.pubkey })
         const sealJson = await signer.decrypt(recipient, event.content)
-        console.log('✓ Gift wrap outer layer decrypted')
+        logger.info('✓ Gift wrap outer layer decrypted')
 
         // Step 3: Parse the seal (middle layer)
         const seal = JSON.parse(sealJson) as NostrEvent
@@ -124,45 +124,45 @@ export async function decryptMessage(event: NostrEvent): Promise<string | null> 
         // Verify it's actually a seal
         if (seal.kind === SEAL_KIND) {
           // This is NIP-17 with seal layer
-          console.log('📦 NIP-17 seal detected, unwrapping...')
-          console.log(`   Real sender: ${seal.pubkey.slice(0, 8)}`)
+          logger.info('📦 NIP-17 seal detected, unwrapping...')
+          logger.info(`   Real sender: ${seal.pubkey.slice(0, 8)}`)
 
           // Step 4: Decrypt seal to get rumor
           // The seal is encrypted from the REAL sender to us
           const realSender = ndk.getUser({ pubkey: seal.pubkey })
           const rumorJson = await signer.decrypt(realSender, seal.content)
-          console.log('✓ NIP-17 seal decrypted')
+          logger.info('✓ NIP-17 seal decrypted')
 
           // Step 5: Parse the rumor (actual message)
           const rumor = JSON.parse(rumorJson) as Partial<NostrEvent>
           decrypted = rumor.content || null
-          console.log('✓ NIP-17 message fully unwrapped:', decrypted?.slice(0, 30) + '...')
+          logger.info('✓ NIP-17 message fully unwrapped:', decrypted?.slice(0, 30) + '...')
         } else {
           // Fallback: treat seal content as the message (NIP-59 style)
           decrypted = seal.content || sealJson
-          console.log('✓ NIP-59 message decrypted (no seal layer)')
+          logger.info('✓ NIP-59 message decrypted (no seal layer)')
         }
       } catch (err) {
-        console.error('Failed to decrypt NIP-17/59:', err)
-        console.error('  Event ID:', event.id.slice(0, 8))
-        console.error('  Ephemeral pubkey:', event.pubkey.slice(0, 8))
-        console.error('  Tagged recipient:', event.tags.find(t => t[0] === 'p')?.[1]?.slice(0, 8))
+        logger.error('Failed to decrypt NIP-17/59:', err)
+        logger.error('  Event ID:', event.id.slice(0, 8))
+        logger.error('  Ephemeral pubkey:', event.pubkey.slice(0, 8))
+        logger.error('  Tagged recipient:', event.tags.find(t => t[0] === 'p')?.[1]?.slice(0, 8))
         return null
       }
     } else {
-      console.warn(`Unknown message kind: ${event.kind}`)
+      logger.warn(`Unknown message kind: ${event.kind}`)
       return null
     }
 
     if (!decrypted) {
-      console.warn('Decryption returned empty string')
+      logger.warn('Decryption returned empty string')
       return null
     }
 
-    console.log('✓ Message decrypted successfully')
+    logger.info('✓ Message decrypted successfully')
     return decrypted
   } catch (err) {
-    console.error('Message decryption error:', err)
+    logger.error('Message decryption error:', err)
     return null
   }
 }
@@ -180,13 +180,13 @@ export async function decryptMessageWithMetadata(event: NostrEvent): Promise<{
     const signer = ndk.signer
 
     if (!signer) {
-      console.warn('Cannot decrypt: no signer available')
+      logger.warn('Cannot decrypt: no signer available')
       return null
     }
 
     const user = await signer.user()
     if (!user?.pubkey) {
-      console.warn('Cannot decrypt: failed to get user pubkey')
+      logger.warn('Cannot decrypt: failed to get user pubkey')
       return null
     }
 
@@ -197,20 +197,20 @@ export async function decryptMessageWithMetadata(event: NostrEvent): Promise<{
         const recipientPubkey = event.tags.find(t => t[0] === 'p')?.[1]
         
         if (!recipientPubkey || recipientPubkey !== user.pubkey) {
-          console.warn('Gift wrap not for us:', {
+          logger.warn('Gift wrap not for us:', {
             tagged: recipientPubkey?.slice(0, 8),
             us: user.pubkey.slice(0, 8),
           })
           return null
         }
         
-        console.log(`📦 Unwrapping gift wrap for metadata (ephemeral: ${event.pubkey.slice(0, 8)})`)
+        logger.info(`📦 Unwrapping gift wrap for metadata (ephemeral: ${event.pubkey.slice(0, 8)})`)
         
         // Step 2: Decrypt outer gift wrap
         // CRITICAL: The gift wrap is encrypted TO US (the recipient)
         const recipient = ndk.getUser({ pubkey: user.pubkey })
         const sealJson = await signer.decrypt(recipient, event.content)
-        console.log('✓ Gift wrap decrypted')
+        logger.info('✓ Gift wrap decrypted')
 
         // Step 3: Parse seal
         const seal = JSON.parse(sealJson) as NostrEvent
@@ -218,19 +218,19 @@ export async function decryptMessageWithMetadata(event: NostrEvent): Promise<{
         if (seal.kind === SEAL_KIND) {
           // NIP-17: Real sender is in the seal
           const realSenderPubkey = seal.pubkey
-          console.log(`   Real sender identified: ${realSenderPubkey.slice(0, 8)}`)
+          logger.info(`   Real sender identified: ${realSenderPubkey.slice(0, 8)}`)
 
           // Step 4: Decrypt seal to get rumor
           // The seal is encrypted from the REAL sender to us
           const realSender = ndk.getUser({ pubkey: realSenderPubkey })
           const rumorJson = await signer.decrypt(realSender, seal.content)
-          console.log('✓ Seal decrypted')
+          logger.info('✓ Seal decrypted')
 
           // Step 5: Parse rumor
           const rumor = JSON.parse(rumorJson) as Partial<NostrEvent>
           const content = rumor.content || ''
 
-          console.log('✓ Gift wrap fully unwrapped:', {
+          logger.info('✓ Gift wrap fully unwrapped:', {
             realSender: realSenderPubkey.slice(0, 8),
             contentPreview: content.slice(0, 30),
           })
@@ -241,14 +241,14 @@ export async function decryptMessageWithMetadata(event: NostrEvent): Promise<{
           }
         } else {
           // NIP-59: Use seal pubkey as sender
-          console.log('âš ï¸  No seal layer found (NIP-59 style)')
+          logger.info('âš ï¸  No seal layer found (NIP-59 style)')
           return {
             content: seal.content || sealJson,
             realSenderPubkey: seal.pubkey,
           }
         }
       } catch (err) {
-        console.error('Failed to decrypt gift wrap:', err)
+        logger.error('Failed to decrypt gift wrap:', err)
         return null
       }
     } else {
@@ -262,7 +262,7 @@ export async function decryptMessageWithMetadata(event: NostrEvent): Promise<{
       }
     }
   } catch (err) {
-    console.error('Decrypt with metadata error:', err)
+    logger.error('Decrypt with metadata error:', err)
     return null
   }
 }
@@ -280,7 +280,7 @@ export async function decryptMessages(events: NostrEvent[]): Promise<Map<string,
         decrypted.set(event.id, content)
       }
     } catch (err) {
-      console.error(`Failed to decrypt event ${event.id}:`, err)
+      logger.error(`Failed to decrypt event ${event.id}:`, err)
     }
   }
 
@@ -369,3 +369,4 @@ export async function decryptMessageCached(event: NostrEvent): Promise<string | 
 
   return decrypted
 }
+

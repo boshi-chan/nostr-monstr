@@ -8,7 +8,7 @@
   import SearchIcon from 'lucide-svelte/icons/search'
 
   onMount(() => {
-    loadConversations().catch(err => console.error('DM bootstrap failed:', err))
+    loadConversations().catch(err => logger.error('DM bootstrap failed:', err))
   })
 
   let searchQuery = ''
@@ -225,3 +225,4 @@
     background: rgba(255, 255, 255, 0.2);
   }
 </style>
+

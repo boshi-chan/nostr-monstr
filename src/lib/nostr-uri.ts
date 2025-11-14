@@ -71,7 +71,7 @@ export function parseNostrURI(uri: string): NostrURI | null {
     }
 
     if (type === 'unknown') {
-      console.warn('Unknown Nostr URI type:', encoded.slice(0, 20))
+      logger.warn('Unknown Nostr URI type:', encoded.slice(0, 20))
       return null
     }
 
@@ -81,7 +81,7 @@ export function parseNostrURI(uri: string): NostrURI | null {
       raw: uri,
     }
   } catch (err) {
-    console.warn('Failed to parse Nostr URI:', err)
+    logger.warn('Failed to parse Nostr URI:', err)
     return null
   }
 }
@@ -211,3 +211,4 @@ export function isProfileURI(uri: NostrURI): boolean {
 export function isAddressableEventURI(uri: NostrURI): boolean {
   return uri.type === 'naddr'
 }
+

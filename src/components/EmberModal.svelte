@@ -71,7 +71,7 @@
         closeModal()
       }, 1000)
     } catch (err) {
-      console.error('Failed to send Ember', err)
+      logger.error('Failed to send Ember', err)
       error = err instanceof Error ? err.message : 'Unable to send Ember.'
     } finally {
       loading = false
@@ -202,3 +202,4 @@
 {/if}
 
 <svelte:window on:keydown={handleKeydown} />
+

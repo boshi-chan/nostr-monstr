@@ -11,7 +11,7 @@ let walletExistsCache: boolean | null = null
  */
 function loadWalletModule() {
   if (!walletModulePromise) {
-    console.log('📦 Lazy loading wallet module (monero-ts)...')
+    logger.info('📦 Lazy loading wallet module (monero-ts)...')
     walletModulePromise = import('./index')
   }
   return walletModulePromise
@@ -46,7 +46,7 @@ export async function hydrateWalletStateLazy(): Promise<void> {
   const wallet = await loadWalletModule()
   await wallet.hydrateWalletState()
   walletExistsCache = walletExists
-  console.log(walletExists ? '🔥 Wallet hydrated and ready for auto-sync' : '🚫 No wallet found - wallet state reset')
+  logger.info(walletExists ? '🔥 Wallet hydrated and ready for auto-sync' : '🚫 No wallet found - wallet state reset')
 }
 
 
@@ -113,12 +113,6 @@ export async function getTransactionHistory() {
   return wallet.getTransactionHistory()
 }
 
-export async function restoreWalletFromNostr() {
-  invalidateWalletCache() // Wallet will exist after this
-  const wallet = await loadWalletModule()
-  return wallet.restoreWalletFromNostr()
-}
-
 export async function setWalletSharePreference(enabled: boolean) {
   const wallet = await loadWalletModule()
   return wallet.setWalletSharePreference(enabled)
@@ -178,3 +172,4 @@ export async function loadCachedSeed(): Promise<string | null> {
   const wallet = await loadWalletModule()
   return wallet.getCachedSeed()
 }
+

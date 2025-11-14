@@ -1,7 +1,6 @@
 <script lang="ts">
   import { walletState, showWallet } from '$stores/wallet'
   import { lockWallet, unlockWallet } from '$lib/wallet/lazy'
-  import EmberIcon from './icons/EmberIcon.svelte'
   import LockIcon from 'lucide-svelte/icons/lock'
   import LockOpenIcon from 'lucide-svelte/icons/lock-open'
 
@@ -67,7 +66,7 @@
     if ($walletState.isSyncing) {
       return {
         label: syncPercent !== null ? `Syncing ${syncPercent}%` : 'Syncing…',
-        classes: 'border border-sky-500/40 bg-sky-500/10 text-sky-100',
+        classes: 'border border-amber-400/40 bg-amber-500/10 text-amber-100',
       }
     }
     return {
@@ -84,7 +83,7 @@
       await unlockWallet()
     } catch (err) {
       if (!(err instanceof Error && err.message === 'WALLET_PIN_CANCELLED')) {
-        console.error('Failed to unlock wallet:', err)
+        logger.error('Failed to unlock wallet:', err)
       }
     } finally {
       lockBusy = false
@@ -97,7 +96,7 @@
     try {
       await lockWallet()
     } catch (err) {
-      console.error('Failed to lock wallet:', err)
+      logger.error('Failed to lock wallet:', err)
     } finally {
       lockBusy = false
     }
@@ -110,8 +109,10 @@
       {#if $walletState.hasWallet}
         <button
           type="button"
-          class={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-dark-border/60 text-xs transition ${status.accent} ${
-            isLocked ? 'hover:border-emerald-400/60 hover:text-emerald-200' : 'hover:border-rose-400/60 hover:text-rose-200'
+          class={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-dark-border/60 text-xs transition ${
+            isLocked
+              ? 'text-rose-300 hover:border-emerald-400/60 hover:text-emerald-200'
+              : 'text-emerald-300 hover:border-rose-400/60 hover:text-rose-200'
           } ${lockBusy ? 'cursor-not-allowed opacity-50' : ''}`}
           aria-label={isLocked ? 'Unlock wallet' : 'Lock wallet'}
           on:click={isLocked ? handleUnlock : handleLock}
@@ -124,17 +125,12 @@
           {/if}
         </button>
       {/if}
-      <span class="flex h-6 w-6 flex-shrink-0 items-center justify-center text-amber-300" aria-hidden="true">
-        <EmberIcon size={14} />
+      <span
+        aria-label={status.label}
+        class={`hidden whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold sm:inline-flex ${statusChip.classes}`}
+      >
+        {statusChip.label}
       </span>
-      <div class="flex min-w-0 items-center gap-2">
-        <span
-          aria-label={status.label}
-          class={`hidden whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold sm:inline-flex ${statusChip.classes}`}
-        >
-          {statusChip.label}
-        </span>
-      </div>
       <span
         aria-label={status.label}
         class={`sm:hidden whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ${statusChip.classes}`}
@@ -164,3 +160,4 @@
     </div>
   </div>
 </div>
+

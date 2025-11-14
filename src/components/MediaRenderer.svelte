@@ -171,27 +171,18 @@
 
 <!-- Embeds/Links -->
 {#if embeds.length > 0}
-  <div class="mt-4 space-y-3">
+  <div class="mt-4 space-y-2 text-sm">
     {#each embeds as embed, index (index)}
       <a
         href={embed}
         target="_blank"
         rel="noopener noreferrer"
-        class="block rounded-2xl border border-dark-border bg-dark-lighter p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/60"
+        class="inline-flex w-full items-center gap-2 break-all rounded-xl border border-dark-border/60 px-3 py-2 text-primary/90 transition-colors hover:border-primary/60 hover:text-primary"
       >
-        <div class="flex items-center gap-3">
-          <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-primary/15 text-sm text-primary">
-            🌐
-          </div>
-          <div class="min-w-0 flex-1">
-            <p class="truncate text-sm font-semibold text-text-soft">
-              {extractDomain(embed)}
-            </p>
-            <p class="truncate text-xs text-text-muted">
-              {embed}
-            </p>
-          </div>
-        </div>
+        <span class="text-[10px] uppercase tracking-[0.35em] text-text-muted/80">
+          {extractDomain(embed)}
+        </span>
+        <span class="flex-1">{embed}</span>
       </a>
     {/each}
   </div>

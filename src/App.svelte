@@ -47,7 +47,7 @@
 
       isInitialized.set(true)
     } catch (err) {
-      console.error('App initialization error:', err)
+      logger.error('App initialization error:', err)
       initError.set(String(err))
       isInitialized.set(true)
     }
@@ -117,7 +117,7 @@
         return
       }
     })().catch(err => {
-      console.error('Subscription error:', err)
+      logger.error('Subscription error:', err)
       feedError.set(String(err))
       feedLoading.set(false)
     })
@@ -147,7 +147,7 @@
     if (interactionsLoadedFor !== $currentUser.pubkey) {
       interactionsLoadedFor = $currentUser.pubkey
       loadUserInteractions().catch(err => {
-        console.error('Failed to load user interactions:', err)
+        logger.error('Failed to load user interactions:', err)
       })
     }
   } else {
@@ -200,3 +200,4 @@
     animation: spin 1s linear infinite;
   }
 </style>
+

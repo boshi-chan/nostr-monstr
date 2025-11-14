@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Monstr Messaging (nos2x-friendly)
  * Supports:
  *  - NIP-04 (legacy)  kind: 4
@@ -361,7 +361,7 @@ export function startDmSubscriptions(me: string) {
     try {
       await processIncomingEvent(raw, me)
     } catch (err) {
-      console.error('DM live event failed:', err)
+      logger.error('DM live event failed:', err)
     }
   }
 
@@ -394,7 +394,7 @@ async function parseEventToMessage(ev: NostrEvent, me: string): Promise<DirectMe
 
         // -----------------------
         // debugging -- shows real sender mapping
-        console.log("💬 REAL SENDER MAP", {
+        logger.info("?? REAL SENDER MAP", {
           event_id: ev.id.slice(0,8),
           original_sender: ev.pubkey.slice(0,8),
           real_sender: dec.realSenderPubkey?.slice(0,8)
@@ -499,7 +499,7 @@ export async function loadConversation(otherPubkey: string) {
 }
 
 export async function loadConversations() {
-  console.log("‼️ loadConversations STARTED")
+  logger.info("?? loadConversations STARTED")
 
   const meUser = getCurrentNDKUser()
   if (!meUser?.pubkey) throw new Error('Not authenticated')
@@ -509,7 +509,7 @@ export async function loadConversations() {
   messagesError.set(null)
 
   try {
-    console.log("building filters…")
+    logger.info("building filters�")
     const filters = [
       { kinds: DM_KINDS, '#p': [meUser.pubkey], limit: 1000 },
       { kinds: DM_KINDS, authors: [meUser.pubkey], limit: 1000 },
@@ -518,15 +518,15 @@ export async function loadConversations() {
     let results;
 try {
   results = await Promise.all(filters.map(f => ndk.fetchEvents(f)))
-  console.log("✅ FETCH DONE", results)
+  logger.info("? FETCH DONE", results)
 } catch (e) {
-  console.error("❌ fetchEvents ERROR", e)
+  logger.error("? fetchEvents ERROR", e)
   return
 }
 
 
     const map = new Map<string, NostrEvent>()
-    console.log("map initialised")
+    logger.info("map initialised")
 
     for (const set of results) {
       for (const e of set as Set<NDKEvent>) {
@@ -536,7 +536,7 @@ try {
       }
     }
 
-    console.log("map size =", map.size)  // THIS NUMBER IS IMPORTANT
+    logger.info("map size =", map.size)  // THIS NUMBER IS IMPORTANT
 
     const convMap = new Map<string, DirectMessage[]>()
 
@@ -608,7 +608,7 @@ try {
 
   } catch (err) {
     const m = err instanceof Error ? err.message : 'Failed to load conversations'
-    console.error('loadConversations failed:', m)
+    logger.error('loadConversations failed:', m)
     messagesError.set(m)
   } finally {
     messagesLoading.set(false)
@@ -728,7 +728,7 @@ export async function sendDirectMessage(
     await evt.publish()
 
   } else {
-    // we will re-enable giftwrap later – first we MUST see conversations group
+    // we will re-enable giftwrap later � first we MUST see conversations group
     throw new Error("giftwrap disabled temporarily until grouping working")
   }
 
@@ -753,7 +753,7 @@ export async function sendDirectMessage(
  */
 export async function searchUsers(query: string): Promise<any[]> {
   // Stub implementation - to be properly implemented later
-  console.warn('searchUsers not yet implemented:', query)
+  logger.warn('searchUsers not yet implemented:', query)
   return []
 }
 
@@ -763,7 +763,8 @@ export async function searchUsers(query: string): Promise<any[]> {
  */
 export async function createGroupChat(name: string, members: string[]): Promise<string> {
   // Stub implementation - to be properly implemented later
-  console.warn('createGroupChat not yet implemented:', name, members)
+  logger.warn('createGroupChat not yet implemented:', name, members)
   // Return a temporary group ID until proper implementation
   return `group-${Date.now()}`
 }
+

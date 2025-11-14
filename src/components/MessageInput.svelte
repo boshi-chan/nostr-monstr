@@ -52,7 +52,7 @@
         ...s,
         error: error instanceof Error ? error.message : 'Failed to send message',
       }))
-      console.error('Failed to send message:', error)
+      logger.error('Failed to send message:', error)
     } finally {
       messageState.update(s => ({ ...s, isSending: false }))
     }
@@ -118,4 +118,5 @@
     cursor: not-allowed;
   }
 </style>
+
 

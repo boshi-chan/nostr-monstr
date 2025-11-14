@@ -7,7 +7,7 @@
     markAsRead,
     removeNotification,
   } from '$stores/notifications'
-  import { openPostById } from '$stores/router'
+  import { openPostById, openProfile } from '$stores/router'
   import type { Notification } from '$stores/notifications'
   import LikeIcon from '../icons/LikeIcon.svelte'
   import CommentIcon from '../icons/CommentIcon.svelte'
@@ -102,6 +102,12 @@
     removeNotification(notificationId)
   }
 
+  function handleActorClick(event: Event, pubkey?: string | null) {
+    event.stopPropagation()
+    if (!pubkey) return
+    openProfile(pubkey, 'notifications')
+  }
+
   function formatTimestamp(seconds: number): string {
     const diffMs = Date.now() - seconds * 1000
     const diffSec = Math.round(diffMs / 1000)
@@ -165,17 +171,31 @@
             }}
           >
             <div class="flex items-start gap-3">
-              {#if notification.fromAvatar}
-                <img
-                  src={notification.fromAvatar}
-                  alt={notification.fromName}
-                  class="h-10 w-10 flex-shrink-0 rounded-full object-cover"
-                />
-              {:else}
-                <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-dark-border text-sm text-text-muted">
-                  {notification.fromName?.charAt(0) || '?'}
-                </div>
-              {/if}
+              <button
+                type="button"
+                class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-dark-border focus:outline-none focus:ring-2 focus:ring-primary/40"
+                on:click={(event) => handleActorClick(event, notification.fromPubkey)}
+                on:keydown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    handleActorClick(event, notification.fromPubkey)
+                  }
+                }}
+              >
+                {#if notification.fromAvatar}
+                  <img
+                    src={notification.fromAvatar}
+                    alt={notification.fromName}
+                    class="h-full w-full rounded-full object-cover"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                {:else}
+                  <span class="text-sm font-semibold text-text-muted">
+                    {notification.fromName?.charAt(0) || '?'}
+                  </span>
+                {/if}
+              </button>
 
               <div class="flex-1 min-w-0">
                 <div class="flex flex-wrap items-center gap-3 text-sm">

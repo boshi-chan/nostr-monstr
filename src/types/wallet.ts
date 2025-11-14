@@ -1,5 +1,3 @@
-export type WalletBackupStatus = 'idle' | 'syncing' | 'ok' | 'error'
-
 export interface WalletState {
   isReady: boolean
   hasWallet: boolean
@@ -14,25 +12,12 @@ export interface WalletState {
   customNodeUri: string | null
   customNodeLabel: string | null
   lastSyncedAt: number | null
-  lastBackupAt: number | null
-  remoteBackupAvailable: boolean
-  backupStatus: WalletBackupStatus
   restoreHeight: number | null
   shareAddress: boolean
 }
 
 export interface WalletConfig {
   seed?: string
-}
-
-export interface WalletBackupPayload {
-  seed: string
-  mnemonic: string
-  address: string
-  createdAt: number
-  network: 'mainnet' | 'testnet' | 'stagenet'
-  restoreHeight: number
-  nodeId: string
 }
 
 export interface EmberTip {

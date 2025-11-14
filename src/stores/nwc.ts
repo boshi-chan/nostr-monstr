@@ -1,4 +1,6 @@
 import { writable, derived } from 'svelte/store'
+import { encryptWalletData, decryptWalletData } from '$lib/crypto'
+import { requireWalletMasterKey, readWalletMasterKey } from '$lib/wallet'
 
 /**
  * Nostr Wallet Connect (NWC) state management
@@ -11,6 +13,19 @@ export interface NWCConnection {
   connectedAt: number
 }
 
+interface EncryptedSecretPayload {
+  encryptedData: string
+  iv: string
+  salt: string
+}
+
+interface StoredNWCConnection {
+  walletPubkey: string
+  relay: string
+  encryptedSecret: EncryptedSecretPayload
+  connectedAt: number
+}
+
 export interface ZapTarget {
   eventId: string
   recipientPubkey: string
@@ -20,32 +35,22 @@ export interface ZapTarget {
 
 const NWC_STORAGE_KEY = 'monstr_nwc_connection'
 
-/**
- * Load NWC connection from localStorage
- */
-function loadNWCConnection(): NWCConnection | null {
+function loadStoredNwcConnection(): StoredNWCConnection | null {
   if (typeof window === 'undefined') return null
-
   try {
-    const stored = window.localStorage.getItem(NWC_STORAGE_KEY)
-    if (!stored) return null
-
-    const parsed = JSON.parse(stored)
-    if (!parsed.walletPubkey || !parsed.relay || !parsed.secret) return null
-
-    return parsed as NWCConnection
+    const raw = window.localStorage.getItem(NWC_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed.walletPubkey || !parsed.relay || !parsed.encryptedSecret) return null
+    return parsed as StoredNWCConnection
   } catch (err) {
-    console.warn('Failed to load NWC connection from localStorage:', err)
+    logger.warn('Failed to load NWC connection from storage:', err)
     return null
   }
 }
 
-/**
- * Save NWC connection to localStorage
- */
-function saveNWCConnection(connection: NWCConnection | null): void {
+function saveStoredNwcConnection(connection: StoredNWCConnection | null): void {
   if (typeof window === 'undefined') return
-
   try {
     if (connection) {
       window.localStorage.setItem(NWC_STORAGE_KEY, JSON.stringify(connection))
@@ -53,19 +58,50 @@ function saveNWCConnection(connection: NWCConnection | null): void {
       window.localStorage.removeItem(NWC_STORAGE_KEY)
     }
   } catch (err) {
-    console.warn('Failed to save NWC connection to localStorage:', err)
+    logger.warn('Failed to persist NWC connection:', err)
   }
 }
 
-/**
- * NWC connection store
- */
-export const nwcConnection = writable<NWCConnection | null>(loadNWCConnection())
+let encryptedNwcSnapshot: StoredNWCConnection | null =
+  typeof window !== 'undefined' ? loadStoredNwcConnection() : null
 
-// Persist to localStorage whenever connection changes
-nwcConnection.subscribe(conn => {
-  saveNWCConnection(conn)
-})
+export const nwcConnection = writable<NWCConnection | null>(null)
+
+async function unlockStoredNwcConnection(options?: { silent?: boolean }): Promise<boolean> {
+  if (!encryptedNwcSnapshot) return false
+  const allowCancel = options?.silent !== false
+  const masterKey = await readWalletMasterKey({ allowCancel })
+  if (!masterKey) {
+    if (!allowCancel) {
+      logger.warn('NWC unlock cancelled by user')
+    }
+    return false
+  }
+  try {
+    const secret = await decryptWalletData(
+      encryptedNwcSnapshot.encryptedSecret.encryptedData,
+      encryptedNwcSnapshot.encryptedSecret.iv,
+      encryptedNwcSnapshot.encryptedSecret.salt,
+      masterKey
+    )
+    nwcConnection.set({
+      walletPubkey: encryptedNwcSnapshot.walletPubkey,
+      relay: encryptedNwcSnapshot.relay,
+      secret,
+      connectedAt: encryptedNwcSnapshot.connectedAt,
+    })
+    return true
+  } catch (err) {
+    logger.error('Failed to decrypt stored NWC connection, clearing it', err)
+    encryptedNwcSnapshot = null
+    saveStoredNwcConnection(null)
+    return false
+  }
+}
+
+if (typeof window !== 'undefined' && encryptedNwcSnapshot) {
+  void unlockStoredNwcConnection({ silent: true })
+}
 
 /**
  * Whether NWC is connected
@@ -81,14 +117,12 @@ export const zapTarget = writable<ZapTarget | null>(null)
 /**
  * Set NWC connection from nostr+walletconnect:// URI
  */
-export function setNWCFromURI(uri: string): boolean {
+export async function setNWCFromURI(uri: string): Promise<boolean> {
   try {
-    // Remove the nostr+walletconnect:// protocol
     if (!uri.startsWith('nostr+walletconnect://')) {
       throw new Error('Invalid NWC URI: must start with nostr+walletconnect://')
     }
 
-    // Extract parts: nostr+walletconnect://pubkey?relay=wss://...&secret=...
     const withoutProtocol = uri.replace('nostr+walletconnect://', '')
     const [pubkeyPart, queryPart] = withoutProtocol.split('?')
 
@@ -97,8 +131,6 @@ export function setNWCFromURI(uri: string): boolean {
     }
 
     const walletPubkey = pubkeyPart.trim()
-
-    // Parse query parameters manually to handle relay URLs properly
     const params = new URLSearchParams(queryPart)
     const relay = params.get('relay')
     const secret = params.get('secret')
@@ -107,22 +139,29 @@ export function setNWCFromURI(uri: string): boolean {
       throw new Error('Invalid NWC URI: missing required parameters (pubkey, relay, or secret)')
     }
 
-    console.log('[NWC] Parsed connection:', {
-      walletPubkey: walletPubkey.slice(0, 8) + '...',
+    const masterKey = await requireWalletMasterKey()
+    const encryptedSecret = await encryptWalletData(secret, masterKey)
+    const snapshot: StoredNWCConnection = {
+      walletPubkey,
       relay,
-      hasSecret: !!secret
-    })
+      encryptedSecret,
+      connectedAt: Date.now(),
+    }
+
+    encryptedNwcSnapshot = snapshot
+    saveStoredNwcConnection(snapshot)
 
     nwcConnection.set({
       walletPubkey,
       relay,
       secret,
-      connectedAt: Date.now(),
+      connectedAt: snapshot.connectedAt,
     })
 
+    logger.info('[NWC] Wallet connected via NWC.')
     return true
   } catch (err) {
-    console.error('Failed to parse NWC URI:', err)
+    logger.error('Failed to connect NWC wallet:', err)
     return false
   }
 }
@@ -131,6 +170,8 @@ export function setNWCFromURI(uri: string): boolean {
  * Disconnect NWC
  */
 export function disconnectNWC(): void {
+  encryptedNwcSnapshot = null
+  saveStoredNwcConnection(null)
   nwcConnection.set(null)
 }
 
@@ -149,3 +190,4 @@ export function closeZapModal(): void {
   showZapModal.set(false)
   zapTarget.set(null)
 }
+

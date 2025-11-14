@@ -32,6 +32,7 @@ import {
   incrementRepostCount,
 } from '$lib/engagement'
 import { persistInteractionsSnapshot } from '$lib/interaction-cache'
+import { normalizeEvent } from '$lib/event-validation'
 
 const subscriptionRefs = new Map<string, any>()
 const eventCache = new Map<string, NostrEvent>()
@@ -97,7 +98,7 @@ function collectEngagementTargets(event: NostrEvent): string[] {
         targets.add(nestedId)
       }
     } catch (err) {
-      console.warn('Failed to parse repost while collecting engagement targets:', err)
+      logger.warn('Failed to parse repost while collecting engagement targets:', err)
     }
   }
 
@@ -107,7 +108,10 @@ function collectEngagementTargets(event: NostrEvent): string[] {
 /**
  * Queue event for debounced feed update
  */
-export function addEventToFeed(event: NostrEvent, origin: FeedOrigin = 'global'): void {
+export function addEventToFeed(input: NostrEvent | NDKEvent, origin: FeedOrigin = 'global'): void {
+  const event = normalizeEvent(input)
+  if (!event) return
+
   const currentFeed = get(feedSource)
   if (!shouldIncludeEvent(origin, currentFeed)) {
     return
@@ -264,7 +268,7 @@ async function fetchFollowing(pubkey: string): Promise<Set<string>> {
   const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
   
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
-    console.log(`✓ Using cached following list for ${pubkey.slice(0, 8)} (${cached.pubkeys.size} follows)`)
+    logger.info(`✓ Using cached following list for ${pubkey.slice(0, 8)} (${cached.pubkeys.size} follows)`)
     return sanitizePubkeySet(cached.pubkeys)
   }
 
@@ -285,7 +289,9 @@ async function fetchFollowing(pubkey: string): Promise<Set<string>> {
     }
 
     sub.on('event', (event: any) => {
-      for (const tag of event.tags) {
+      const raw = normalizeEvent(event)
+      if (!raw) return
+      for (const tag of raw.tags) {
         if (tag[0] === 'p' && isHexPubkey(tag[1])) {
           follows.add(tag[1].toLowerCase())
         }
@@ -294,7 +300,7 @@ async function fetchFollowing(pubkey: string): Promise<Set<string>> {
 
     sub.on('eose', finish)
     ;(sub as any).on?.('error', (err: unknown) => {
-      console.warn('Failed to fetch following list:', err)
+      logger.warn('Failed to fetch following list:', err)
       finish()
     })
   })
@@ -321,11 +327,11 @@ async function fetchCirclesFromFollowing(follows: Set<string>, pubkey: string): 
   const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
-    console.log(`✓ Using cached circles for ${pubkey.slice(0, 8)} (${cached.pubkeys.size} circles)`)
+    logger.info(`✓ Using cached circles for ${pubkey.slice(0, 8)} (${cached.pubkeys.size} circles)`)
     return sanitizePubkeySet(cached.pubkeys)
   }
 
-  console.log(`⏳ Fetching circles from ${follows.size} follows...`)
+  logger.info(`⏳ Fetching circles from ${follows.size} follows...`)
   const startTime = Date.now()
 
   const ndk = getNDK()
@@ -342,7 +348,7 @@ async function fetchCirclesFromFollowing(follows: Set<string>, pubkey: string): 
     new Promise<void>(resolve => {
       // Add timeout per chunk to prevent hanging
       const timeout = setTimeout(() => {
-        console.warn(`⚠️ Chunk ${index} timed out after 3s`)
+        logger.warn(`⚠️ Chunk ${index} timed out after 3s`)
         resolve()
       }, 3000)
 
@@ -360,7 +366,9 @@ async function fetchCirclesFromFollowing(follows: Set<string>, pubkey: string): 
       }
 
       sub.on('event', (event: any) => {
-        for (const tag of event.tags) {
+        const raw = normalizeEvent(event)
+        if (!raw) return
+        for (const tag of raw.tags) {
           if (tag[0] === 'p' && isHexPubkey(tag[1])) {
             const pk = tag[1].toLowerCase()
             if (!follows.has(pk)) {
@@ -372,7 +380,7 @@ async function fetchCirclesFromFollowing(follows: Set<string>, pubkey: string): 
 
       sub.on('eose', finish)
       ;(sub as any).on?.('error', (err: unknown) => {
-        console.warn(`Failed to fetch circles for chunk ${index}:`, err)
+        logger.warn(`Failed to fetch circles for chunk ${index}:`, err)
         finish()
       })
     })
@@ -398,7 +406,7 @@ async function fetchCirclesFromFollowing(follows: Set<string>, pubkey: string): 
     return next
   })
 
-  console.log(`✓ Fetched ${sanitized.size} circles in ${duration}ms`)
+  logger.info(`✓ Fetched ${sanitized.size} circles in ${duration}ms`)
   return sanitized
 }
 
@@ -431,7 +439,7 @@ function subscribeWithFilter(
   })
 
   ;(subscription as any).on?.('error', (err: unknown) => {
-    console.error(`${label} feed error:`, err)
+    logger.error(`${label} feed error:`, err)
     feedError.set(`Feed error: ${String(err)}`)
     feedLoading.set(false)
   })
@@ -464,7 +472,7 @@ function startCirclesSubscription(authors: string[], reason: 'cached' | 'fallbac
   const limitedAuthors = limitAuthors(authors)
   const sinceWindow = reason === 'fallback' ? 7 : 14
 
-  console.log(
+  logger.info(
     `⚡ Subscribing to circles feed with ${limitedAuthors.length} authors (${reason})`
   )
 
@@ -568,11 +576,11 @@ export async function subscribeToFollowingFeed(retryCount = 0): Promise<void> {
 
   } catch (err) {
     const errorMsg = String(err)
-    console.error(`✗ Following feed error (attempt ${retryCount + 1}):`, errorMsg)
+    logger.error(`✗ Following feed error (attempt ${retryCount + 1}):`, errorMsg)
 
     // Retry logic
     if (retryCount < MAX_RETRIES) {
-      console.log(`↻ Retrying following feed in ${RETRY_DELAY}ms...`)
+      logger.info(`↻ Retrying following feed in ${RETRY_DELAY}ms...`)
       feedError.set(`Retrying... (${retryCount + 1}/${MAX_RETRIES})`)
       
       await new Promise(resolve => setTimeout(resolve, RETRY_DELAY))
@@ -621,7 +629,7 @@ export async function subscribeToCirclesFeed(): Promise<void> {
       const fallbackAuthors = limitAuthors(followSet)
       if (fallbackAuthors.length > 0) {
         initialAuthorSet = new Set(fallbackAuthors)
-        console.log('⌛ Circles cache empty — using following fallback while graph builds')
+        logger.info('⌛ Circles cache empty — using following fallback while graph builds')
         startCirclesSubscription(fallbackAuthors, 'fallback')
       }
     }
@@ -645,7 +653,7 @@ export async function subscribeToCirclesFeed(): Promise<void> {
         startCirclesSubscription(Array.from(circleSet), 'fresh')
       })
       .catch(err => {
-        console.error('Failed to refresh circles graph:', err)
+        logger.error('Failed to refresh circles graph:', err)
         if (initialSnapshot.size === 0) {
           feedLoading.set(false)
         }
@@ -653,7 +661,7 @@ export async function subscribeToCirclesFeed(): Promise<void> {
       })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error('Failed to subscribe to circles feed:', err)
+    logger.error('Failed to subscribe to circles feed:', err)
     feedError.set(message)
     feedLoading.set(false)
   }
@@ -689,7 +697,7 @@ export async function subscribeToLongReadsFollowingFeed(): Promise<void> {
       return
     }
 
-    console.log(`⚡ Loading long reads from ${followAuthors.length} following`)
+    logger.info(`⚡ Loading long reads from ${followAuthors.length} following`)
 
     subscribeWithFilter(
       {
@@ -702,7 +710,7 @@ export async function subscribeToLongReadsFollowingFeed(): Promise<void> {
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error('Failed to subscribe to long reads (following):', err)
+    logger.error('Failed to subscribe to long reads (following):', err)
     feedError.set(message)
     feedLoading.set(false)
   }
@@ -741,7 +749,7 @@ export async function subscribeToLongReadsCirclesFeed(): Promise<void> {
       return
     }
 
-    console.log(`⚡ Loading long reads from ${circleAuthors.length} circles`)
+    logger.info(`⚡ Loading long reads from ${circleAuthors.length} circles`)
 
     subscribeWithFilter(
       {
@@ -754,7 +762,7 @@ export async function subscribeToLongReadsCirclesFeed(): Promise<void> {
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error('Failed to subscribe to long reads (circles):', err)
+    logger.error('Failed to subscribe to long reads (circles):', err)
     feedError.set(message)
     feedLoading.set(false)
   }
@@ -806,7 +814,7 @@ export async function subscribeToLongReadsFeed(): Promise<void> {
       return
     }
 
-    console.log(`⚡ Loading long reads from ${authors.length} authors (${followAuthors.length} follows + ${Math.min(circleAuthors.length, maxAuthors - followAuthors.length)} circles)`)
+    logger.info(`⚡ Loading long reads from ${authors.length} authors (${followAuthors.length} follows + ${Math.min(circleAuthors.length, maxAuthors - followAuthors.length)} circles)`)
 
     // Refresh circles in background for next time (non-blocking)
     void ensureCircles(followSet, user.pubkey)
@@ -823,7 +831,7 @@ export async function subscribeToLongReadsFeed(): Promise<void> {
     )
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error('Failed to subscribe to long reads:', err)
+    logger.error('Failed to subscribe to long reads:', err)
     feedError.set(message)
     feedLoading.set(false)
   }
@@ -869,11 +877,11 @@ export async function subscribeToGlobalFeed(retryCount = 0): Promise<void> {
 
   } catch (err) {
     const errorMsg = String(err)
-    console.error(`✗ Global feed error (attempt ${retryCount + 1}):`, errorMsg)
+    logger.error(`✗ Global feed error (attempt ${retryCount + 1}):`, errorMsg)
 
     // Retry logic
     if (retryCount < MAX_RETRIES) {
-      console.log(`↻ Retrying global feed in ${RETRY_DELAY}ms...`)
+      logger.info(`↻ Retrying global feed in ${RETRY_DELAY}ms...`)
       feedError.set(`Retrying... (${retryCount + 1}/${MAX_RETRIES})`)
       
       await new Promise(resolve => setTimeout(resolve, RETRY_DELAY))
@@ -946,14 +954,18 @@ export async function fetchEventById(id: string): Promise<NostrEvent | null> {
       return null
     }
 
-    const raw = (event as NDKEvent).rawEvent?.() ?? (event as unknown as NostrEvent)
+    const raw = normalizeEvent(event as NDKEvent | NostrEvent)
+    if (!raw) {
+      return null
+    }
+
     eventCache.set(raw.id, raw)
     void fetchUserMetadata(raw.pubkey)
     queueEngagementHydration(collectEngagementTargets(raw))
 
     return raw
   } catch (err) {
-    console.error(`Failed to fetch event ${id.slice(0, 8)}:`, err)
+    logger.error(`Failed to fetch event ${id.slice(0, 8)}:`, err)
     return null
   }
 }
@@ -1081,7 +1093,7 @@ export async function publishNote(content: string, replyTo?: NostrEvent): Promis
     await ndkEvent.sign()
     await ndkEvent.publish()
 
-    console.log('✓ Post published:', ndkEvent.id)
+    logger.info('✓ Post published:', ndkEvent.id)
 
     const raw = ndkEvent.rawEvent()
     recordUserEvent(raw)
@@ -1099,7 +1111,7 @@ export async function publishNote(content: string, replyTo?: NostrEvent): Promis
     return raw
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err)
-    console.error('✗ Publish failed:', errorMsg)
+    logger.error('✗ Publish failed:', errorMsg)
     throw new Error(`Failed to publish post: ${errorMsg}`)
   }
 }
@@ -1191,12 +1203,12 @@ export async function loadUserInteractions(): Promise<void> {
   const user = getCurrentNDKUser()
 
   if (!user?.pubkey) {
-    console.log('No user authenticated, skipping interaction load')
+    logger.info('No user authenticated, skipping interaction load')
     return
   }
 
   try {
-    console.log('Loading user interactions...')
+    logger.info('Loading user interactions...')
 
     // Load reactions (kind:7 - likes)
     const reactions = await ndk.fetchEvents(
@@ -1216,7 +1228,7 @@ export async function loadUserInteractions(): Promise<void> {
       }
     }
     likedEvents.set(likedEventIds)
-    console.log(`Loaded ${likedEventIds.size} likes`)
+    logger.info(`Loaded ${likedEventIds.size} likes`)
 
     // Load reposts (kind:6)
     const reposts = await ndk.fetchEvents(
@@ -1236,7 +1248,7 @@ export async function loadUserInteractions(): Promise<void> {
       }
     }
     repostedEvents.set(repostedEventIds)
-    console.log(`Loaded ${repostedEventIds.size} reposts`)
+    logger.info(`Loaded ${repostedEventIds.size} reposts`)
 
     // Load zaps (kind:9735 - zap receipts we sent)
     const zaps = await ndk.fetchEvents(
@@ -1259,7 +1271,7 @@ export async function loadUserInteractions(): Promise<void> {
       }
     }
     zappedEvents.set(zappedEventMap)
-    console.log(`Loaded ${zappedEventMap.size} zapped events`)
+    logger.info(`Loaded ${zappedEventMap.size} zapped events`)
 
     // Load replies authored by user (kind 1) to know which threads were commented
     const replies = await ndk.fetchEvents(
@@ -1279,10 +1291,11 @@ export async function loadUserInteractions(): Promise<void> {
       }
     }
     commentedThreads.set(commentedSet)
-    console.log(`Loaded ${commentedSet.size} commented threads`)
+    logger.info(`Loaded ${commentedSet.size} commented threads`)
 
     persistInteractionsSnapshot()
   } catch (err) {
-    console.error('Failed to load user interactions:', err)
+    logger.error('Failed to load user interactions:', err)
   }
 }
+

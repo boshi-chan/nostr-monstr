@@ -47,7 +47,7 @@ function loadNotifications(): Notification[] {
     const weekAgo = Date.now() / 1000 - 86400 * 7
     return parsed.filter((n: Notification) => n.createdAt > weekAgo)
   } catch (err) {
-    console.warn('Failed to load notifications from localStorage:', err)
+    logger.warn('Failed to load notifications from localStorage:', err)
     return []
   }
 }
@@ -61,7 +61,7 @@ function saveNotifications(notifs: Notification[]): void {
   try {
     window.localStorage.setItem(NOTIFICATIONS_STORAGE_KEY, JSON.stringify(notifs))
   } catch (err) {
-    console.warn('Failed to save notifications to localStorage:', err)
+    logger.warn('Failed to save notifications to localStorage:', err)
   }
 }
 
@@ -136,3 +136,4 @@ export function removeNotification(notificationId: string): void {
     notifs.filter(n => n.id !== notificationId)
   )
 }
+

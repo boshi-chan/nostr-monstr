@@ -31,7 +31,7 @@
       const results = await searchUsers(query)
       searchResults.set(results)
     } catch (err) {
-      console.error('Search failed:', err)
+      logger.error('Search failed:', err)
       searchResults.set([])
     } finally {
       isSearching.set(false)
@@ -127,3 +127,4 @@
     </div>
   </div>
 </Modal>
+

@@ -20,7 +20,7 @@
       searchResults.set(results)
     } catch (err) {
       searchError.set(String(err))
-      console.error('Search failed:', err)
+      logger.error('Search failed:', err)
     } finally {
       isSearching.set(false)
     }
@@ -241,3 +241,4 @@
     color: rgba(166, 166, 166, 0.5);
   }
 </style>
+

@@ -7,6 +7,7 @@ import { metadataCache as metadataCacheStore } from '$stores/feed'
 import { getNDK } from './ndk'
 import type { NostrEvent } from '$types/nostr'
 import type { UserMetadata } from '$types/user'
+import { normalizeEvent } from '$lib/event-validation'
 
 const metadataCache = new Map<string, UserMetadata & { fetched: number }>()
 const pendingFetches = new Set<string>()
@@ -56,10 +57,12 @@ export async function fetchUserMetadata(pubkey: string): Promise<void> {
     const sub = ndk.subscribe(filter, { closeOnEose: true }, undefined, false)
 
     sub.on('event', (event: any) => {
-      parseMetadataEvent(event)
+      const raw = normalizeEvent(event)
+      if (!raw) return
+      parseMetadataEvent(raw)
     })
   } catch (err) {
-    console.warn('Failed to fetch metadata for', pubkey.slice(0, 8), err)
+    logger.warn('Failed to fetch metadata for', pubkey.slice(0, 8), err)
   } finally {
     // Clear pending after a short delay
     setTimeout(() => pendingFetches.delete(pubkey), 1000)
@@ -90,7 +93,7 @@ export function parseMetadataEvent(event: NostrEvent): UserMetadata | null {
     
     return metadata
   } catch (err) {
-    console.error('Failed to parse metadata:', err)
+    logger.error('Failed to parse metadata:', err)
     return null
   }
 }
@@ -130,3 +133,4 @@ export function getNip05Display(nip05?: string): string | null {
   if (!nip05) return null
   return nip05
 }
+

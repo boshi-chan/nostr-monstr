@@ -26,7 +26,7 @@ export async function deriveKeyFromPin(pin: string, salt: Uint8Array): Promise<C
     ])
   } catch (err) {
     // Fallback to PBKDF2 if Argon2 is unavailable (should be rare)
-    console.warn('Argon2 derivation failed, falling back to PBKDF2:', err)
+    logger.warn('Argon2 derivation failed, falling back to PBKDF2:', err)
     const encoder = new TextEncoder()
     const pinData = encoder.encode(pin)
 
@@ -107,3 +107,4 @@ function hexToBuffer(hex: string): Uint8Array {
   }
   return buffer
 }
+

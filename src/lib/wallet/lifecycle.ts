@@ -48,11 +48,11 @@ function startBackgroundSync(): void {
     return
   }
   runSync('start').catch(err => {
-    console.warn('Initial wallet sync failed', err)
+    logger.warn('Initial wallet sync failed', err)
   })
   backgroundTimer = window.setInterval(() => {
     runSync('interval').catch(err => {
-      console.warn('Background wallet sync failed', err)
+      logger.warn('Background wallet sync failed', err)
     })
   }, SYNC_INTERVAL_MS)
 }
@@ -67,7 +67,7 @@ function stopBackgroundSync(): void {
 function handleVisibilityChange(): void {
   if (document.visibilityState === 'visible') {
     runSync('focus').catch(err => {
-      console.warn('Wallet sync on focus failed', err)
+      logger.warn('Wallet sync on focus failed', err)
     })
   }
 }
@@ -92,3 +92,4 @@ async function runSync(reason: 'start' | 'interval' | 'focus'): Promise<void> {
     syncInFlight = false
   }
 }
+

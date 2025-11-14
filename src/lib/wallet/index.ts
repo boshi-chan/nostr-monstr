@@ -1,7 +1,7 @@
 /**
  * Monero wallet integration powered by monero-ts.
  * Keys are generated client-side and stored encrypted with a local master key.
- * Adds remote backups via Nostr (NIP-04) and Ember tipping helpers.
+ * Integrates Monero hot wallet functionality plus Ember tipping helpers.
  */
 
 import { walletState, resetWalletStore, setSharePreferenceInStore } from '$stores/wallet'
@@ -10,11 +10,11 @@ import { encryptWalletData, decryptWalletData } from '$lib/crypto'
 import { getSetting, saveSetting } from '$lib/db'
 import { getNDK, getCurrentNDKUser } from '$lib/ndk'
 import type moneroTs from 'monero-ts'
-import { NDKEvent, type NDKFilter, type NDKSubscriptionOptions } from '@nostr-dev-kit/ndk'
+import { NDKEvent } from '@nostr-dev-kit/ndk'
 import type { MoneroNode } from './nodes'
 import { CUSTOM_NODE_ID, DEFAULT_NODES, getNodeById } from './nodes'
 import { getBrowserFs, resetBrowserFs } from './browser-fs'
-import type { WalletBackupPayload, SendMoneroOptions, SendMoneroResult } from '$types/wallet'
+import type { SendMoneroOptions, SendMoneroResult } from '$types/wallet'
 import { EMBER_EVENT_KIND, EMBER_TAG, encodeEmberPayload } from '$lib/ember'
 import { setEmberAddressMetadata } from '$lib/profile'
 
@@ -50,8 +50,6 @@ const WALLET_SHARE_KEY = 'walletShareAddress'
 const WALLET_MASTER_KEY = 'walletMasterKey'
 const HOT_WALLET_WARNING_KEY = 'walletHotWalletWarning'
 const PIN_CANCELLED_ERROR = 'WALLET_PIN_CANCELLED'
-const WALLET_BACKUP_KIND = 30078
-const WALLET_BACKUP_D_TAG = 'monstr-wallet'
 const BLOCK_TIME_SECONDS = 120
 const REFERENCE_HEIGHT = 3350000 // Fallback reference: December 2024
 const REFERENCE_TIMESTAMP = Date.UTC(2024, 11, 15) // Fallback reference: December 15, 2024
@@ -159,7 +157,7 @@ async function storeEncryptedMasterKey(masterKey: string, pin: string): Promise<
   try {
     window.localStorage.setItem(WALLET_MASTER_KEY, JSON.stringify(encrypted))
   } catch (err) {
-    console.warn('Failed to persist encrypted wallet key', err)
+    logger.warn('Failed to persist encrypted wallet key', err)
   }
 }
 
@@ -200,7 +198,7 @@ async function unlockEncryptedMasterKeyFromStorage(
       showHotWalletWarning()
       return masterKey
     } catch (err) {
-      console.warn('Failed to decrypt wallet master key', err)
+      logger.warn('Failed to decrypt wallet master key', err)
       promptText = 'Incorrect PIN. Enter your wallet PIN'
     }
   }
@@ -269,7 +267,7 @@ function clearMasterKey(): void {
     window.localStorage.removeItem(WALLET_MASTER_KEY)
     window.localStorage.removeItem(HOT_WALLET_WARNING_KEY)
   } catch (err) {
-    console.warn('Failed to clear wallet key', err)
+    logger.warn('Failed to clear wallet key', err)
   }
 }
 
@@ -311,7 +309,7 @@ async function tryDecodeSecrets(
     )
     return JSON.parse(serialized) as StoredWalletSecrets
   } catch (err) {
-    console.warn('Failed to decode wallet secrets with provided key', err)
+    logger.warn('Failed to decode wallet secrets with provided key', err)
     return null
   }
 }
@@ -407,7 +405,7 @@ function parseStoredCustomNode(value: any): MoneroNode | null {
   try {
     return buildCustomNode(value)
   } catch (err) {
-    console.warn('Ignoring invalid custom node config:', err)
+    logger.warn('Ignoring invalid custom node config:', err)
     return null
   }
 }
@@ -472,7 +470,7 @@ async function fetchCurrentHeight(): Promise<number> {
     const daemonHeight = await (connection as any).getHeight()
     return daemonHeight
   } catch (err) {
-    console.warn('Failed to fetch daemon height, using fallback estimation:', err)
+    logger.warn('Failed to fetch daemon height, using fallback estimation:', err)
     // Fallback to estimation if daemon fetch fails
     return estimateRestoreHeightFallback(Date.now())
   }
@@ -591,7 +589,7 @@ async function disposeWalletInstance(save = true): Promise<void> {
   try {
     await walletInstance.close(save)
   } catch (err) {
-    console.warn('Failed to close wallet instance', err)
+    logger.warn('Failed to close wallet instance', err)
   } finally {
     walletInstance = null
   }
@@ -648,7 +646,7 @@ async function refreshWalletInternal(): Promise<void> {
         lastSyncedAt: Date.now(),
       })
     } catch (err) {
-      console.error('Wallet sync failed:', err)
+      logger.error('Wallet sync failed:', err)
       setWalletState({ isSyncing: false, syncProgress: null })
       throw err
     } finally {
@@ -657,101 +655,6 @@ async function refreshWalletInternal(): Promise<void> {
   })()
 
   return walletSyncPromise
-}
-
-async function publishWalletBackup(): Promise<void> {
-  if (!isBrowser() || !window.nostr?.nip04 || !cachedSecrets || !cachedMeta) {
-    return
-  }
-
-  let ndk
-  try {
-    ndk = getNDK()
-  } catch (err) {
-    console.warn('NDK unavailable, skipping wallet backup', err)
-    return
-  }
-
-  const user = getCurrentNDKUser()
-  if (!user?.pubkey || !ndk.signer) {
-    console.warn('No authenticated Nostr user; cannot back up wallet remotely')
-    return
-  }
-
-  try {
-    setWalletState({ backupStatus: 'syncing' })
-    const payload: WalletBackupPayload = {
-      seed: cachedSecrets.seed,
-      mnemonic: cachedSecrets.mnemonic,
-      address: cachedMeta.address,
-      createdAt: cachedMeta.createdAt,
-      network: cachedMeta.network,
-      restoreHeight: cachedMeta.restoreHeight,
-      nodeId: activeNode.id,
-    }
-
-    const ciphertext = await window.nostr.nip04.encrypt(user.pubkey, JSON.stringify(payload))
-    const event = new NDKEvent(ndk)
-    event.kind = WALLET_BACKUP_KIND
-    event.content = ciphertext
-    event.tags = [
-      ['d', WALLET_BACKUP_D_TAG],
-      ['client', 'monstr'],
-      ['node', activeNode.id],
-    ]
-    event.created_at = Math.floor(Date.now() / 1000)
-    await event.sign()
-    await event.publish()
-    setWalletState({
-      backupStatus: 'ok',
-      remoteBackupAvailable: true,
-      lastBackupAt: Date.now(),
-    })
-  } catch (err) {
-    console.error('Failed to publish wallet backup:', err)
-    setWalletState({ backupStatus: 'error' })
-  }
-}
-
-async function fetchWalletBackupRecord(): Promise<{ payload: WalletBackupPayload; updatedAt: number } | null> {
-  if (!isBrowser() || !window.nostr?.nip04) {
-    throw new Error('Nostr extension with NIP-04 support is required to restore.')
-  }
-
-  const user = getCurrentNDKUser()
-  if (!user?.pubkey) {
-    throw new Error('Log in with your Nostr key to restore wallet data.')
-  }
-
-  const ndk = getNDK()
-  const filter: NDKFilter = {
-    authors: [user.pubkey],
-    kinds: [WALLET_BACKUP_KIND],
-    '#d': [WALLET_BACKUP_D_TAG],
-    limit: 1,
-  }
-
-  const events = await ndk.fetchEvents(filter, { closeOnEose: true } as NDKSubscriptionOptions)
-  let latest: ReturnType<NDKEvent['rawEvent']> | null = null
-  for (const ev of events as Set<NDKEvent>) {
-    const raw = ev.rawEvent()
-    if (!latest || raw.created_at > latest.created_at) {
-      latest = raw
-    }
-  }
-
-  if (!latest) {
-    return null
-  }
-
-  const ciphertext = latest.content
-  const plaintext = await window.nostr.nip04.decrypt(user.pubkey, ciphertext)
-  const payload = JSON.parse(plaintext) as WalletBackupPayload
-  setWalletState({ remoteBackupAvailable: true, lastBackupAt: latest.created_at * 1000 })
-  return {
-    payload,
-    updatedAt: latest.created_at * 1000,
-  }
 }
 
 async function publishEmberReceipt(
@@ -793,7 +696,7 @@ async function publishEmberReceipt(
     await ndkEvent.sign()
     await ndkEvent.publish()
   } catch (err) {
-    console.warn('Failed to publish Ember receipt:', err)
+    logger.warn('Failed to publish Ember receipt:', err)
   }
 }
 
@@ -801,7 +704,7 @@ async function syncProfileAddress(address: string | null): Promise<void> {
   try {
     await setEmberAddressMetadata(address)
   } catch (err) {
-    console.warn('Failed to sync Ember address:', err)
+    logger.warn('Failed to sync Ember address:', err)
   }
 }
 
@@ -894,7 +797,7 @@ export async function hydrateWalletState(): Promise<void> {
         // The metadata cache is empty at this point, which would wipe the profile.
         // Instead, sync will happen later when the app is fully initialized and metadata is loaded.
         // See: syncProfileAddressWhenReady() in App.svelte
-        console.log('⏳ Wallet hydrated. Profile address sync will happen when metadata is ready.')
+        logger.info('⏳ Wallet hydrated. Profile address sync will happen when metadata is ready.')
         void refreshWalletInternal()
       } else {
         locked = true
@@ -976,17 +879,16 @@ export async function initWallet(
     shareAddress: shareAddressPreference,
   })
 
-  void publishWalletBackup()
   void refreshWalletInternal()
 
   // Sync address to profile metadata if sharing is enabled
   if (shareAddressPreference) {
-    console.log('📝 Syncing Monero address to profile metadata...')
+    logger.info('📝 Syncing Monero address to profile metadata...')
     try {
       await syncProfileAddress(address)
-      console.log('✅ Monero address published to profile')
+      logger.info('✅ Monero address published to profile')
     } catch (err) {
-      console.warn('⚠️ Failed to sync address to profile (non-fatal):', err)
+      logger.warn('⚠️ Failed to sync address to profile (non-fatal):', err)
     }
   }
 
@@ -1055,18 +957,18 @@ export async function getTransactionHistory(): Promise<any[]> {
   try {
     // Fetch all transactions (incoming and outgoing)
     const txs = await wallet.getTxs()
-    console.log('🔍 Raw txs from wallet.getTxs():', txs)
-    console.log('🔍 Number of transactions:', txs?.length || 0)
+    logger.info('🔍 Raw txs from wallet.getTxs():', txs)
+    logger.info('🔍 Number of transactions:', txs?.length || 0)
 
     if (!txs || txs.length === 0) {
-      console.warn('⚠️ No transactions found in wallet')
+      logger.warn('⚠️ No transactions found in wallet')
       return []
     }
 
     // Log first transaction to inspect available methods
     if (txs.length > 0) {
-      console.log('🔍 First transaction methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(txs[0])))
-      console.log('🔍 First transaction sample:', {
+      logger.info('🔍 First transaction methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(txs[0])))
+      logger.info('🔍 First transaction sample:', {
         hash: txs[0].getHash?.(),
         height: txs[0].getHeight?.(),
         timestamp: (txs[0] as any).getTimestamp?.(),
@@ -1098,23 +1000,12 @@ export async function getTransactionHistory(): Promise<any[]> {
       return timeB - timeA
     })
 
-    console.log('✅ Returning', sorted.length, 'sorted transactions')
+    logger.info('✅ Returning', sorted.length, 'sorted transactions')
     return sorted
   } catch (err) {
-    console.error('❌ Failed to fetch transaction history:', err)
+    logger.error('❌ Failed to fetch transaction history:', err)
     return []
   }
-}
-
-export async function restoreWalletFromNostr(): Promise<WalletInfo> {
-  const record = await fetchWalletBackupRecord()
-  if (!record) {
-    throw new Error('No wallet backup found for this Nostr login yet.')
-  }
-  return await initWallet(record.payload.mnemonic, {
-    createdAt: record.payload.createdAt,
-    restoreHeight: record.payload.restoreHeight,
-  })
 }
 
 export async function sendMonero(options: SendMoneroOptions): Promise<SendMoneroResult> {
@@ -1151,10 +1042,9 @@ export async function sendMonero(options: SendMoneroOptions): Promise<SendMonero
   void (async () => {
     try {
       await refreshWalletInternal()
-      void publishWalletBackup()
       await publishEmberReceipt(options.amount, txHash ?? '', options)
     } catch (err) {
-      console.warn('Background post-send operations failed:', err)
+      logger.warn('Background post-send operations failed:', err)
     }
   })()
 
@@ -1181,7 +1071,6 @@ export async function withdrawAll(address: string): Promise<SendMoneroResult[]> 
     relay: true,
   })
   await refreshWalletInternal()
-  void publishWalletBackup()
   return sweeps.map(tx => {
     const outgoing = typeof tx.getOutgoingAmount === 'function' ? tx.getOutgoingAmount() : 0n
     return {
@@ -1202,14 +1091,14 @@ export async function setWalletSharePreference(enabled: boolean): Promise<void> 
       try {
         await syncProfileAddress(cachedMeta.address)
       } catch (err) {
-        console.warn('Failed to sync address to profile:', err)
+        logger.warn('Failed to sync address to profile:', err)
       }
     }
   } else {
     try {
       await syncProfileAddress(null)
     } catch (err) {
-      console.warn('Failed to remove address from profile:', err)
+      logger.warn('Failed to remove address from profile:', err)
     }
   }
 }
@@ -1220,7 +1109,7 @@ export async function deleteWallet(): Promise<void> {
     try {
       await syncProfileAddress(null)
     } catch (err) {
-      console.warn('Failed to remove address from profile:', err)
+      logger.warn('Failed to remove address from profile:', err)
     }
   }
   cachedSecrets = null
@@ -1240,3 +1129,12 @@ export async function deleteWallet(): Promise<void> {
     shareAddress: shareAddressPreference,
   })
 }
+
+export async function requireWalletMasterKey(): Promise<string> {
+  return await ensureMasterKey()
+}
+
+export async function readWalletMasterKey(opts: { allowCancel?: boolean } = {}): Promise<string | null> {
+  return await readMasterKey(opts)
+}
+

@@ -55,7 +55,7 @@
       comment = ''
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to send zap'
-      console.error('Zap send error:', err)
+      logger.error('Zap send error:', err)
     } finally {
       sending = false
     }
@@ -195,3 +195,4 @@
     </div>
   </div>
 {/if}
+

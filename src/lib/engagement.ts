@@ -47,7 +47,7 @@ async function flushQueue(): Promise<void> {
       lastFetchedAt.set(id, stamp)
     }
   } catch (err) {
-    console.error('Failed to hydrate engagement counts:', err)
+    logger.error('Failed to hydrate engagement counts:', err)
     // Re-queue so we can retry later
     for (const id of ids) {
       pendingEventIds.add(id)
@@ -201,3 +201,4 @@ export function incrementReplyCount(id: string, delta = 1): void {
   if (!id) return
   incrementMapCount(replyCounts, id, delta)
 }
+

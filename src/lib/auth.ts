@@ -129,7 +129,7 @@ export async function restoreSession(): Promise<User | null> {
           return savedUser
         }
       } catch (err) {
-        console.warn('Failed to restore extension session:', err)
+        logger.warn('Failed to restore extension session:', err)
       }
     }
 
@@ -138,7 +138,7 @@ export async function restoreSession(): Promise<User | null> {
     void warmupMessagingPermissions()
     return savedUser
   } catch (err) {
-    console.error('Failed to restore session:', err)
+    logger.error('Failed to restore session:', err)
     return null
   }
 }
@@ -147,21 +147,21 @@ export async function restoreSession(): Promise<User | null> {
  * Logout - properly cleanup NDK and stores
  */
 export async function logout(): Promise<void> {
-  console.log('🚪 logout() called - starting cleanup')
+  logger.info('🚪 logout() called - starting cleanup')
 
   // Clear NDK signer
-  console.log('🚪 Clearing NDK signer')
+  logger.info('🚪 Clearing NDK signer')
   logoutNDK()
 
   // Stop all feed subscriptions and clear feed
-  console.log('🚪 Stopping subscriptions and clearing feed')
+  logger.info('🚪 Stopping subscriptions and clearing feed')
   const { stopAllSubscriptions, clearFeed } = await import('./feed-ndk')
   stopAllSubscriptions()
   clearFeed()
   resetMessagingState()
 
   // Clear all feed state stores
-  console.log('🚪 Clearing all feed state')
+  logger.info('🚪 Clearing all feed state')
   try {
     const {
       likedEvents,
@@ -199,28 +199,28 @@ export async function logout(): Promise<void> {
     messagesLoading.set(false)
     messagesError.set(null)
   } catch (err) {
-    console.warn('Failed to clear feed stores:', err)
+    logger.warn('Failed to clear feed stores:', err)
   }
 
   // Stop notifications
-  console.log('🚪 Stopping notifications')
+  logger.info('🚪 Stopping notifications')
   try {
     const { stopNotificationListener } = await import('$lib/notifications')
     stopNotificationListener()
   } catch (err) {
-    console.warn('Failed to stop notifications:', err)
+    logger.warn('Failed to stop notifications:', err)
   }
 
   // Clear storage
-  console.log('🚪 Clearing storage')
+  logger.info('🚪 Clearing storage')
   await saveSetting('currentUser', null)
   await saveSetting('authMethod', null)
   await saveSetting('nostrConnectToken', null)
 
   // Clear store - this triggers reactive updates
-  console.log('🚪 Setting currentUser to null (should trigger isAuthenticated = false)')
+  logger.info('🚪 Setting currentUser to null (should trigger isAuthenticated = false)')
   currentUser.set(null)
-  console.log('🚪 Logout complete - currentUser.set(null) called')
+  logger.info('🚪 Logout complete - currentUser.set(null) called')
 }
 
 /**
@@ -240,7 +240,7 @@ export async function updateProfile(updates: Partial<User>): Promise<void> {
 
     // Persist to storage
     saveSetting('currentUser', updated).catch(err => {
-      console.error('Failed to save profile updates:', err)
+      logger.error('Failed to save profile updates:', err)
     })
 
     return updated
@@ -248,3 +248,4 @@ export async function updateProfile(updates: Partial<User>): Promise<void> {
 
   // TODO: Publish profile event to relays using NDK
 }
+

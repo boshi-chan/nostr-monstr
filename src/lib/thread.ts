@@ -8,6 +8,7 @@ import { parseContent } from './content'
 import { getNDK } from './ndk'
 import { getEventById, fetchEventById } from './feed-ndk'
 import type { NDKSubscriptionOptions } from '@nostr-dev-kit/ndk'
+import { normalizeEvent } from '$lib/event-validation'
 
 export interface ThreadNode {
   event: NostrEvent
@@ -60,7 +61,7 @@ export async function findRootPost(event: NostrEvent): Promise<NostrEvent> {
       try {
         parent = await fetchEventById(parentId)
       } catch (err) {
-        console.warn('Failed to fetch parent event:', err)
+        logger.warn('Failed to fetch parent event:', err)
         // Return current as root if we can't fetch parent
         return current
       }
@@ -101,7 +102,7 @@ async function fetchAllAncestors(event: NostrEvent): Promise<NostrEvent[]> {
       try {
         parent = await fetchEventById(parentId)
       } catch (err) {
-        console.warn('Failed to fetch ancestor:', err)
+        logger.warn('Failed to fetch ancestor:', err)
         break
       }
     }
@@ -144,8 +145,8 @@ async function fetchDirectReplies(eventId: string): Promise<NostrEvent[]> {
     const result = (await Promise.race([fetchPromise, timeoutPromise])) as Set<any>
 
     const replies = Array.from(result)
-      .map(item => (item.rawEvent?.() ?? item) as NostrEvent)
-      .filter(Boolean)
+      .map(item => normalizeEvent(item as NostrEvent))
+      .filter((event): event is NostrEvent => Boolean(event))
 
     // Cache the result
     repliesCache.set(eventId, { replies, fetchedAt: Date.now() })
@@ -160,7 +161,7 @@ async function fetchDirectReplies(eventId: string): Promise<NostrEvent[]> {
 
     return replies
   } catch (err) {
-    console.warn('Failed to fetch direct replies:', err)
+    logger.warn('Failed to fetch direct replies:', err)
     return []
   }
 }
@@ -226,7 +227,7 @@ export async function buildCompleteThread(event: NostrEvent): Promise<ThreadCont
     )
 
     const threadPromise = (async () => {
-      console.log('⏳ Building thread for', event.id.slice(0, 8))
+      logger.info('⏳ Building thread for', event.id.slice(0, 8))
 
       // Parallel fetch: ancestors and replies
       const [ancestors, rootPost] = await Promise.all([
@@ -234,12 +235,12 @@ export async function buildCompleteThread(event: NostrEvent): Promise<ThreadCont
         findRootPost(event),
       ])
 
-      console.log('✓ Found root post and ancestors')
+      logger.info('✓ Found root post and ancestors')
 
       // Fetch all replies (including nested)
       const allReplies = await fetchAllReplies(rootPost)
 
-      console.log(`✓ Fetched ${allReplies.length} replies`)
+      logger.info(`✓ Fetched ${allReplies.length} replies`)
 
       // Combine all events
       const allEvents = [rootPost, ...ancestors, event, ...allReplies]
@@ -265,7 +266,7 @@ export async function buildCompleteThread(event: NostrEvent): Promise<ThreadCont
 
     return await Promise.race([threadPromise, timeoutPromise])
   } catch (err) {
-    console.error('Failed to build complete thread:', err)
+    logger.error('Failed to build complete thread:', err)
     // Return minimal thread with just the event
     return {
       rootPost: null,
@@ -477,3 +478,4 @@ export function flattenThread(node: ThreadNode | null): ThreadNode[] {
   traverse(node)
   return flattened
 }
+

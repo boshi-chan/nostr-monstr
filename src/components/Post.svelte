@@ -138,6 +138,9 @@
   $: nip05 = getNip05Display(metadata?.nip05)
   $: displayLabel = displayName || actionableEvent.pubkey.slice(0, 8)
   $: initials = displayLabel.slice(0, 2).toUpperCase()
+  $: if (actionableEvent?.pubkey && !$metadataCache.get(actionableEvent.pubkey)) {
+    void fetchUserMetadata(actionableEvent.pubkey)
+  }
 
   let isReply = false
   $: isReply = parsed.replyToId !== null
@@ -191,7 +194,7 @@
       await publishReaction(actionableEvent.id, '+')
       likedEvents.update(set => new Set(set).add(actionableEvent.id))
     } catch (err) {
-      console.error('Like failed:', err)
+      logger.error('Like failed:', err)
     } finally {
       likeLoading = false
     }
@@ -204,7 +207,7 @@
       await publishRepost(actionableEvent)
       repostedEvents.update(set => new Set(set).add(actionableEvent.id))
     } catch (err) {
-      console.error('Repost failed:', err)
+      logger.error('Repost failed:', err)
     } finally {
       repostActionLoading = false
     }
@@ -267,7 +270,7 @@
           onSelect(fetched)
         }
       } catch (err) {
-        console.warn('Failed to resolve event', err)
+        logger.warn('Failed to resolve event', err)
       }
       return
     }
@@ -305,7 +308,7 @@
       }
       parentEvent = target
     } catch (err) {
-      console.warn('Failed to load parent event', err)
+      logger.warn('Failed to load parent event', err)
     } finally {
       parentLoading = false
     }
@@ -325,7 +328,7 @@
       }
       repostTargetEvent = target
     } catch (err) {
-      console.warn('Failed to load repost target', err)
+      logger.warn('Failed to load repost target', err)
     } finally {
       repostTargetLoading = false
     }
@@ -353,14 +356,14 @@
 
   async function copyToClipboard(value: string, label: string): Promise<void> {
     if (typeof navigator === 'undefined' || !navigator.clipboard) {
-      console.warn(`Clipboard API unavailable. Unable to copy ${label}.`)
+      logger.warn(`Clipboard API unavailable. Unable to copy ${label}.`)
       return
     }
     try {
       await navigator.clipboard.writeText(value)
-      console.info(`${label} copied to clipboard.`)
+      logger.info(`${label} copied to clipboard.`)
     } catch (err) {
-      console.warn(`Failed to copy ${label}`, err)
+      logger.warn(`Failed to copy ${label}`, err)
     }
   }
 
@@ -370,7 +373,7 @@
       const noteId = nip19.noteEncode(actionableEvent.id)
       await copyToClipboard(noteId, 'Note ID')
     } catch (err) {
-      console.warn('Failed to encode note id', err)
+      logger.warn('Failed to encode note id', err)
       await copyToClipboard(actionableEvent.id, 'Note ID (raw)')
     }
     closeMenu()
@@ -382,7 +385,7 @@
       const npub = nip19.npubEncode(actionableEvent.pubkey)
       await copyToClipboard(npub, 'npub')
     } catch (err) {
-      console.warn('Failed to encode npub', err)
+      logger.warn('Failed to encode npub', err)
     } finally {
       closeMenu()
     }
@@ -391,7 +394,7 @@
   function handleBlockUser(mouseEvent: MouseEvent): void {
     mouseEvent.stopPropagation()
     closeMenu()
-    console.warn('Blocking users is not implemented yet.', actionableEvent.pubkey)
+    logger.warn('Blocking users is not implemented yet.', actionableEvent.pubkey)
   }
 
   function handleWindowClick(): void {
@@ -825,6 +828,7 @@
     height: auto;
   }
 </style>
+
 
 
 

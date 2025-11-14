@@ -1,14 +1,17 @@
 <script lang="ts">
   import { fade } from 'svelte/transition'
+  import { tick } from 'svelte'
   import { pinPrompt, closePinPrompt } from '$stores/pinPrompt'
 
   let pin = ''
   let localError: string | null = null
   let pinInput: HTMLInputElement | null = null
+  let submitting = false
   $: request = $pinPrompt
   $: if (!request) {
     pin = ''
     localError = null
+    submitting = false
   }
 
   function validatePin(value: string): boolean {
@@ -30,9 +33,11 @@ $: if (request) {
   })
 }
 
-  function submit(): void {
+  async function submit(): Promise<void> {
     const trimmed = pin.trim()
     if (!validatePin(trimmed)) return
+    submitting = true
+    await tick()
     closePinPrompt(trimmed)
   }
 
@@ -74,7 +79,8 @@ $: if (request) {
         bind:value={pin}
         id="pin-prompt-input"
         bind:this={pinInput}
-        class="mt-2 w-full rounded-2xl border border-dark-border/60 bg-dark/70 px-3 py-2 text-sm text-text-soft focus:border-primary/60 focus:outline-none"
+        class="mt-2 w-full rounded-2xl border border-dark-border/60 bg-dark/70 px-3 py-2 text-sm text-text-soft focus:border-primary/60 focus:outline-none disabled:opacity-60"
+        disabled={submitting}
       />
       {#if localError}
         <p class="mt-2 text-xs text-rose-300">{localError}</p>
@@ -84,18 +90,20 @@ $: if (request) {
         {#if request.allowCancel}
           <button
             type="button"
-            class="rounded-2xl border border-dark-border/60 px-4 py-2 text-sm font-semibold text-text-soft transition hover:border-rose-400/60 hover:text-rose-200"
+            class="rounded-2xl border border-dark-border/60 px-4 py-2 text-sm font-semibold text-text-soft transition hover:border-rose-400/60 hover:text-rose-200 disabled:opacity-50"
             on:click={cancel}
+            disabled={submitting}
           >
             Cancel
           </button>
         {/if}
         <button
           type="button"
-          class="btn-primary flex-1 justify-center"
+          class="btn-primary flex-1 justify-center disabled:cursor-not-allowed disabled:opacity-60"
           on:click={submit}
+          disabled={submitting}
         >
-          Continue
+          {submitting ? 'Checking PIN…' : 'Continue'}
         </button>
       </div>
     </div>

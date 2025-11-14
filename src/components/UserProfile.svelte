@@ -23,7 +23,7 @@
       await user.fetchProfile()
       profile = user.profile ?? profile
     } catch (err) {
-      console.warn('Failed to fetch profile for', pubkey.slice(0, 8))
+      logger.warn('Failed to fetch profile for', pubkey.slice(0, 8))
     }
   })
 
@@ -88,3 +88,4 @@
     transition: opacity 0.2s;
   }
 </style>
+

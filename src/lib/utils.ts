@@ -37,7 +37,7 @@ export async function copyToClipboard(text: string): Promise<boolean> {
     await navigator.clipboard.writeText(text)
     return true
   } catch (err) {
-    console.error('Failed to copy:', err)
+    logger.error('Failed to copy:', err)
     return false
   }
 }
@@ -112,3 +112,4 @@ export function extractDomain(url: string): string {
     return url
   }
 }
+

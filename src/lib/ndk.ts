@@ -43,24 +43,24 @@ export async function initNDK(relays: string[] = DEFAULT_RELAYS): Promise<NDK> {
     
     // Track connection state BEFORE connecting
     ndkInstance.pool.on('relay:connect', () => {
-      console.log('✓ NDK relay connected')
+      logger.info('✓ NDK relay connected')
       ndkConnected.set(true)
       ndkConnecting.set(false)
     })
 
     ndkInstance.pool.on('relay:disconnect', () => {
-      console.log('✗ NDK relay disconnected')
+      logger.info('✗ NDK relay disconnected')
     })
 
     // Connect to relays
-    console.log('Connecting to NDK relays...', relays)
+    logger.info('Connecting to NDK relays...', relays)
     await ndkInstance.connect()
-    console.log('NDK connect() completed')
+    logger.info('NDK connect() completed')
 
     return ndkInstance
   } catch (err) {
     const errorMsg = `NDK initialization failed: ${err}`
-    console.error(errorMsg)
+    logger.error(errorMsg)
     ndkError.set(errorMsg)
     ndkConnecting.set(false)
     throw err
@@ -154,3 +154,4 @@ export function disconnectNDK(): void {
     ndkConnected.set(false)
   }
 }
+

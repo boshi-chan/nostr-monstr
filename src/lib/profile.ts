@@ -73,7 +73,7 @@ async function fetchExistingMetadata(): Promise<UserMetadata> {
       }
     }
   } catch (err) {
-    console.warn('Failed to fetch metadata from relay:', err instanceof Error ? err.message : err)
+    logger.warn('Failed to fetch metadata from relay:', err instanceof Error ? err.message : err)
   }
 
   try {
@@ -81,7 +81,7 @@ async function fetchExistingMetadata(): Promise<UserMetadata> {
       return user.profile as UserMetadata
     }
   } catch (err) {
-    console.warn('Failed to access NDK user profile cache:', err)
+    logger.warn('Failed to access NDK user profile cache:', err)
   }
 
   throw new Error(
@@ -193,3 +193,4 @@ export async function updateProfileMetadata(updates: EditableProfileFields): Pro
 
   await publishMetadata(next)
 }
+

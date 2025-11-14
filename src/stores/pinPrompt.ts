@@ -28,7 +28,8 @@ export function requestPinModal(message: string, allowCancel: boolean): Promise<
 export function closePinPrompt(value: string | null): void {
   pinPromptStore.update(current => {
     if (current) {
-      current.resolve(value)
+      const resolve = current.resolve
+      setTimeout(() => resolve(value), 0)
     }
     return null
   })

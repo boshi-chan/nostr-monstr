@@ -2,6 +2,7 @@ import { writable } from 'svelte/store'
 import { getNDK } from '$lib/ndk'
 import type { NDKEvent, NDKSubscriptionOptions } from '@nostr-dev-kit/ndk'
 import { EMBER_EVENT_KIND, EMBER_TAG, atomicToXmr } from '$lib/ember'
+import { normalizeEvent } from '$lib/event-validation'
 
 export const emberTotals = writable<Map<string, number>>(new Map())
 
@@ -37,7 +38,8 @@ export async function ensureEmberTotal(postId: string): Promise<void> {
 
       let total = 0
       for (const event of events as Set<NDKEvent>) {
-        const raw = event.rawEvent()
+        const raw = normalizeEvent(event)
+        if (!raw) continue
         const amountTag = raw.tags.find(tag => tag[0] === EMBER_TAG)
         if (amountTag?.[1]) {
           total += atomicToXmr(amountTag[1])
@@ -50,7 +52,7 @@ export async function ensureEmberTotal(postId: string): Promise<void> {
         return next
       })
     } catch (err) {
-      console.warn('Failed to load Ember totals for post', postId, err)
+      logger.warn('Failed to load Ember totals for post', postId, err)
     } finally {
       loadCache.delete(postId)
     }
@@ -59,3 +61,4 @@ export async function ensureEmberTotal(postId: string): Promise<void> {
   loadCache.set(postId, promise)
   await promise
 }
+

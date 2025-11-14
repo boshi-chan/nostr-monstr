@@ -176,7 +176,7 @@
       followingCount = following.size
       followersCount = followers.size
     } catch (err) {
-      console.warn('Failed to load profile stats', err)
+      logger.warn('Failed to load profile stats', err)
     } finally {
       loadingStats = false
     }
@@ -200,7 +200,7 @@
         })
         .sort((a, b) => b.created_at - a.created_at)
     } catch (err) {
-      console.error('Failed to load profile posts', err)
+      logger.error('Failed to load profile posts', err)
       error = 'Unable to load posts right now.'
     } finally {
       loadingPosts = false
@@ -486,5 +486,6 @@
     </div>
   </div>
 {/if}
+
 
 

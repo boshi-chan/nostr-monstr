@@ -30,7 +30,7 @@ function loadFilters(): FeedFilters {
       return { ...DEFAULT_FILTERS, ...JSON.parse(stored) }
     }
   } catch (e) {
-    console.warn('Failed to load feed filters from localStorage:', e)
+    logger.warn('Failed to load feed filters from localStorage:', e)
   }
 
   return DEFAULT_FILTERS
@@ -45,7 +45,7 @@ feedFilters.subscribe(value => {
     try {
       localStorage.setItem('feedFilters', JSON.stringify(value))
     } catch (e) {
-      console.warn('Failed to save feed filters to localStorage:', e)
+      logger.warn('Failed to save feed filters to localStorage:', e)
     }
   }
 })
@@ -75,3 +75,4 @@ export function setProfileMode(mode: FilterMode) {
 export function resetFilters() {
   feedFilters.set(DEFAULT_FILTERS)
 }
+

@@ -245,7 +245,7 @@ export async function sendZap(
       throw new Error('bech32 LNURL not yet supported, please use Lightning address')
     }
   } catch (err) {
-    console.error('LNURL/invoice error:', err)
+    logger.error('LNURL/invoice error:', err)
     throw new Error('Failed to get Lightning invoice: ' + (err instanceof Error ? err.message : String(err)))
   }
 
@@ -262,9 +262,9 @@ export async function sendZap(
       throw new Error(response.error.message)
     }
 
-    console.log('Zap sent successfully:', response)
+    logger.info('Zap sent successfully:', response)
   } catch (err) {
-    console.error('NWC payment error:', err)
+    logger.error('NWC payment error:', err)
     throw new Error('Failed to send payment: ' + (err instanceof Error ? err.message : String(err)))
   }
 }
@@ -286,7 +286,7 @@ export async function getNWCBalance(): Promise<number> {
 
     return 0
   } catch (err) {
-    console.error('Failed to get NWC balance:', err)
+    logger.error('Failed to get NWC balance:', err)
     throw err
   }
 }
@@ -303,7 +303,8 @@ export async function getNWCInfo(): Promise<Record<string, any>> {
 
     return response.result || {}
   } catch (err) {
-    console.error('Failed to get NWC info:', err)
+    logger.error('Failed to get NWC info:', err)
     throw err
   }
 }
+

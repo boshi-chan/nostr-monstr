@@ -1,6 +1,6 @@
 import { get } from 'svelte/store'
 import { getNDK, getCurrentNDKUser } from '$lib/ndk'
-import { NDKEvent, type NDKFilter, type NDKSigner, type NDKSubscription } from '@nostr-dev-kit/ndk'
+import { NDKEvent, type NDKFilter, type NDKSubscription } from '@nostr-dev-kit/ndk'
 import {
   conversations,
   conversationMetadata,
@@ -14,6 +14,14 @@ import {
 import { fetchUserMetadata } from '$lib/metadata'
 import type { DirectMessage } from '$types/dm'
 import type { NostrEvent } from '$types/nostr'
+import {
+  encryptForPubkey,
+  decryptFromPubkey,
+  preferredSchemeFor,
+  rememberScheme,
+  type DmEncryptionScheme,
+} from '$lib/dm-crypto'
+import { normalizeEvent } from '$lib/event-validation'
 
 const NIP04_KIND = 4
 const NIP44_KIND = 44
@@ -58,8 +66,7 @@ export async function loadConversations(): Promise<void> {
 
   try {
     const ndk = getNDK()
-    const signer = ndk.signer
-    if (!signer) throw new Error('No signer available')
+    if (!ndk.signer) throw new Error('No signer available')
 
     const receivedFilter: NDKFilter = { kinds: DM_KINDS, '#p': [user.pubkey], limit: 500 }
     const sentFilter: NDKFilter = { kinds: DM_KINDS, authors: [user.pubkey], limit: 500 }
@@ -71,7 +78,8 @@ export async function loadConversations(): Promise<void> {
 
     const map = new Map<string, NostrEvent>()
     for (const event of [...received, ...sent]) {
-      const raw = (event as NDKEvent).rawEvent() as NostrEvent
+      const raw = normalizeEvent(event as NDKEvent | NostrEvent)
+      if (!raw) continue
       map.set(raw.id, raw)
     }
 
@@ -84,7 +92,7 @@ export async function loadConversations(): Promise<void> {
       markEventProcessed(event.id)
       const partner = getPartner(event, user.pubkey)
       if (!partner) continue
-      const message = await decryptEvent(event, user.pubkey, partner, signer, ndk)
+      const message = await decryptEvent(event, user.pubkey, partner)
       if (!convMap.has(partner)) convMap.set(partner, [])
       convMap.get(partner)!.push(message)
     }
@@ -102,7 +110,7 @@ export async function loadConversations(): Promise<void> {
 
     void subscribeToDmEvents(user.pubkey)
   } catch (err) {
-    console.error('[DM] Failed to load conversations:', err)
+    logger.error('[DM] Failed to load conversations:', err)
     messagesError.set(err instanceof Error ? err.message : 'Failed to load conversations')
   } finally {
     messagesLoading.set(false)
@@ -118,8 +126,7 @@ export async function loadConversation(pubkey: string): Promise<void> {
 
   try {
     const ndk = getNDK()
-    const signer = ndk.signer
-    if (!signer) throw new Error('No signer available')
+    if (!ndk.signer) throw new Error('No signer available')
 
     const filters: NDKFilter[] = [
       { kinds: DM_KINDS, authors: [user.pubkey], '#p': [pubkey], limit: 200 },
@@ -130,7 +137,8 @@ export async function loadConversation(pubkey: string): Promise<void> {
     const map = new Map<string, NostrEvent>()
     for (const set of results) {
       for (const event of set) {
-        const raw = (event as NDKEvent).rawEvent() as NostrEvent
+        const raw = normalizeEvent(event as NDKEvent | NostrEvent)
+        if (!raw) continue
         map.set(raw.id, raw)
       }
     }
@@ -142,7 +150,7 @@ export async function loadConversation(pubkey: string): Promise<void> {
     const messages: DirectMessage[] = []
     for (const event of events) {
       markEventProcessed(event.id)
-      messages.push(await decryptEvent(event, user.pubkey, pubkey, signer, ndk))
+      messages.push(await decryptEvent(event, user.pubkey, pubkey))
     }
 
     setConversationEntry(pubkey, messages)
@@ -153,7 +161,7 @@ export async function loadConversation(pubkey: string): Promise<void> {
       return next
     })
   } catch (err) {
-    console.error('[DM] Failed to load conversation:', err)
+    logger.error('[DM] Failed to load conversation:', err)
     messagesError.set(err instanceof Error ? err.message : 'Failed to load conversation')
   } finally {
     messagesLoading.set(false)
@@ -172,16 +180,32 @@ export async function sendDirectMessage(recipientPubkey: string, content: string
   if (!trimmed) return
 
   try {
-    const recipient = ndk.getUser({ pubkey: recipientPubkey })
-    const encrypted = await signer.encrypt(recipient, trimmed, 'nip44')
+    let scheme: DmEncryptionScheme = preferredSchemeFor(recipientPubkey)
+    let ciphertext: string
+    let kind: number
+
+    try {
+      ciphertext = await encryptForPubkey(recipientPubkey, trimmed, scheme)
+      kind = scheme === 'nip44' ? NIP44_KIND : NIP04_KIND
+    } catch (err) {
+      if (scheme === 'nip44') {
+        logger.warn('[DM] NIP-44 send failed, falling back to NIP-04:', err)
+        scheme = 'nip04'
+        ciphertext = await encryptForPubkey(recipientPubkey, trimmed, scheme)
+        kind = NIP04_KIND
+      } else {
+        throw err
+      }
+    }
 
     const event = new NDKEvent(ndk)
-    event.kind = NIP44_KIND
-    event.content = encrypted
+    event.kind = kind
+    event.content = ciphertext
     event.tags = [['p', recipientPubkey]]
     await event.sign(signer)
     await event.publish()
 
+    rememberScheme(recipientPubkey, scheme)
     markEventProcessed(event.id)
 
     const message: DirectMessage = {
@@ -191,7 +215,7 @@ export async function sendDirectMessage(recipientPubkey: string, content: string
       content: trimmed,
       createdAt: event.created_at || Math.floor(Date.now() / 1000),
       isEncrypted: true,
-      encryptionType: 'nip44',
+      encryptionType: scheme === 'nip44' ? 'nip44' : 'nip4',
     }
 
     appendMessageToConversation(recipientPubkey, message)
@@ -201,7 +225,7 @@ export async function sendDirectMessage(recipientPubkey: string, content: string
       conversationMessages.set([...current, message])
     }
   } catch (err) {
-    console.error('[DM] Failed to send message:', err)
+    logger.error('[DM] Failed to send message:', err)
     throw err
   }
 }
@@ -260,18 +284,17 @@ function hasProcessedEvent(id?: string): boolean {
 async function decryptEvent(
   event: NostrEvent,
   mePubkey: string,
-  partnerPubkey: string,
-  signer: NDKSigner,
-  ndk: ReturnType<typeof getNDK>
+  partnerPubkey: string
 ): Promise<DirectMessage> {
-  const scheme = event.kind === NIP44_KIND ? 'nip44' : 'nip04'
+  const scheme: DmEncryptionScheme = event.kind === NIP44_KIND ? 'nip44' : 'nip04'
   const sender = event.pubkey
   const recipient = sender === mePubkey ? partnerPubkey : mePubkey
-  const counterpart = ndk.getUser({ pubkey: sender === mePubkey ? partnerPubkey : sender })
+  const counterpart = sender === mePubkey ? partnerPubkey : sender
 
   try {
-    let plaintext = await signer.decrypt(counterpart, event.content, scheme as any)
+    let plaintext = await decryptFromPubkey(counterpart, event.content, scheme)
     plaintext = plaintext.replace(/^\[\/\/\]: # \(nip\d+\)\s*/gm, '').trim()
+    rememberScheme(partnerPubkey, scheme)
     return {
       id: event.id,
       senderPubkey: sender,
@@ -282,7 +305,12 @@ async function decryptEvent(
       encryptionType: scheme === 'nip44' ? 'nip44' : 'nip4',
     }
   } catch (err) {
-    console.warn('[DM] Failed to decrypt event', event.id, err)
+    if (scheme === 'nip44') {
+      logger.warn('[DM] Failed to decrypt NIP-44 message, marking partner as legacy:', err)
+      rememberScheme(partnerPubkey, 'nip04')
+    } else {
+      logger.warn('[DM] Failed to decrypt NIP-04 message:', err)
+    }
     return {
       id: event.id,
       senderPubkey: sender,
@@ -343,8 +371,7 @@ function updateConversationMetadata(pubkey: string, messages: DirectMessage[]): 
 
 function subscribeToDmEvents(mePubkey: string): void {
   const ndk = getNDK()
-  const signer = ndk.signer
-  if (!signer) return
+  if (!ndk.signer) return
 
   if (subscriptionOwner === mePubkey && dmSubscriptions.size > 0) {
     return
@@ -369,20 +396,16 @@ function subscribeToDmEvents(mePubkey: string): void {
 }
 
 async function handleLiveDmEvent(event: NDKEvent, mePubkey: string): Promise<void> {
-  const raw = event.rawEvent() as NostrEvent
-  if (hasProcessedEvent(raw.id)) {
+  const raw = normalizeEvent(event)
+  if (!raw || hasProcessedEvent(raw.id)) {
     return
   }
-
-  const ndk = getNDK()
-  const signer = ndk.signer
-  if (!signer) return
 
   const partner = getPartner(raw, mePubkey)
   if (!partner) return
 
   try {
-    const message = await decryptEvent(raw, mePubkey, partner, signer, ndk)
+    const message = await decryptEvent(raw, mePubkey, partner)
     markEventProcessed(raw.id)
     appendMessageToConversation(partner, message)
     void fetchUserMetadata(partner)
@@ -402,7 +425,7 @@ async function handleLiveDmEvent(event: NDKEvent, mePubkey: string): Promise<voi
       })
     }
   } catch (err) {
-    console.error('[DM] Failed to handle live DM event:', err)
+    logger.error('[DM] Failed to handle live DM event:', err)
   }
 }
 
@@ -411,7 +434,7 @@ export function stopDmSubscriptions(): void {
     try {
       sub.stop()
     } catch (err) {
-      console.warn('Failed to stop DM subscription:', err)
+      logger.warn('Failed to stop DM subscription:', err)
     }
   }
   dmSubscriptions.clear()
@@ -424,3 +447,4 @@ export function resetMessagingState(): void {
   subscriptionOwner = null
   processedOwner = null
 }
+
