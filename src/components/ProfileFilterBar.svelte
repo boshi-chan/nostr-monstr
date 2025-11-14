@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { feedFilters, setProfileMode, type FilterMode } from '$stores/feedFilters'
+  import { feedFilters, setProfileMode } from '$stores/feedFilters'
   import CommentIcon from './icons/CommentIcon.svelte'
   import RepostIcon from './icons/RepostIcon.svelte'
   import ImageIcon from './icons/ImageIcon.svelte'

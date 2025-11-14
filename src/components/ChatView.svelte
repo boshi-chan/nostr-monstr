@@ -10,10 +10,6 @@
 
   let messagesContainer: HTMLDivElement
   let currentUser = getCurrentNDKUser()
-  let messages: DirectMessage[] = []   // <= THIS WAS THE MISSING LINE
-
-  // force Svelte to redraw arr
-  $: messages = [...$conversationMessages]
 
   $: {
     if (messagesContainer && $conversationMessages.length > 0) {

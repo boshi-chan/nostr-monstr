@@ -18,6 +18,7 @@ import {
   likedEvents,
   repostedEvents,
   zappedEvents,
+  commentedThreads,
 } from '$stores/feed'
 import { parseMetadataEvent, fetchUserMetadata } from './metadata'
 import { feedSource, type FeedSource } from '$stores/feedSource'
@@ -147,7 +148,10 @@ function shouldIncludeEvent(origin: FeedOrigin, currentFeed: FeedSource): boolea
 
 /**
  * Check if event passes the current feed filters
+ * Note: Currently unused, but kept for future filtering needs
  */
+// @ts-ignore - unused function kept for future use
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function passesFilters(event: NostrEvent): boolean {
   const filters = get(feedFilters)
 
@@ -161,8 +165,8 @@ function passesFilters(event: NostrEvent): boolean {
     return filters.showReplies
   }
 
-  // It's a regular post
-  return filters.showPosts
+  // It's a regular post - always show regular posts if they're not replies/reposts
+  return true
 }
 
 function flushPendingEvents(): void {
@@ -1082,6 +1086,15 @@ export async function publishNote(content: string, replyTo?: NostrEvent): Promis
     const raw = ndkEvent.rawEvent()
     recordUserEvent(raw)
     addEventToFeed(raw, 'local')
+    if (replyTo?.id) {
+      commentedThreads.update(set => {
+        if (set.has(replyTo.id)) return set
+        const next = new Set(set)
+        next.add(replyTo.id)
+        return next
+      })
+      persistInteractionsSnapshot()
+    }
 
     return raw
   } catch (err) {
@@ -1247,6 +1260,26 @@ export async function loadUserInteractions(): Promise<void> {
     }
     zappedEvents.set(zappedEventMap)
     console.log(`Loaded ${zappedEventMap.size} zapped events`)
+
+    // Load replies authored by user (kind 1) to know which threads were commented
+    const replies = await ndk.fetchEvents(
+      {
+        kinds: [1],
+        authors: [user.pubkey],
+        limit: 500,
+      },
+      { closeOnEose: true }
+    )
+
+    const commentedSet = new Set<string>()
+    for (const reply of replies) {
+      const eventTag = reply.tags.find((t: string[]) => t[0] === 'e')
+      if (eventTag && eventTag[1]) {
+        commentedSet.add(eventTag[1])
+      }
+    }
+    commentedThreads.set(commentedSet)
+    console.log(`Loaded ${commentedSet.size} commented threads`)
 
     persistInteractionsSnapshot()
   } catch (err) {

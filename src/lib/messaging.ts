@@ -17,14 +17,13 @@ import {
   messagesError,
   setDmPermissionError,
   dmCacheHydratedFor,
-  conversationEncryption,
 } from '$stores/messages'
 import { metadataCache } from '$stores/feed'
 import type { DirectMessage, Conversation } from '$types/dm'
 import type { NostrEvent } from '$types/nostr'
 import type { UserMetadata } from '$types/user'
 import { get } from 'svelte/store'
-import { NDKEvent, type NDKSubscription, NDKPrivateKeySigner } from '@nostr-dev-kit/ndk'
+import { NDKEvent, type NDKSubscription } from '@nostr-dev-kit/ndk'
 
 // --------------------------------- CONSTANTS ---------------------------------
 
@@ -715,7 +714,8 @@ export async function sendDirectMessage(
 
   if (mode === 'nip4') {
     const counterpart = ndk.getUser({ pubkey: recipientPubkey })
-    const cipher = await ndk.signer!.nip04.encrypt(counterpart, content)
+    // Type assertion needed because nip04 exists at runtime but not in type definitions
+    const cipher = await (ndk.signer as any).nip04.encrypt(counterpart, content)
 
     evt = new NDKEvent(ndk, {
       kind: DIRECT_MESSAGE_KIND,
@@ -745,4 +745,25 @@ export async function sendDirectMessage(
   }
 
   updateConversation(recipientPubkey, optimistic)
+}
+
+/**
+ * Search for users by name or pubkey (stub implementation)
+ * TODO: Implement proper user search functionality
+ */
+export async function searchUsers(query: string): Promise<any[]> {
+  // Stub implementation - to be properly implemented later
+  console.warn('searchUsers not yet implemented:', query)
+  return []
+}
+
+/**
+ * Create a group chat (stub implementation)
+ * TODO: Implement group chat functionality
+ */
+export async function createGroupChat(name: string, members: string[]): Promise<string> {
+  // Stub implementation - to be properly implemented later
+  console.warn('createGroupChat not yet implemented:', name, members)
+  // Return a temporary group ID until proper implementation
+  return `group-${Date.now()}`
 }

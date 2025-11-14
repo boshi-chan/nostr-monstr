@@ -120,8 +120,16 @@ export function parseContent(event: NostrEvent): ParsedContent {
     processTags(nestedTags, false)
   }
 
-  if (!replyToId && lastReferenceId && lastReferenceId !== rootId) {
-    replyToId = lastReferenceId
+  // Determine replyToId if not explicitly set
+  if (!replyToId) {
+    if (lastReferenceId && lastReferenceId !== rootId) {
+      // Use lastReferenceId if it's different from root
+      replyToId = lastReferenceId
+    } else if (rootId) {
+      // If we only have a root tag (direct reply to root), use rootId
+      // This handles the NIP-10 case where a post with only a "root" marker is a direct reply
+      replyToId = rootId
+    }
   }
 
   // Parse content for URLs and mentions
@@ -412,9 +420,6 @@ export function hasMedia(event: NostrEvent): boolean {
  * Detects bots by common patterns in content and metadata
  */
 export function isBot(event: NostrEvent): boolean {
-  // Check for bot indicators in content
-  const content = event.content.toLowerCase()
-
   // Common bot patterns
   const botPatterns = [
     /\bbot\b/i,

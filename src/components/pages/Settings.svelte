@@ -3,7 +3,7 @@
   import { walletState, showWallet } from '$stores/wallet'
   import { metadataCache } from '$stores/feed'
   import { getAvatarUrl, getNip05Display, fetchUserMetadata } from '$lib/metadata'
-  import { setWalletSharePreference, getAvailableNodes, setActiveNode } from '$lib/wallet'
+  import { setWalletSharePreference, setActiveNode } from '$lib/wallet/lazy'
   import { getRelaysFromNIP65, publishRelays, getDefaultRelays, isValidRelayUrl, type RelayConfig } from '$lib/relays'
   import { updateProfileMetadata, type EditableProfileFields } from '$lib/profile'
   import { onMount } from 'svelte'
@@ -12,7 +12,7 @@
   import ServerIcon from '../icons/ServerIcon.svelte'
   import EmberIcon from '../icons/EmberIcon.svelte'
   import ZapIcon from '../icons/ZapIcon.svelte'
-  import type { MoneroNode } from '$lib/wallet/nodes'
+  import { DEFAULT_NODES, type MoneroNode } from '$lib/wallet/nodes'
   import { nwcConnection, nwcConnected, setNWCFromURI, disconnectNWC } from '$stores/nwc'
   import { getNWCBalance, getNWCInfo } from '$lib/nwc'
 
@@ -374,7 +374,7 @@
   }
 
   // Wallet state
-  const nodes: MoneroNode[] = getAvailableNodes()
+  const nodes: MoneroNode[] = [...DEFAULT_NODES]
   let nodeBusy: string | null = null
 
   async function handleNodeChange(event: Event) {
@@ -558,12 +558,14 @@
 
           <div class="grid gap-4 md:grid-cols-2">
             <div>
+              <!-- svelte-ignore a11y-label-has-associated-control -->
               <label class="text-xs uppercase tracking-[0.25em] text-text-muted">Public Key</label>
               <p class="mt-2 break-all text-sm text-text-soft/80 font-mono bg-dark/50 rounded-lg border border-dark-border/60 p-3">
                 {$currentUser.pubkey}
               </p>
             </div>
             <div>
+              <!-- svelte-ignore a11y-label-has-associated-control -->
               <label class="text-xs uppercase tracking-[0.25em] text-text-muted">NIP-05 Verification</label>
               <p class="mt-2 text-sm text-text-soft/80 bg-dark/50 rounded-lg border border-dark-border/60 p-3">
                 {nip05 || 'Not set'}
@@ -600,8 +602,9 @@
               <form class="space-y-5" on:submit|preventDefault={handleProfileSubmit}>
                 <div class="grid gap-4 md:grid-cols-2">
                   <div>
-                    <label class="mb-1 block text-sm font-medium text-text-soft">Display Name</label>
+                    <label for="profile-display-name" class="mb-1 block text-sm font-medium text-text-soft">Display Name</label>
                     <input
+                      id="profile-display-name"
                       type="text"
                       maxlength="80"
                       autocomplete="name"
@@ -613,8 +616,9 @@
                     <p class="mt-1 text-xs text-text-muted">Shown prominently across feeds.</p>
                   </div>
                   <div>
-                    <label class="mb-1 block text-sm font-medium text-text-soft">Username (NIP-01 name)</label>
+                    <label for="profile-username" class="mb-1 block text-sm font-medium text-text-soft">Username (NIP-01 name)</label>
                     <input
+                      id="profile-username"
                       type="text"
                       maxlength="64"
                       autocomplete="username"
@@ -628,8 +632,9 @@
                 </div>
 
                 <div>
-                  <label class="mb-1 block text-sm font-medium text-text-soft">Bio</label>
+                  <label for="profile-bio" class="mb-1 block text-sm font-medium text-text-soft">Bio</label>
                   <textarea
+                    id="profile-bio"
                     rows="4"
                     maxlength="1024"
                     bind:value={profileAboutInput}
@@ -641,8 +646,9 @@
 
                 <div class="grid gap-4 md:grid-cols-2">
                   <div>
-                    <label class="mb-1 block text-sm font-medium text-text-soft">Website</label>
+                    <label for="profile-website" class="mb-1 block text-sm font-medium text-text-soft">Website</label>
                     <input
+                      id="profile-website"
                       type="url"
                       autocomplete="url"
                       bind:value={profileWebsiteInput}
@@ -652,8 +658,9 @@
                     />
                   </div>
                   <div>
-                    <label class="mb-1 block text-sm font-medium text-text-soft">NIP-05 Identifier</label>
+                    <label for="profile-nip05" class="mb-1 block text-sm font-medium text-text-soft">NIP-05 Identifier</label>
                     <input
+                      id="profile-nip05"
                       type="text"
                       bind:value={profileNip05Input}
                       class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
@@ -666,8 +673,9 @@
 
                 <div class="grid gap-4 md:grid-cols-2">
                   <div>
-                    <label class="mb-1 block text-sm font-medium text-text-soft">Avatar URL</label>
+                    <label for="profile-avatar" class="mb-1 block text-sm font-medium text-text-soft">Avatar URL</label>
                     <input
+                      id="profile-avatar"
                       type="url"
                       bind:value={profileAvatarInput}
                       class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
@@ -676,8 +684,9 @@
                     />
                   </div>
                   <div>
-                    <label class="mb-1 block text-sm font-medium text-text-soft">Banner URL</label>
+                    <label for="profile-banner" class="mb-1 block text-sm font-medium text-text-soft">Banner URL</label>
                     <input
+                      id="profile-banner"
                       type="url"
                       bind:value={profileBannerInput}
                       class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
@@ -689,8 +698,9 @@
 
                 <div class="grid gap-4 md:grid-cols-2">
                   <div>
-                    <label class="mb-1 block text-sm font-medium text-text-soft">Lightning Address (LUD-16)</label>
+                    <label for="profile-lud16" class="mb-1 block text-sm font-medium text-text-soft">Lightning Address (LUD-16)</label>
                     <input
+                      id="profile-lud16"
                       type="text"
                       bind:value={profileLud16Input}
                       class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
@@ -699,8 +709,9 @@
                     />
                   </div>
                   <div>
-                    <label class="mb-1 block text-sm font-medium text-text-soft">LNURL (LUD-06)</label>
+                    <label for="profile-lud06" class="mb-1 block text-sm font-medium text-text-soft">LNURL (LUD-06)</label>
                     <input
+                      id="profile-lud06"
                       type="text"
                       bind:value={profileLud06Input}
                       class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
@@ -709,8 +720,9 @@
                     />
                   </div>
                   <div class="md:col-span-2">
-                    <label class="mb-1 block text-sm font-medium text-text-soft">Ember Monero Address</label>
+                    <label for="profile-monero" class="mb-1 block text-sm font-medium text-text-soft">Ember Monero Address</label>
                     <input
+                      id="profile-monero"
                       type="text"
                       inputmode="text"
                       spellcheck="false"

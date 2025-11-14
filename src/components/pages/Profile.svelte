@@ -15,6 +15,7 @@
   import { activeRoute, openPost, openProfile, goBack, navigateToPage } from '$stores/router'
   import type { NavTab } from '$stores/nav'
   import { activeConversation } from '$stores/messages'
+  import { loadConversation } from '$lib/messaging-simple'
   import ChevronLeftIcon from 'lucide-svelte/icons/chevron-left'
   import SearchIcon from 'lucide-svelte/icons/search'
   import XIcon from 'lucide-svelte/icons/x'
@@ -283,10 +284,12 @@
     openProfile(pubkey, getOriginTab())
   }
 
-  function handleOpenDM(): void {
+  async function handleOpenDM(): Promise<void> {
     if (!resolvedPubkey) return
     // Set the active conversation to this user's pubkey
     activeConversation.set(resolvedPubkey)
+    // Load the conversation messages
+    await loadConversation(resolvedPubkey)
     // Navigate to messages tab
     navigateToPage('messages')
   }

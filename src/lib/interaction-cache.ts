@@ -1,5 +1,5 @@
 import { get } from 'svelte/store'
-import { likedEvents, repostedEvents, zappedEvents } from '$stores/feed'
+import { likedEvents, repostedEvents, zappedEvents, commentedThreads } from '$stores/feed'
 import { currentUser } from '$stores/auth'
 
 const STORAGE_PREFIX = 'monstr:interactions:'
@@ -13,6 +13,7 @@ interface InteractionSnapshot {
   likes: string[]
   reposts: string[]
   zaps: Array<[string, number]>
+  comments: string[]
 }
 
 function getStorageKey(pubkey: string): string {
@@ -69,6 +70,10 @@ export function hydrateInteractionsFromCache(pubkey: string): void {
     if (Array.isArray(parsed.zaps)) {
       zappedEvents.set(new Map(parsed.zaps))
     }
+
+    if (Array.isArray(parsed.comments)) {
+      commentedThreads.set(new Set(parsed.comments))
+    }
   } catch (err) {
     console.warn('Failed to hydrate interaction cache:', err)
   } finally {
@@ -87,6 +92,7 @@ export function persistInteractionsSnapshot(): void {
     likes: clampList(get(likedEvents)),
     reposts: clampList(get(repostedEvents)),
     zaps: clampList(get(zappedEvents).entries()),
+    comments: clampList(get(commentedThreads)),
   }
 
   try {
@@ -116,6 +122,7 @@ export function startInteractionPersistence(): void {
     likedEvents.subscribe(schedulePersistence),
     repostedEvents.subscribe(schedulePersistence),
     zappedEvents.subscribe(schedulePersistence),
+    commentedThreads.subscribe(schedulePersistence),
   ]
 
   persistenceUnsubscribers = subscribers

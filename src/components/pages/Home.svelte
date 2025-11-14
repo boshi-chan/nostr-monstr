@@ -24,8 +24,15 @@
     { id: 'global', label: 'Global', icon: GlobeIcon },
   ]
 
-let activeFeed: FeedSource = 'following'
+  let activeFeed: FeedSource = 'following'
+  let hasLoadedOnce = false
+
   $: activeFeed = $feedSource
+
+  // Track if we've loaded at least once to avoid showing "no posts" during initial load
+  $: if ($feedEvents.length > 0) {
+    hasLoadedOnce = true
+  }
 
   function setActiveFeed(tab: FeedSource) {
     feedSource.set(tab)
@@ -81,7 +88,21 @@ let activeFeed: FeedSource = 'following'
 
   <div class="mx-auto w-full max-w-3xl px-3 md:px-6">
     <div class="flex flex-col gap-3 pt-3">
-      {#if $feedLoading && $feedEvents.length === 0}
+      {#if $feedLoading && !hasLoadedOnce}
+        <!-- Show friendly loading state on first load -->
+        <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-8 text-center">
+          <div class="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+          <p class="text-lg font-semibold text-text-soft">Finding posts...</p>
+          <p class="mt-2 text-sm text-text-muted">
+            {activeFeed === 'following'
+              ? 'Loading posts from people you follow'
+              : activeFeed === 'circles'
+              ? 'Loading posts from your circles'
+              : 'Loading posts from the global feed'}
+          </p>
+        </div>
+      {:else if $feedLoading && $feedEvents.length === 0}
+        <!-- After first load, show skeleton loaders -->
         {#each Array(5) as _}
           <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-5">
             <Skeleton count={4} height="h-4" />

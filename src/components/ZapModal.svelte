@@ -76,6 +76,7 @@
     on:click={handleOverlayClick}
     on:keydown={handleOverlayKey}
   >
+    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
     <div
       role="dialog"
       class="relative w-full max-w-md rounded-2xl border border-dark-border/80 bg-dark-light p-6 shadow-2xl"
@@ -114,7 +115,8 @@
       {:else}
         <!-- Amount selection -->
         <div class="mb-6">
-          <label class="mb-2 block text-sm font-semibold text-text-soft">
+          <!-- svelte-ignore a11y-label-has-associated-control -->
+          <label for="zap-amount" class="mb-2 block text-sm font-semibold text-text-soft">
             Amount (sats)
           </label>
           <div class="flex gap-2">
@@ -133,6 +135,7 @@
             {/each}
           </div>
           <input
+            id="zap-amount"
             type="number"
             bind:value={amount}
             min="1"
@@ -145,10 +148,12 @@
 
         <!-- Comment -->
         <div class="mb-6">
-          <label class="mb-2 block text-sm font-semibold text-text-soft">
+          <!-- svelte-ignore a11y-label-has-associated-control -->
+          <label for="zap-comment" class="mb-2 block text-sm font-semibold text-text-soft">
             Comment (optional)
           </label>
           <textarea
+            id="zap-comment"
             bind:value={comment}
             placeholder="Say something nice..."
             rows="3"

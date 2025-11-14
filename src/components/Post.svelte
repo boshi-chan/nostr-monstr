@@ -11,6 +11,7 @@
     repostCounts,
     zapTotals,
     replyCounts,
+    commentedThreads,
   } from '$stores/feed'
   import {
     publishReaction,
@@ -65,6 +66,7 @@
   let displayRepostCount = 0
   let displayZapAmount = 0
   let displayReplyCount = 0
+  let hasCommented = false
 
   let wrapperParsed = parseContent(event)
   $: wrapperParsed = parseContent(event)
@@ -122,6 +124,7 @@
   $: displayRepostCount = Math.max(aggregateRepostCount, isReposted ? 1 : 0)
   $: displayZapAmount = Math.max(aggregateZapTotal, zapAmount)
   $: displayReplyCount = Math.max(aggregateReplyCount, replyCount ?? 0)
+  $: hasCommented = $commentedThreads.has(actionableEvent.id)
   $: {
     const totals = $emberTotals
     emberAmount = totals.get(actionableEvent.id) ?? 0
@@ -660,7 +663,7 @@
           <button
             on:click|stopPropagation={handleReply}
             class={`${baseActionClass} hover:text-sky-400 hover:bg-sky-400/10 ${
-              displayReplyCount > 0 ? 'text-sky-300' : 'text-text-muted'
+              hasCommented ? 'text-sky-300' : 'text-text-muted'
             }`}
             title="Comment"
           >

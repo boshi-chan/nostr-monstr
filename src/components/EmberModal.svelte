@@ -1,7 +1,7 @@
 <script lang="ts">
   import { fade } from 'svelte/transition'
   import { walletState, showEmberModal, showWallet, emberTarget } from '$stores/wallet'
-  import { sendMonero } from '$lib/wallet'
+  import { sendMonero } from '$lib/wallet/lazy'
   import { incrementEmberTotal } from '$stores/ember'
   import EmberIcon from './icons/EmberIcon.svelte'
   import { EMBER_PRESET_AMOUNTS } from '$lib/ember'

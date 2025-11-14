@@ -4,24 +4,22 @@
   import { currentUser } from '$stores/auth'
   import {
     initWallet,
-    getAvailableNodes,
     setActiveNode,
-    getCachedMnemonic,
     refreshWallet,
     restoreWalletFromNostr,
     sendMonero,
     deleteWallet,
     getTransactionHistory,
-    type WalletInfo,
-  } from '$lib/wallet'
+  } from '$lib/wallet/lazy'
+  import { getCachedMnemonic, type WalletInfo } from '$lib/wallet'
   import { toDataURL as qrToDataURL } from 'qrcode'
-  import type { MoneroNode } from '$lib/wallet/nodes'
+  import { DEFAULT_NODES, type MoneroNode } from '$lib/wallet/nodes'
   import LayoutGridIcon from 'lucide-svelte/icons/layout-grid'
   import ClockIcon from 'lucide-svelte/icons/clock'
   import ArrowDownIcon from 'lucide-svelte/icons/arrow-down'
   import ArrowUpIcon from 'lucide-svelte/icons/arrow-up'
 
-  const nodes: MoneroNode[] = getAvailableNodes()
+  const nodes: MoneroNode[] = [...DEFAULT_NODES]
 
   let importSeed = ''
   let activeTab: 'create' | 'import' = 'create'

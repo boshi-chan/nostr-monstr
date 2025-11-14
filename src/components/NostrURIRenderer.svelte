@@ -113,7 +113,7 @@
     <span>{part.content}</span>
   {:else if part.uri && part.type === 'uri'}
     {@const pubkey = getPubkeyFromURI(part.uri)}
-    {@const metadata = pubkey ? $metadataCache.get(pubkey) : null}
+    {@const metadata = pubkey ? $metadataCache.get(pubkey) : undefined}
     {@const displayName = pubkey ? getDisplayName(pubkey, metadata) : null}
     <button
       type="button"

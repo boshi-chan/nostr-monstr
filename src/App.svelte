@@ -20,8 +20,7 @@
     loadUserInteractions,
   } from '$lib/feed-ndk'
   import { startNotificationListener, stopNotificationListener } from '$lib/notifications'
-  import { hydrateWalletState } from '$lib/wallet'
-  import { initWalletLifecycle } from '$lib/wallet/lifecycle'
+  import { hydrateWalletStateLazy as hydrateWalletState, initWalletLifecycleLazy as initWalletLifecycle } from '$lib/wallet/lazy'
   import {
     hydrateInteractionsFromCache,
     startInteractionPersistence,

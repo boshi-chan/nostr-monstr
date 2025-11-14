@@ -31,3 +31,8 @@ export const activeConversationData = derived(
 export function setDmPermissionError(error: string | null): void {
   messagesError.set(error)
 }
+
+// User search stores (for new chat modal)
+export const searchQuery = writable('')
+export const searchResults = writable<any[]>([])
+export const isSearching = writable(false)

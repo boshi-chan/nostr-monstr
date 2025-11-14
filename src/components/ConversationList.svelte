@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { conversations, conversationMetadata, activeConversation, unreadCounts } from '$stores/messages'
+  import { conversations, conversationMetadata, activeConversation, unreadCounts, messagesLoading } from '$stores/messages'
   import { metadataCache } from '$stores/feed'
   import type { Conversation } from '$types/dm'
   import { loadConversation, loadConversations } from '$lib/messaging-simple'
@@ -13,6 +13,12 @@
 
   let searchQuery = ''
   let filtered: Conversation[] = []
+  let hasLoadedOnce = false
+
+  // Track if we've loaded at least once to avoid showing "no conversations" during initial load
+  $: if ($conversationMetadata.size > 0) {
+    hasLoadedOnce = true
+  }
 
   $: {
     const list = Array.from($conversationMetadata.values())
@@ -26,7 +32,7 @@
           conv.lastMessagePreview?.toLowerCase().includes(query)
         )
       })
-      .sort((a, b) => b.lastUpdated - a.lastUpdated)
+      .sort((a, b) => (b.lastUpdated ?? 0) - (a.lastUpdated ?? 0))
   }
 
   async function handleSelectConversation(conv: Conversation) {
@@ -119,7 +125,16 @@
   </div>
 
   <div class="flex-1 overflow-y-auto">
-    {#if filtered.length === 0}
+    {#if $messagesLoading && !hasLoadedOnce}
+      <!-- Show loading state only on first load -->
+      <div class="flex h-full items-center justify-center p-4 text-center">
+        <div>
+          <div class="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+          <p class="text-sm text-text-soft">Finding messages...</p>
+          <p class="mt-1 text-xs text-text-muted">This may take a few moments</p>
+        </div>
+      </div>
+    {:else if filtered.length === 0}
       <div class="flex h-full items-center justify-center p-4 text-center">
         <div>
           <p class="text-sm text-text-muted">
@@ -172,7 +187,7 @@
                     {getDisplayName(conversation)}
                   </button>
                   <span class="flex-shrink-0 text-xs text-text-muted">
-                    {formatTime(conversation.lastUpdated)}
+                    {formatTime(conversation.lastUpdated ?? 0)}
                   </span>
                 </div>
 

@@ -15,13 +15,6 @@ export type MediaFilters = {
   profile: MediaFilterSettings
 }
 
-const DEFAULT_SETTINGS: MediaFilterSettings = {
-  autoShow: true,
-  blurUnknown: false,
-  respectCW: true,
-  blurAll: false,
-}
-
 const DEFAULT_FILTERS: MediaFilters = {
   following: {
     autoShow: true,

@@ -207,7 +207,8 @@ async function fetchCurrentHeight(): Promise<number> {
       password: activeNode.password,
     })
 
-    const daemonHeight = await connection.getHeight()
+    // Type assertion needed because getHeight exists at runtime but not in type definitions
+    const daemonHeight = await (connection as any).getHeight()
     return daemonHeight
   } catch (err) {
     console.warn('Failed to fetch daemon height, using fallback estimation:', err)
@@ -723,7 +724,7 @@ export async function getTransactionHistory(): Promise<any[]> {
       console.log('🔍 First transaction sample:', {
         hash: txs[0].getHash?.(),
         height: txs[0].getHeight?.(),
-        timestamp: txs[0].getTimestamp?.(),
+        timestamp: (txs[0] as any).getTimestamp?.(),
         block: txs[0].getBlock?.(),
         isConfirmed: txs[0].getIsConfirmed?.(),
       })
@@ -735,16 +736,16 @@ export async function getTransactionHistory(): Promise<any[]> {
       let timeA = 0
       let timeB = 0
 
-      // Try getTimestamp first
-      if (typeof a.getTimestamp === 'function') {
-        timeA = a.getTimestamp() || 0
+      // Try getTimestamp first (use type assertion as method exists at runtime)
+      if (typeof (a as any).getTimestamp === 'function') {
+        timeA = (a as any).getTimestamp() || 0
       } else if (a.getBlock?.()?.getTimestamp) {
         // Try getting timestamp from block
         timeA = a.getBlock().getTimestamp() || 0
       }
 
-      if (typeof b.getTimestamp === 'function') {
-        timeB = b.getTimestamp() || 0
+      if (typeof (b as any).getTimestamp === 'function') {
+        timeB = (b as any).getTimestamp() || 0
       } else if (b.getBlock?.()?.getTimestamp) {
         timeB = b.getBlock().getTimestamp() || 0
       }
