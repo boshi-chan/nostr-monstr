@@ -35,6 +35,6 @@
       "assert": ["src/polyfills/assert.ts"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte"],
+  "include": ["src/**/*.ts", "src/**/*.svelte", "src/**/*.d.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

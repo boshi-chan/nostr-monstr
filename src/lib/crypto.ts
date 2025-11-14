@@ -1,28 +1,52 @@
 /**
  * Encryption utilities for wallet
- * Uses AES-GCM with PIN-derived key (PBKDF2/Argon2)
+ * Uses AES-GCM with Argon2id-derived key (falls back to PBKDF2 if Argon2 unavailable)
  */
 
+import { argon2idAsync } from '@noble/hashes/argon2.js'
+import { utf8ToBytes } from '@noble/hashes/utils.js'
+
+const ARGON2_MEM_KIB = 64 * 1024 // 64 MB in kibibytes
+const ARGON2_TIME = 3
+const ARGON2_PARALLELISM = 2
+const ARGON2_HASH_LEN = 32
+
 export async function deriveKeyFromPin(pin: string, salt: Uint8Array): Promise<CryptoKey> {
-  const encoder = new TextEncoder()
-  const pinData = encoder.encode(pin)
+  try {
+    const hashBytes = await argon2idAsync(utf8ToBytes(pin), salt, {
+      m: ARGON2_MEM_KIB,
+      t: ARGON2_TIME,
+      p: ARGON2_PARALLELISM,
+      dkLen: ARGON2_HASH_LEN,
+    })
+    const keyBytes = Uint8Array.from(hashBytes)
+    return crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, [
+      'encrypt',
+      'decrypt',
+    ])
+  } catch (err) {
+    // Fallback to PBKDF2 if Argon2 is unavailable (should be rare)
+    console.warn('Argon2 derivation failed, falling back to PBKDF2:', err)
+    const encoder = new TextEncoder()
+    const pinData = encoder.encode(pin)
 
-  const baseKey = await crypto.subtle.importKey('raw', pinData, 'PBKDF2', false, [
-    'deriveKey',
-  ])
+    const baseKey = await crypto.subtle.importKey('raw', pinData, 'PBKDF2', false, [
+      'deriveKey',
+    ])
 
-  return crypto.subtle.deriveKey(
-    {
-      name: 'PBKDF2',
-      salt: salt.buffer.slice(0) as ArrayBuffer,
-      iterations: 100000,
-      hash: 'SHA-256',
-    },
-    baseKey,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt']
-  )
+    return crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt: salt.buffer.slice(0) as ArrayBuffer,
+        iterations: 600000,
+        hash: 'SHA-256',
+      },
+      baseKey,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    )
+  }
 }
 
 export async function encryptWalletData(data: string, pin: string): Promise<{

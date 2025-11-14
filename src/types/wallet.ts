@@ -3,12 +3,16 @@ export type WalletBackupStatus = 'idle' | 'syncing' | 'ok' | 'error'
 export interface WalletState {
   isReady: boolean
   hasWallet: boolean
+  locked: boolean
   balance: number
   unlockedBalance: number
   address: string | null
   isLoading: boolean
   isSyncing: boolean
+  syncProgress: number | null
   selectedNode: string | null
+  customNodeUri: string | null
+  customNodeLabel: string | null
   lastSyncedAt: number | null
   lastBackupAt: number | null
   remoteBackupAvailable: boolean

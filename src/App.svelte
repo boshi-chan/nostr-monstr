@@ -32,6 +32,7 @@
 
   import Layout from './components/Layout.svelte'
   import Login from './components/pages/Login.svelte'
+  import PinPrompt from './components/PinPrompt.svelte'
 
   onMount(async () => {
     try {
@@ -181,6 +182,8 @@
     </div>
   </div>
 {/if}
+
+<PinPrompt />
 
 <style global>
   :global(body) {

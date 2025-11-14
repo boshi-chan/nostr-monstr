@@ -43,18 +43,12 @@ export async function checkWalletExists(): Promise<boolean> {
 export async function hydrateWalletStateLazy(): Promise<void> {
   const walletExists = await checkWalletExists()
 
-  if (walletExists) {
-    // Wallet exists - load the full module and hydrate
-    const wallet = await loadWalletModule()
-    await wallet.hydrateWalletState()
-    console.log('✅ Wallet hydrated and ready for auto-sync')
-  } else {
-    // No wallet - just set empty state without loading monero-ts
-    const { resetWalletStore } = await import('$stores/wallet')
-    resetWalletStore()
-    console.log('ℹ️ No wallet found - monero-ts not loaded')
-  }
+  const wallet = await loadWalletModule()
+  await wallet.hydrateWalletState()
+  walletExistsCache = walletExists
+  console.log(walletExists ? '🔥 Wallet hydrated and ready for auto-sync' : '🚫 No wallet found - wallet state reset')
 }
+
 
 /**
  * Invalidate wallet exists cache (call when creating/deleting wallet)
@@ -87,6 +81,16 @@ export async function deleteWallet() {
   const result = await wallet.deleteWallet()
   invalidateWalletCache() // Wallet no longer exists
   return result
+}
+
+export async function unlockWallet() {
+  const wallet = await loadWalletModule()
+  return wallet.unlockWalletWithPin()
+}
+
+export async function lockWallet() {
+  const wallet = await loadWalletModule()
+  return wallet.lockWallet()
 }
 
 export async function refreshWallet() {
@@ -123,6 +127,16 @@ export async function setWalletSharePreference(enabled: boolean) {
 export async function setActiveNode(nodeId: string) {
   const wallet = await loadWalletModule()
   return wallet.setActiveNode(nodeId)
+}
+
+export async function saveCustomNode(config: { label?: string; uri: string }) {
+  const wallet = await loadWalletModule()
+  return wallet.saveCustomNode(config)
+}
+
+export async function clearCustomNode() {
+  const wallet = await loadWalletModule()
+  return wallet.clearCustomNode()
 }
 
 export async function getAvailableNodes() {

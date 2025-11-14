@@ -8,6 +8,19 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="description" content="Monstr - Snappy Nostr client with Monero Embers" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
+        script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval';
+        style-src 'self' 'unsafe-inline';
+        img-src 'self' https: data: blob:;
+        media-src 'self' https: blob:;
+        font-src 'self' https:;
+        connect-src 'self' https: wss:;
+        frame-ancestors 'none';
+      "
+    />
     <title>Monstr</title>
     <style>
       /* Support for iOS safe areas and dynamic viewport */

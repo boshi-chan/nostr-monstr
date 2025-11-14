@@ -5,21 +5,26 @@
   import {
     initWallet,
     setActiveNode,
+    saveCustomNode,
+    clearCustomNode,
     refreshWallet,
     restoreWalletFromNostr,
     sendMonero,
     deleteWallet,
     getTransactionHistory,
+    unlockWallet,
   } from '$lib/wallet/lazy'
   import { getCachedMnemonic, type WalletInfo } from '$lib/wallet'
   import { toDataURL as qrToDataURL } from 'qrcode'
-  import { DEFAULT_NODES, type MoneroNode } from '$lib/wallet/nodes'
+  import { CUSTOM_NODE_ID, DEFAULT_NODES, type MoneroNode } from '$lib/wallet/nodes'
   import LayoutGridIcon from 'lucide-svelte/icons/layout-grid'
   import ClockIcon from 'lucide-svelte/icons/clock'
   import ArrowDownIcon from 'lucide-svelte/icons/arrow-down'
   import ArrowUpIcon from 'lucide-svelte/icons/arrow-up'
 
-  const nodes: MoneroNode[] = [...DEFAULT_NODES]
+  const builtInNodes: MoneroNode[] = [...DEFAULT_NODES]
+  let nodes: MoneroNode[] = [...builtInNodes]
+  let customNodeEntry: MoneroNode | null = null
 
   let importSeed = ''
   let activeTab: 'create' | 'import' = 'create'
@@ -47,9 +52,24 @@
   let transactions: any[] = []
   let loadingHistory = false
   let historyError: string | null = null
+  let unlockBusy = false
+  let customNodeLabel = ''
+  let customNodeUri = ''
+  let customNodeError: string | null = null
+  let customNodeBusy = false
+  let customFormTouched = false
 
   $: isOpen = $showWallet
   $: walletMode = !$walletState.hasWallet ? 'setup' : $walletState.isReady ? 'ready' : 'pending'
+  $: customNodeEntry =
+    $walletState.customNodeUri
+      ? {
+          id: CUSTOM_NODE_ID,
+          label: $walletState.customNodeLabel ?? 'Custom node',
+          uri: $walletState.customNodeUri,
+        }
+      : null
+  $: nodes = customNodeEntry ? [...builtInNodes, customNodeEntry] : [...builtInNodes]
   $: selectedNodeId = $walletState.selectedNode ?? nodes[0]?.id
   $: displayMnemonic =
     walletMode === 'ready'
@@ -69,6 +89,11 @@
   } else {
     depositQr = null
     lastQrAddress = null
+  }
+
+  $: if (!customFormTouched) {
+    customNodeLabel = $walletState.customNodeLabel ?? ''
+    customNodeUri = $walletState.customNodeUri ?? ''
   }
 
   function resetForm(): void {
@@ -96,6 +121,10 @@
     transactions = []
     loadingHistory = false
     historyError = null
+    unlockBusy = false
+    customNodeError = null
+    customNodeBusy = false
+    customFormTouched = false
   }
 
   function closeModal(): void {
@@ -242,6 +271,62 @@
       sendError = err instanceof Error ? err.message : 'Unable to send payment. Please try again.'
     } finally {
       sendLoading = false
+    }
+  }
+
+  function markCustomFormTouched(): void {
+    if (!customFormTouched) {
+      customFormTouched = true
+    }
+  }
+
+  async function handleCustomNodeSave(): Promise<void> {
+    if (customNodeBusy) return
+    customNodeError = null
+    customNodeBusy = true
+    try {
+      await saveCustomNode({
+        label: customNodeLabel.trim() || undefined,
+        uri: customNodeUri.trim(),
+      })
+      customFormTouched = false
+    } catch (err) {
+      console.error('Failed to save custom node', err)
+      customNodeError =
+        err instanceof Error ? err.message : 'Unable to save custom node. Check the URL and try again.'
+    } finally {
+      customNodeBusy = false
+    }
+  }
+
+  async function handleCustomNodeRemove(): Promise<void> {
+    if (customNodeBusy) return
+    customNodeError = null
+    customNodeBusy = true
+    try {
+      await clearCustomNode()
+      customNodeLabel = ''
+      customNodeUri = ''
+      customFormTouched = false
+    } catch (err) {
+      console.error('Failed to remove custom node', err)
+      customNodeError = err instanceof Error ? err.message : 'Unable to remove custom node.'
+    } finally {
+      customNodeBusy = false
+    }
+  }
+
+  async function handleUnlockWallet(): Promise<void> {
+    unlockBusy = true
+    error = null
+    try {
+      await unlockWallet()
+    } catch (err) {
+      if (!(err instanceof Error && err.message === 'WALLET_PIN_CANCELLED')) {
+        error = err instanceof Error ? err.message : 'Unable to unlock wallet.'
+      }
+    } finally {
+      unlockBusy = false
     }
   }
 
@@ -394,7 +479,7 @@
             {#if walletMode === 'setup'}
               Create or import a Monero wallet to send and receive tips.
             {:else if walletMode === 'pending'}
-              Finish syncing your wallet to access your address and funds.
+              Your wallet is locked. Enter your PIN to unlock or restore a backup.
             {:else}
               Wallet ready. Select a node, copy your address, or lock when done.
             {/if}
@@ -482,27 +567,62 @@
             </p>
           {/if}
         {:else if walletMode === 'pending'}
-          <div class="rounded-2xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm text-amber-100">
-            We found an encrypted wallet on this device but could not load it automatically. Restore it from your Nostr backup or remove it and set up a new wallet.
-          </div>
-          <div class="flex flex-col gap-3 md:flex-row">
-            <button
-              class="btn-primary flex-1 justify-center"
-              type="button"
-              on:click={handleRestoreViaNostr}
-              disabled={restoreBusy}
-            >
-              {restoreBusy ? 'Restoring…' : 'Restore backup'}
-            </button>
-            <button
-              class="flex-1 rounded-2xl border border-dark-border/60 px-4 py-2 text-sm font-semibold text-text-soft transition hover:border-rose-400/60 hover:text-rose-200 disabled:opacity-50"
-              type="button"
-              on:click={handleDeleteWallet}
-              disabled={deleteBusy}
-            >
-              {deleteBusy ? 'Removing…' : 'Remove local wallet'}
-            </button>
-          </div>
+          {#if $walletState.locked}
+            <div class="rounded-2xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm text-amber-100 space-y-2">
+              <p>We found your encrypted Ember wallet on this device, but it’s locked behind your PIN.</p>
+              <p class="text-xs text-amber-200">
+                Reminder: this is a hot wallet. Only keep small balances on this browser and never share your PIN.
+              </p>
+            </div>
+            <div class="flex flex-col gap-3 md:grid md:grid-cols-3">
+              <button
+                class="btn-primary flex-1 justify-center"
+                type="button"
+                on:click={handleUnlockWallet}
+                disabled={unlockBusy}
+              >
+                {unlockBusy ? 'Unlocking…' : 'Unlock with PIN'}
+              </button>
+              <button
+                class="btn-secondary flex-1 justify-center"
+                type="button"
+                on:click={handleRestoreViaNostr}
+                disabled={restoreBusy}
+              >
+                {restoreBusy ? 'Restoring…' : 'Restore backup'}
+              </button>
+              <button
+                class="flex-1 rounded-2xl border border-dark-border/60 px-4 py-2 text-sm font-semibold text-text-soft transition hover:border-rose-400/60 hover:text-rose-200 disabled:opacity-50"
+                type="button"
+                on:click={handleDeleteWallet}
+                disabled={deleteBusy}
+              >
+                {deleteBusy ? 'Removing…' : 'Remove local wallet'}
+              </button>
+            </div>
+          {:else}
+            <div class="rounded-2xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm text-amber-100 space-y-2">
+              <p>Your wallet setup is incomplete. Restore from backup or remove the local data to start fresh.</p>
+            </div>
+            <div class="flex flex-col gap-3 md:flex-row">
+              <button
+                class="btn-primary flex-1 justify-center"
+                type="button"
+                on:click={handleRestoreViaNostr}
+                disabled={restoreBusy}
+              >
+                {restoreBusy ? 'Restoring…' : 'Restore backup'}
+              </button>
+              <button
+                class="flex-1 rounded-2xl border border-dark-border/60 px-4 py-2 text-sm font-semibold text-text-soft transition hover:border-rose-400/60 hover:text-rose-200 disabled:opacity-50"
+                type="button"
+                on:click={handleDeleteWallet}
+                disabled={deleteBusy}
+              >
+                {deleteBusy ? 'Removing…' : 'Remove local wallet'}
+              </button>
+            </div>
+          {/if}
         {:else}
           <div class="flex gap-2 rounded-2xl border border-dark-border/60 bg-dark/60 p-1 text-sm font-semibold text-text-muted">
             <button
@@ -614,6 +734,53 @@
               <p class="mt-3 text-xs text-text-muted">
                 Restore height: {$walletState.restoreHeight ?? '—'}
               </p>
+              <div class="mt-4 rounded-2xl border border-dark-border/60 bg-dark/40 p-3">
+                <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-text-muted">Custom node</p>
+                <p class="mt-2 text-[12px] text-text-muted">
+                  Paste a HTTPS endpoint that enables CORS so browsers can talk to it directly.
+                </p>
+                <form class="mt-3 space-y-2" on:submit|preventDefault={handleCustomNodeSave}>
+                  <div class="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      class="w-full rounded-xl border border-dark-border/60 bg-dark/60 px-3 py-2 text-sm text-text-soft focus:border-primary focus:outline-none"
+                      placeholder="Label (optional)"
+                      bind:value={customNodeLabel}
+                      on:input={markCustomFormTouched}
+                    />
+                    <input
+                      class="w-full rounded-xl border border-dark-border/60 bg-dark/60 px-3 py-2 text-sm text-text-soft focus:border-primary focus:outline-none"
+                      placeholder="https://node.example.com:443"
+                      bind:value={customNodeUri}
+                      on:input={markCustomFormTouched}
+                    />
+                  </div>
+                  <div class="flex flex-col gap-2 sm:flex-row">
+                    <button
+                      type="submit"
+                      class="btn-secondary flex-1 justify-center"
+                      disabled={customNodeBusy}
+                    >
+                      {customNodeBusy ? 'Saving…' : 'Save & connect'}
+                    </button>
+                    {#if $walletState.customNodeUri}
+                      <button
+                        type="button"
+                        class="flex-1 rounded-full border border-dark-border/60 px-4 py-2 text-sm font-semibold text-text-muted transition hover:border-rose-400/60 hover:text-rose-200 disabled:opacity-50"
+                        on:click={handleCustomNodeRemove}
+                        disabled={customNodeBusy}
+                      >
+                        Remove custom node
+                      </button>
+                    {/if}
+                  </div>
+                  {#if customNodeError}
+                    <p class="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-100">{customNodeError}</p>
+                  {/if}
+                  <p class="text-[11px] text-text-muted/70">
+                    Tip: most public RPCs block browsers unless they send <code class="text-primary">Access-Control-Allow-Origin</code>.
+                  </p>
+                </form>
+              </div>
             </div>
 
             <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4">

@@ -5,13 +5,14 @@
  */
 
 import { walletState, resetWalletStore, setSharePreferenceInStore } from '$stores/wallet'
+import { requestPinModal } from '$stores/pinPrompt'
 import { encryptWalletData, decryptWalletData } from '$lib/crypto'
 import { getSetting, saveSetting } from '$lib/db'
 import { getNDK, getCurrentNDKUser } from '$lib/ndk'
 import type moneroTs from 'monero-ts'
 import { NDKEvent, type NDKFilter, type NDKSubscriptionOptions } from '@nostr-dev-kit/ndk'
 import type { MoneroNode } from './nodes'
-import { DEFAULT_NODES, getNodeById } from './nodes'
+import { CUSTOM_NODE_ID, DEFAULT_NODES, getNodeById } from './nodes'
 import { getBrowserFs, resetBrowserFs } from './browser-fs'
 import type { WalletBackupPayload, SendMoneroOptions, SendMoneroResult } from '$types/wallet'
 import { EMBER_EVENT_KIND, EMBER_TAG, encodeEmberPayload } from '$lib/ember'
@@ -44,8 +45,11 @@ type MoneroWalletFullInstance = Awaited<ReturnType<MoneroLib['createWalletFull']
 const WALLET_SECRETS_KEY = 'walletEncrypted'
 const WALLET_META_KEY = 'walletMetaInfo'
 const WALLET_NODE_KEY = 'walletActiveNode'
+const WALLET_CUSTOM_NODE_KEY = 'walletCustomNode'
 const WALLET_SHARE_KEY = 'walletShareAddress'
 const WALLET_MASTER_KEY = 'walletMasterKey'
+const HOT_WALLET_WARNING_KEY = 'walletHotWalletWarning'
+const PIN_CANCELLED_ERROR = 'WALLET_PIN_CANCELLED'
 const WALLET_BACKUP_KIND = 30078
 const WALLET_BACKUP_D_TAG = 'monstr-wallet'
 const BLOCK_TIME_SECONDS = 120
@@ -60,43 +64,202 @@ let walletKey: string | null = null
 let cachedSecrets: StoredWalletSecrets | null = null
 let cachedMeta: WalletMetaInfo | null = null
 let activeNode: MoneroNode = DEFAULT_NODES[0]
+let customNode: MoneroNode | null = null
 let shareAddressPreference = true
 let masterKeyCache: string | null = null
+
+type StoredCustomNode = {
+  label?: string
+  uri: string
+  username?: string
+  password?: string
+}
+
+type EncryptedMasterKeyPayload = {
+  encryptedData: string
+  iv: string
+  salt: string
+}
 
 function isBrowser(): boolean {
   return typeof window !== 'undefined'
 }
 
-function ensureMasterKey(): string {
+function createRandomHexKey(bytes = 32): string {
+  const randomBytes = crypto.getRandomValues(new Uint8Array(bytes))
+  return Array.from(randomBytes, b => b.toString(16).padStart(2, '0')).join('')
+}
+
+function parseEncryptedMasterKey(raw: string): EncryptedMasterKeyPayload | null {
+  try {
+    const parsed = JSON.parse(raw)
+    if (
+      parsed &&
+      typeof parsed.encryptedData === 'string' &&
+      typeof parsed.iv === 'string' &&
+      typeof parsed.salt === 'string'
+    ) {
+      return parsed
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function showHotWalletWarning(): void {
+  if (!isBrowser()) return
+  if (window.localStorage.getItem(HOT_WALLET_WARNING_KEY) === '1') return
+  window.alert(
+    'Security warning: The embedded Ember wallet is a hot wallet. Only keep small balances on this device and never reuse this PIN elsewhere.'
+  )
+  window.localStorage.setItem(HOT_WALLET_WARNING_KEY, '1')
+}
+
+async function requestPin(promptText: string, allowCancel: boolean): Promise<string | null> {
+  if (!isBrowser()) return null
+  let message = promptText
+  while (true) {
+    const input = await requestPinModal(`${message}\n(Use 4-32 digits)`, allowCancel)
+    if (input === null) {
+      return null
+    }
+    const trimmed = input.trim()
+    if (!/^\d{4,32}$/.test(trimmed)) {
+      message = 'PIN must be 4-32 digits.'
+      continue
+    }
+    return trimmed
+  }
+}
+
+async function requestNewPin(): Promise<string> {
+  let promptMessage = 'Create a wallet PIN'
+  while (true) {
+    const first = await requestPin(promptMessage, false)
+    if (!first) {
+      promptMessage = 'PIN must be 4-32 digits. Create a wallet PIN'
+      continue
+    }
+    const confirmPin = await requestPin('Confirm your wallet PIN', false)
+    if (!confirmPin) {
+      promptMessage = 'PIN must be 4-32 digits. Create a wallet PIN'
+      continue
+    }
+    if (first !== confirmPin) {
+      promptMessage = 'PINs did not match. Create a wallet PIN'
+      continue
+    }
+    return first
+  }
+}
+
+async function storeEncryptedMasterKey(masterKey: string, pin: string): Promise<void> {
+  const encrypted = await encryptWalletData(masterKey, pin)
+  try {
+    window.localStorage.setItem(WALLET_MASTER_KEY, JSON.stringify(encrypted))
+  } catch (err) {
+    console.warn('Failed to persist encrypted wallet key', err)
+  }
+}
+
+async function unlockEncryptedMasterKeyFromStorage(
+  raw: string,
+  allowCancel: boolean
+): Promise<string | null> {
+  const payload = parseEncryptedMasterKey(raw)
+  if (!payload) {
+    const masterKey = raw
+    const pin = await requestNewPin()
+    await storeEncryptedMasterKey(masterKey, pin)
+    showHotWalletWarning()
+    return masterKey
+  }
+
+  const attempts = 5
+  let promptText = allowCancel
+    ? 'Enter your wallet PIN (Cancel to skip unlock)'
+    : 'Enter your wallet PIN'
+  for (let i = 0; i < attempts; i++) {
+    const pin = await requestPin(promptText, allowCancel)
+    if (!pin) {
+      if (allowCancel) {
+        return null
+      }
+      promptText = 'Wallet PIN is required. Enter your wallet PIN'
+      continue
+    }
+
+    try {
+      const masterKey = await decryptWalletData(
+        payload.encryptedData,
+        payload.iv,
+        payload.salt,
+        pin
+      )
+      showHotWalletWarning()
+      return masterKey
+    } catch (err) {
+      console.warn('Failed to decrypt wallet master key', err)
+      promptText = 'Incorrect PIN. Enter your wallet PIN'
+    }
+  }
+
+  if (allowCancel) {
+    window.alert('Wallet unlock cancelled.')
+    return null
+  }
+
+  throw new Error('Failed to unlock wallet after multiple attempts.')
+}
+
+async function ensureMasterKey(): Promise<string> {
   if (masterKeyCache) return masterKeyCache
   if (!isBrowser()) {
     throw new Error('Wallet key unavailable outside of browser')
   }
   const existing = window.localStorage.getItem(WALLET_MASTER_KEY)
   if (existing) {
-    masterKeyCache = existing
-    return existing
+    const unlocked = await unlockEncryptedMasterKeyFromStorage(existing, false)
+    if (!unlocked) {
+      throw new Error('Wallet PIN is required to continue')
+    }
+    masterKeyCache = unlocked
+    return unlocked
   }
-  const randomBytes = crypto.getRandomValues(new Uint8Array(32))
-  const generated = Array.from(randomBytes, b => b.toString(16).padStart(2, '0')).join('')
-  try {
-    window.localStorage.setItem(WALLET_MASTER_KEY, generated)
-  } catch (err) {
-    console.warn('Failed to persist wallet key', err)
-  }
+  const pin = await requestNewPin()
+  const generated = createRandomHexKey()
+  await storeEncryptedMasterKey(generated, pin)
+  showHotWalletWarning()
   masterKeyCache = generated
   return generated
 }
 
-function readMasterKey(): string | null {
+async function readMasterKey(options: { allowCancel?: boolean } = {}): Promise<string | null> {
   if (masterKeyCache) return masterKeyCache
   if (!isBrowser()) return null
   const stored = window.localStorage.getItem(WALLET_MASTER_KEY)
-  if (stored) {
-    masterKeyCache = stored
-    return stored
+  if (!stored) return null
+  try {
+    const unlocked = await unlockEncryptedMasterKeyFromStorage(
+      stored,
+      options.allowCancel !== false
+    )
+    if (!unlocked) {
+      return null
+    }
+    masterKeyCache = unlocked
+    return unlocked
+  } catch (err) {
+    if (
+      options.allowCancel !== false &&
+      err instanceof Error &&
+      err.message === PIN_CANCELLED_ERROR
+    ) {
+      return null
+    }
+    throw err
   }
-  return null
 }
 
 function clearMasterKey(): void {
@@ -104,6 +267,7 @@ function clearMasterKey(): void {
   if (!isBrowser()) return
   try {
     window.localStorage.removeItem(WALLET_MASTER_KEY)
+    window.localStorage.removeItem(HOT_WALLET_WARNING_KEY)
   } catch (err) {
     console.warn('Failed to clear wallet key', err)
   }
@@ -178,7 +342,7 @@ function normalizeMeta(meta: any): WalletMetaInfo | null {
   const createdAt = typeof meta.createdAt === 'number' ? meta.createdAt : Date.now()
   const restoreHeight = typeof meta.restoreHeight === 'number' ? meta.restoreHeight : estimateRestoreHeightFallback(createdAt)
   const nodeId = typeof meta.nodeId === 'string' ? meta.nodeId : activeNode.id
-  const normalizedNode = getNodeById(nodeId) ?? activeNode
+  const normalizedNode = resolveNode(nodeId) ?? activeNode
   return {
     address: meta.address,
     network: meta.network ?? 'mainnet',
@@ -193,6 +357,103 @@ function setWalletState(partial: Partial<Parameters<typeof walletState.set>[0]>)
     ...state,
     ...partial,
   }))
+}
+
+function buildCustomNode(config: StoredCustomNode): MoneroNode {
+  let inputUri = (config.uri ?? '').trim()
+  if (!inputUri) {
+    throw new Error('Node URL is required.')
+  }
+  if (!/^https?:\/\//i.test(inputUri)) {
+    inputUri = `https://${inputUri}`
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(inputUri)
+  } catch {
+    throw new Error('Enter a valid HTTPS URL for the node.')
+  }
+
+  if (parsed.protocol !== 'https:') {
+    throw new Error('Wallet nodes must use HTTPS to run inside the PWA.')
+  }
+  if (!parsed.port) {
+    throw new Error('Node URL must include a port, e.g. :443 or :18089.')
+  }
+
+  const username = config.username ?? (parsed.username ? decodeURIComponent(parsed.username) : undefined)
+  const password = config.password ?? (parsed.password ? decodeURIComponent(parsed.password) : undefined)
+
+  parsed.username = ''
+  parsed.password = ''
+  parsed.pathname = ''
+  parsed.search = ''
+  parsed.hash = ''
+
+  const uri = parsed.toString().replace(/\/$/, '')
+  const label = config.label?.trim() || parsed.hostname || 'Custom node'
+
+  return {
+    id: CUSTOM_NODE_ID,
+    label,
+    uri,
+    username: username || undefined,
+    password: password || undefined,
+  }
+}
+
+function parseStoredCustomNode(value: any): MoneroNode | null {
+  if (!value) return null
+  try {
+    return buildCustomNode(value)
+  } catch (err) {
+    console.warn('Ignoring invalid custom node config:', err)
+    return null
+  }
+}
+
+function assignCustomNode(node: MoneroNode | null): void {
+  customNode = node
+  setWalletState({
+    customNodeLabel: node?.label ?? null,
+    customNodeUri: node?.uri ?? null,
+  })
+}
+
+async function persistCustomNode(node: MoneroNode | null): Promise<void> {
+  assignCustomNode(node)
+  await saveSetting(
+    WALLET_CUSTOM_NODE_KEY,
+    node
+      ? {
+          label: node.label,
+          uri: node.uri,
+          username: node.username,
+          password: node.password,
+        }
+      : null
+  )
+}
+
+function resolveNode(nodeId?: string | null): MoneroNode | null {
+  if (!nodeId) return null
+  if (nodeId === CUSTOM_NODE_ID) {
+    return customNode
+  }
+  return getNodeById(nodeId) ?? null
+}
+
+async function applyActiveNode(node: MoneroNode): Promise<void> {
+  activeNode = node
+  await saveSetting(WALLET_NODE_KEY, node.id)
+  if (cachedMeta) {
+    await persistMeta({ ...cachedMeta, nodeId: node.id })
+  }
+  await disposeWalletInstance(false)
+  setWalletState({ selectedNode: node.id })
+  if (cachedSecrets && walletKey) {
+    void refreshWalletInternal()
+  }
 }
 
 /**
@@ -343,11 +604,38 @@ async function refreshWalletInternal(): Promise<void> {
 
   walletSyncPromise = (async () => {
     try {
-      setWalletState({ isSyncing: true })
+      setWalletState({ isSyncing: true, syncProgress: 0 })
       const moneroLib = await loadMonero()
       const wallet = await ensureWalletInstance()
-      await wallet.setDaemonConnection(activeNode.uri)
-      await wallet.sync()
+      await wallet.setDaemonConnection({
+        uri: activeNode.uri,
+        proxyToWorker: true,
+        ...(activeNode.username ? { username: activeNode.username } : {}),
+        ...(activeNode.password ? { password: activeNode.password } : {}),
+      } as any)
+      let listener: any = null
+      if (moneroLib.MoneroWalletListener) {
+        listener = new moneroLib.MoneroWalletListener()
+        listener.onSyncProgress = async (
+          _height: number,
+          _startHeight: number,
+          _endHeight: number,
+          percentDone: number
+        ) => {
+          const percent =
+            typeof percentDone === 'number' && Number.isFinite(percentDone)
+              ? Math.max(0, Math.min(100, Math.round(percentDone * 100)))
+              : null
+          setWalletState({ syncProgress: percent })
+        }
+      }
+
+      if (listener) {
+        await wallet.sync(listener)
+      } else {
+        await wallet.sync()
+      }
+
       const balanceAtomic = await wallet.getBalance()
       const unlockedAtomic = await wallet.getUnlockedBalance()
       const balance = moneroLib.MoneroUtils.atomicUnitsToXmr(balanceAtomic)
@@ -356,11 +644,12 @@ async function refreshWalletInternal(): Promise<void> {
         balance,
         unlockedBalance,
         isSyncing: false,
+        syncProgress: 100,
         lastSyncedAt: Date.now(),
       })
     } catch (err) {
       console.error('Wallet sync failed:', err)
-      setWalletState({ isSyncing: false })
+      setWalletState({ isSyncing: false, syncProgress: null })
       throw err
     } finally {
       walletSyncPromise = null
@@ -528,7 +817,7 @@ function priorityFromInput(priority: SendMoneroOptions['priority'], moneroLib: M
 }
 
 export function getAvailableNodes(): MoneroNode[] {
-  return [...DEFAULT_NODES]
+  return customNode ? [...DEFAULT_NODES, customNode] : [...DEFAULT_NODES]
 }
 
 export function getActiveNode(): MoneroNode {
@@ -536,75 +825,97 @@ export function getActiveNode(): MoneroNode {
 }
 
 export async function setActiveNode(nodeId: string): Promise<void> {
-  const node = getNodeById(nodeId)
+  const node = resolveNode(nodeId)
   if (!node) {
-    throw new Error(`Unknown node id: ${nodeId}`)
+    throw new Error(
+      nodeId === CUSTOM_NODE_ID ? 'Set up a custom node before selecting it.' : `Unknown node id: ${nodeId}`
+    )
   }
-  activeNode = node
-  await saveSetting(WALLET_NODE_KEY, node.id)
-  if (cachedMeta) {
-    await persistMeta({ ...cachedMeta, nodeId: node.id })
-  }
-  await disposeWalletInstance(false)
-  setWalletState({ selectedNode: node.id })
-  if (cachedSecrets && walletKey) {
-    void refreshWalletInternal()
+  await applyActiveNode(node)
+}
+
+export async function saveCustomNode(config: { label?: string; uri: string }): Promise<void> {
+  const node = buildCustomNode(config)
+  await persistCustomNode(node)
+  await applyActiveNode(node)
+}
+
+export async function clearCustomNode(): Promise<void> {
+  const wasActive = activeNode.id === CUSTOM_NODE_ID
+  await persistCustomNode(null)
+  if (wasActive) {
+    const fallback = DEFAULT_NODES[0]
+    if (!fallback) {
+      throw new Error('No fallback nodes are available after removing the custom node.')
+    }
+    await applyActiveNode(fallback)
   }
 }
 
 export async function hydrateWalletState(): Promise<void> {
-  const [encrypted, meta, savedNodeId, savedSharePref] = await Promise.all([
+  const [encrypted, meta, savedNodeId, savedSharePref, savedCustomNode] = await Promise.all([
     loadEncryptedSecrets(),
     loadMeta(),
     getSetting(WALLET_NODE_KEY),
     getSetting(WALLET_SHARE_KEY),
+    getSetting(WALLET_CUSTOM_NODE_KEY),
   ])
 
   shareAddressPreference =
     savedSharePref === undefined || savedSharePref === null ? true : Boolean(savedSharePref)
   setSharePreferenceInStore(shareAddressPreference)
 
-  if (savedNodeId) {
-    const node = getNodeById(savedNodeId)
-    if (node) {
-      activeNode = node
-    }
-  } else if (meta?.nodeId) {
-    const node = getNodeById(meta.nodeId)
-    if (node) {
-      activeNode = node
-    }
+  assignCustomNode(parseStoredCustomNode(savedCustomNode))
+
+  const savedNode = resolveNode(savedNodeId)
+  const metaNode = resolveNode(meta?.nodeId)
+  const fallbackNode = savedNode ?? metaNode ?? customNode ?? DEFAULT_NODES[0]
+
+  if (!fallbackNode) {
+    throw new Error('No Monero RPC nodes are configured. Please add a custom node.')
   }
+
+  activeNode = fallbackNode
 
   const hasWallet = Boolean(encrypted && meta)
   let isReady = false
+  let locked = hasWallet
 
   if (hasWallet && meta) {
-    const key = readMasterKey()
+    const key = await readMasterKey()
     if (key) {
       const secrets = await tryDecodeSecrets(encrypted, key)
       if (secrets) {
         cachedSecrets = secrets
         walletKey = key
         isReady = true
+        locked = false
         // CRITICAL FIX: Don't sync profile address immediately during hydration!
         // The metadata cache is empty at this point, which would wipe the profile.
         // Instead, sync will happen later when the app is fully initialized and metadata is loaded.
         // See: syncProfileAddressWhenReady() in App.svelte
         console.log('⏳ Wallet hydrated. Profile address sync will happen when metadata is ready.')
         void refreshWalletInternal()
+      } else {
+        locked = true
       }
+    } else {
+      locked = true
     }
   } else {
     cachedSecrets = null
     walletKey = null
+    locked = false
   }
 
   setWalletState({
     hasWallet,
     isReady,
+    locked,
     address: meta?.address ?? null,
     selectedNode: activeNode.id,
+    customNodeLabel: customNode?.label ?? null,
+    customNodeUri: customNode?.uri ?? null,
     balance: 0,
     unlockedBalance: 0,
     lastSyncedAt: null,
@@ -617,7 +928,7 @@ export async function initWallet(
   mnemonic?: string,
   options?: { createdAt?: number; restoreHeight?: number }
 ): Promise<WalletInfo> {
-  const masterKey = ensureMasterKey()
+  const masterKey = await ensureMasterKey()
   const moneroLib = await loadMonero()
 
   const walletKeys = await moneroLib.createWalletKeys({
@@ -653,10 +964,13 @@ export async function initWallet(
   setWalletState({
     hasWallet: true,
     isReady: true,
+    locked: false,
     address,
     balance: 0,
     unlockedBalance: 0,
     selectedNode: activeNode.id,
+    customNodeLabel: customNode?.label ?? null,
+    customNodeUri: customNode?.uri ?? null,
     isLoading: false,
     restoreHeight,
     shareAddress: shareAddressPreference,
@@ -683,6 +997,37 @@ export async function initWallet(
     balance: 0,
     unlockedBalance: 0,
   }
+}
+
+export async function unlockWalletWithPin(): Promise<void> {
+  const encrypted = await loadEncryptedSecrets()
+  if (!encrypted) {
+    throw new Error('No encrypted wallet found on this device.')
+  }
+
+  masterKeyCache = null
+  const masterKey = await readMasterKey({ allowCancel: false })
+  if (!masterKey) {
+    throw new Error(PIN_CANCELLED_ERROR)
+  }
+
+  const secrets = await tryDecodeSecrets(encrypted, masterKey)
+  if (!secrets) {
+    throw new Error('Incorrect PIN or wallet data is corrupted.')
+  }
+
+  cachedSecrets = secrets
+  walletKey = masterKey
+  setWalletState({ isReady: true, locked: false })
+  await refreshWalletInternal()
+}
+
+export async function lockWallet(): Promise<void> {
+  cachedSecrets = null
+  walletKey = null
+  masterKeyCache = null
+  await disposeWalletInstance(false)
+  setWalletState({ isReady: false, locked: true })
 }
 
 export async function hasStoredWallet(): Promise<boolean> {
@@ -888,4 +1233,10 @@ export async function deleteWallet(): Promise<void> {
   await saveSetting(WALLET_NODE_KEY, null)
   await resetBrowserFs()
   resetWalletStore()
+  setWalletState({
+    selectedNode: activeNode.id,
+    customNodeLabel: customNode?.label ?? null,
+    customNodeUri: customNode?.uri ?? null,
+    shareAddress: shareAddressPreference,
+  })
 }

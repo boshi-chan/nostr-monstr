@@ -24,7 +24,7 @@
   import { parseContent } from '$lib/content'
   import type { NostrEvent } from '$types/nostr'
   import type { UserMetadata } from '$types/user'
-  import snarkdown from 'snarkdown'
+  import { renderMarkdownSafe } from '$lib/markdown'
   import MediaRenderer from './MediaRenderer.svelte'
   import NostrURIRenderer from './NostrURIRenderer.svelte'
   import LikeIcon from './icons/LikeIcon.svelte'
@@ -89,9 +89,7 @@
 
   // Render markdown for long-form posts
   let renderedHtml = ''
-  $: if (isLongForm && parsed.text) {
-    renderedHtml = snarkdown(parsed.text)
-  }
+  $: renderedHtml = isLongForm && parsed.text ? renderMarkdownSafe(parsed.text) : ''
 
   $: {
     if (!isRepostWrapper) {

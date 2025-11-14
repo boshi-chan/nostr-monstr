@@ -6,21 +6,28 @@ export interface MoneroNode {
   password?: string
 }
 
+export const CUSTOM_NODE_ID = 'custom-node'
+
 export const DEFAULT_NODES: MoneroNode[] = [
-  {
-    id: 'cake-us',
-    label: 'Cake Wallet',
-    uri: 'https://xmr-node-cakewallet.com:18081',
-  },
-  {
-    id: 'hashvault',
-    label: 'HashVault',
-    uri: 'https://nodes.hashvault.pro:18081',
-  },
   {
     id: 'seth',
     label: 'sethforprivacy.com',
     uri: 'https://node.sethforprivacy.com:443',
+  },
+  {
+    id: 'doggett-1',
+    label: 'doggett.tech #1',
+    uri: 'https://xmr1.doggett.tech:18089',
+  },
+  {
+    id: 'salami',
+    label: 'salami.network',
+    uri: 'https://xmr.salami.network:18089',
+  },
+  {
+    id: 'cryptostorm',
+    label: 'cryptostorm.is',
+    uri: 'https://xmr.cryptostorm.is:18081',
   },
 ]
 
