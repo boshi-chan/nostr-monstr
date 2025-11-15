@@ -54,17 +54,30 @@ function bytesToHex(bytes: Uint8Array): string {
     .join('')
 }
 
-function randomHex(size = 32): string {
+function randomBytes(size = 32): Uint8Array {
   const arr = new Uint8Array(size)
-  const cryptoObj = globalThis.crypto
-  if (cryptoObj?.getRandomValues) {
-    cryptoObj.getRandomValues(arr)
+  if (typeof globalThis.crypto?.getRandomValues === 'function') {
+    globalThis.crypto.getRandomValues(arr)
   } else {
     for (let i = 0; i < size; i++) {
       arr[i] = Math.floor(Math.random() * 256)
     }
   }
-  return bytesToHex(arr)
+  return arr
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  if (typeof globalThis.btoa === 'function') {
+    let binary = ''
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i])
+    }
+    return globalThis.btoa(binary)
+  }
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(bytes).toString('base64')
+  }
+  throw new Error('Base64 encoder not available')
 }
 
 export async function loginWithNostrConnect(): Promise<string> {
@@ -73,11 +86,15 @@ export async function loginWithNostrConnect(): Promise<string> {
   const appSecretKey = bytesToHex(rawSecretKey)
   const appPubkey = getPublicKey(rawSecretKey)
 
-  // Generate shared secret for encryption
-  const sharedSecret = randomHex(32)
+  // Generate shared secret for encryption (base64 per NIP-46)
+  const sharedSecretBytes = randomBytes(32)
+  const sharedSecret = bytesToBase64(sharedSecretBytes)
 
   const relayUrl = 'wss://relay.damus.io'
-  const connectUrl = `nostr+walletconnect://${appPubkey}?relay=${encodeURIComponent(relayUrl)}&secret=${sharedSecret}`
+  const connectUrl =
+    `nostr+walletconnect://${appPubkey}` +
+    `?relay=${encodeURIComponent(relayUrl)}` +
+    `&secret=${encodeURIComponent(sharedSecret)}`
 
   await saveSetting('nostrConnectAppSecret', appSecretKey)
   await saveSetting('nostrConnectSecret', sharedSecret)
