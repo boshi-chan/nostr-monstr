@@ -1,15 +1,23 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { loginWithExtension, hasNostrExtension } from '$lib/auth'
+  import {  loginWithExtension, hasNostrExtension } from '$lib/auth'
   import Button from '../Button.svelte'
+  import { toDataURL as qrToDataURL } from 'qrcode'
 
   let isLoading = false
   let error = ''
+  let connectUrl = ''
+  let showQR = false
   let hasExtension = false
+  let qrDataUrl: string | null = null
+  let qrError: string | null = null
 
+  // Check for extensions on component mount
   onMount(() => {
     hasExtension = hasNostrExtension()
   })
+
+  
 
   async function handleExtensionLogin() {
     try {
@@ -22,16 +30,41 @@
       isLoading = false
     }
   }
+
+  function handleCopyUrl() {
+    if (connectUrl) {
+      navigator.clipboard.writeText(connectUrl)
+      alert('Connection URL copied to clipboard')
+    }
+  }
+
+  $: if (showQR && connectUrl) {
+    qrDataUrl = null
+    qrError = null
+    qrToDataURL(connectUrl, { margin: 1, scale: 5 })
+      .then(url => {
+        qrDataUrl = url
+      })
+      .catch(err => {
+        qrError = 'Failed to render QR code'
+        console.error('QR generation error', err)
+      })
+  } else if (!showQR) {
+    qrDataUrl = null
+    qrError = null
+  }
 </script>
 
 <div class="min-h-screen bg-bg-primary flex items-center justify-center p-4">
   <div class="w-full max-w-md">
+    <!-- Logo -->
     <div class="text-center mb-8">
       <img src="/logo.svg" alt="Monstr" class="h-16 w-16 mx-auto mb-4" />
       <h1 class="text-3xl font-bold text-white">Monstr</h1>
       <p class="text-text-tertiary mt-2">Nostr Client with Monero Embers</p>
     </div>
 
+    <!-- Login Options -->
     <div class="bg-bg-secondary rounded-lg p-6 space-y-6">
       <div>
         <h2 class="text-xl font-semibold text-white mb-2">Login</h2>
@@ -46,43 +79,98 @@
         </div>
       {/if}
 
-      <div class="space-y-4">
-        {#if hasExtension}
-          <div class="p-4 bg-bg-tertiary rounded-lg border border-primary/30">
-            <h3 class="font-semibold text-white mb-2">Browser Extension</h3>
-            <p class="text-sm text-text-tertiary mb-4">
-              Detected extension ready to use
+      {#if !showQR}
+        <!-- Login Options -->
+        <div class="space-y-4">
+          <!-- Browser Extension Option (if available) -->
+          {#if hasExtension}
+            <div class="p-4 bg-bg-tertiary rounded-lg border border-primary/30">
+              <h3 class="font-semibold text-white mb-2">Browser Extension</h3>
+              <p class="text-sm text-text-tertiary mb-4">
+                Detected extension ready to use
+              </p>
+              <Button
+                variant="primary"
+                size="lg"
+                loading={isLoading}
+                on:click={handleExtensionLogin}
+                className="w-full"
+              >
+                {isLoading ? 'Connecting...' : 'Sign with Extension'}
+              </Button>
+            </div>
+          {/if}
+          <!-- Supported Methods -->
+          <div class="text-xs text-text-tertiary space-y-1 p-3 bg-bg-tertiary rounded">
+            <p class="font-medium text-text-secondary">Supported:</p>
+            <ul class="space-y-1">
+              <li>Browser extensions (Alby, nos2x, SoapBox Signer.)</li>
+              <li>Amber (Coming soon)</li>
+              
+            </ul>
+          </div>
+        </div>
+      {:else}
+        <!-- QR Code Display -->
+        <div class="space-y-4">
+          <div class="p-4 bg-bg-tertiary rounded-lg">
+            <p class="text-sm text-text-secondary mb-3">
+              Scan with your wallet or copy the connection URL:
             </p>
+            <div class="bg-white p-4 rounded-lg mb-3 flex items-center justify-center min-h-64">
+              {#if qrDataUrl}
+                <img src={qrDataUrl} alt="Nostr Connect QR" class="w-full max-w-xs" />
+              {:else if qrError}
+                <p class="text-sm text-red-500">{qrError}</p>
+              {:else}
+                <p class="text-sm text-text-tertiary text-center">
+                  Generating QR code...
+                </p>
+              {/if}
+            </div>
+            <textarea
+              readonly
+              value={connectUrl}
+              class="w-full px-3 py-2 bg-bg-primary border border-bg-tertiary rounded text-white text-xs resize-none"
+              rows="3"
+            />
+          </div>
+
+          <div class="space-y-2">
             <Button
               variant="primary"
               size="lg"
-              loading={isLoading}
-              on:click={handleExtensionLogin}
+              on:click={handleCopyUrl}
               className="w-full"
             >
-              {isLoading ? 'Connecting...' : 'Sign with Extension'}
+              Copy Connection URL
+            </Button>
+
+            <Button
+              variant="secondary"
+              size="lg"
+              on:click={() => (showQR = false)}
+              className="w-full"
+            >
+              Back
             </Button>
           </div>
-        {/if}
 
-        <div class="p-4 bg-bg-tertiary rounded-lg border border-bg-tertiary/50">
-          <h3 class="font-semibold text-white mb-2">Remote Keys</h3>
-          <p class="text-sm text-text-tertiary">
-            Amber / Nostr Connect support is being rebuilt with full NIP-46 compliance.
+          <p class="text-xs text-text-tertiary text-center">
+            Waiting for wallet connection...
           </p>
         </div>
-
-        <div class="text-xs text-text-tertiary space-y-1 p-3 bg-bg-tertiary rounded">
-          <p class="font-medium text-text-secondary">Supported:</p>
-          <ul class="space-y-1">
-            <li>• Browser extensions (Alby, nos2x, Nostr Garden, etc.)</li>
-            <li>• Amber remote key manager (coming soon)</li>
-          </ul>
-        </div>
-      </div>
+      {/if}
     </div>
+
+    <!-- Security Info -->
+    
   </div>
 </div>
 
+<style>
+  textarea:readonly {
     cursor: default;
   }
+</style>
+

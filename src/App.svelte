@@ -92,6 +92,9 @@
         return
       }
 
+      // Clear stale login warnings once authenticated
+      feedError.set(null)
+
       if (targetFeed === 'following') {
         await subscribeToFollowingFeed()
         return
