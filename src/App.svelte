@@ -196,9 +196,23 @@
 <PinPrompt />
 
 <style global>
-  :global(body) {
+:global(body) {
     margin: 0;
     padding: 0;
+  }
+
+  @media (max-width: 520px) {
+    :global(body) {
+      font-size: 13px;
+    }
+
+    :global(nav.mobile-nav) {
+      min-height: 56px;
+    }
+
+    :global(.mobile-tight) {
+      gap: 0.25rem !important;
+    }
   }
 
   @keyframes spin {

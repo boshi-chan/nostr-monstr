@@ -488,36 +488,32 @@
     <!-- User info and header content only -->
     <div class="flex-1 min-w-0">
       <!-- User info row -->
-      <div class="flex items-start justify-between gap-2">
-        <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
-          <button
-            type="button"
-            class="font-semibold text-text-soft hover:underline focus:outline-none focus:ring-2 focus:ring-primary/40 rounded-md px-1 -mx-1 truncate"
-            on:click|stopPropagation={() => onProfileSelect?.(actionableEvent.pubkey)}
-            on:keydown|stopPropagation={(keyboardEvent) => {
-              if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
-                keyboardEvent.preventDefault()
-                onProfileSelect?.(actionableEvent.pubkey)
-              }
-            }}
-          >
-            {displayLabel}
-          </button>
-          {#if nip05}
-            <div class="flex items-center gap-1.5">
-              <span class="text-xs text-text-muted truncate">@{nip05}</span>
-              <!-- NIP-05 Verified Badge -->
-              <svg class="h-4 w-4 text-primary flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-label="Verified">
-                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd" />
-              </svg>
-            </div>
-          {/if}
-        </div>
-
-        <div class="flex items-center gap-2 text-sm text-text-muted flex-shrink-0">
-          <span class="hover:underline cursor-pointer" title={new Date(actionableEvent.created_at * 1000).toLocaleString()}>{formattedTime}</span>
-          <FollowButton pubkey={actionableEvent.pubkey} size="sm" layout="inline" />
-          <div class="relative">
+      <div class="flex flex-col gap-1">
+        <div class="flex items-start gap-2">
+          <div class="flex flex-1 min-w-0 flex-col gap-0.5">
+            <button
+              type="button"
+              class="text-left font-semibold text-text-soft hover:underline focus:outline-none focus:ring-2 focus:ring-primary/40 rounded-md px-1 -mx-1 truncate"
+              on:click|stopPropagation={() => onProfileSelect?.(actionableEvent.pubkey)}
+              on:keydown|stopPropagation={(keyboardEvent) => {
+                if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
+                  keyboardEvent.preventDefault()
+                  onProfileSelect?.(actionableEvent.pubkey)
+                }
+              }}
+            >
+              {displayLabel}
+            </button>
+            {#if nip05}
+              <div class="flex items-center gap-1.5 text-xs text-text-muted truncate ps-1">
+                <span class="truncate">@{nip05}</span>
+                <svg class="h-4 w-4 text-primary flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-label="Verified">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clip-rule="evenodd" />
+                </svg>
+              </div>
+            {/if}
+          </div>
+          <div class="relative flex-shrink-0 self-start">
             <button
               type="button"
               class="rounded-full p-1.5 text-text-muted transition-colors duration-200 hover:bg-dark-border/40 hover:text-text-soft focus:outline-none focus:ring-2 focus:ring-primary/40"
@@ -559,6 +555,18 @@
                 </button>
               </div>
             {/if}
+          </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 text-xs text-text-muted sm:text-sm">
+          <span
+            class="hover:underline cursor-pointer whitespace-nowrap"
+            title={new Date(actionableEvent.created_at * 1000).toLocaleString()}
+          >
+            {formattedTime}
+          </span>
+          <div class="flex-shrink-0">
+            <FollowButton pubkey={actionableEvent.pubkey} size="sm" layout="inline" />
           </div>
         </div>
       </div>

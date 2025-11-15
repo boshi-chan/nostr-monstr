@@ -3,17 +3,15 @@
   import { currentUser } from '$stores/auth'
   import { feedSource, lastTimelineFeed } from '$stores/feedSource'
   import { logout } from '$lib/auth'
-  import { showCompose } from '$stores/feed'
-  import { navigateToPage } from '$stores/router'
-  import type { NavTab } from '$stores/nav'
-  import HomeIcon from './icons/HomeIcon.svelte'
-  import BookOpenIcon from './icons/BookOpenIcon.svelte'
-  import BellIcon from './icons/BellIcon.svelte'
-  import SquarePenIcon from './icons/SquarePenIcon.svelte'
-  import MailIcon from 'lucide-svelte/icons/mail'
-  import { unreadCount } from '$stores/notifications'
-  import { showSearch } from '$stores/search'
-  import { unreadCounts } from '$stores/messages'
+import { navigateToPage } from '$stores/router'
+import type { NavTab } from '$stores/nav'
+import HomeIcon from './icons/HomeIcon.svelte'
+import BookOpenIcon from './icons/BookOpenIcon.svelte'
+import BellIcon from './icons/BellIcon.svelte'
+import MailIcon from 'lucide-svelte/icons/mail'
+import { unreadCount } from '$stores/notifications'
+import { showSearch } from '$stores/search'
+import { unreadCounts } from '$stores/messages'
 
   const tabs: { id: NavTab; label: string; icon: any }[] = [
     { id: 'home', label: 'Home', icon: HomeIcon },
@@ -36,10 +34,6 @@
     } else if (tab === 'long-reads') {
       feedSource.set('long-reads')
     }
-  }
-
-  function handleCompose() {
-    showCompose.set(true)
   }
 
   function navigate(tab: NavTab) {
@@ -84,17 +78,17 @@
   }
 </script>
 
-<nav class="relative flex h-20 w-full items-center gap-3 border-t border-dark-border bg-dark-light px-3 py-2 text-text-muted md:h-full md:w-20 md:flex-col md:items-center md:justify-start md:gap-4 md:border-t-0 md:border-r md:bg-transparent md:px-4 md:py-4" style="padding-bottom: max(0.5rem, env(safe-area-inset-bottom))">
+<nav class="mobile-nav relative flex min-h-[3.5rem] w-full items-center gap-3 border-t border-dark-border bg-dark-light px-3 py-1 text-text-muted md:h-full md:w-20 md:flex-col md:items-center md:justify-start md:gap-4 md:border-t-0 md:border-r md:bg-transparent md:px-4 md:py-4" style="padding-bottom: max(0.5rem, env(safe-area-inset-bottom))">
   <!-- Desktop: Logo Only -->
   <div class="hidden md:flex items-center justify-center h-12">
     <img src="/logo.svg" alt="Monstr" class="h-10 w-10" />
   </div>
 
   <!-- Navigation Tabs -->
-  <div class="flex flex-1 items-center justify-around gap-2 md:flex-col md:items-center md:justify-start md:gap-3 md:w-full">
+<div class="flex flex-1 items-center justify-around gap-2 md:flex-col md:items-center md:justify-start md:gap-3 md:w-full">
     {#each tabs as tab (tab.id)}
       <button
-        class={`relative flex h-12 w-12 md:w-12 md:h-12 items-center justify-center rounded-xl text-sm font-medium transition-colors duration-200 ${
+        class={`relative flex h-12 w-12 md:w-12 md:h-12 items-center justify-center rounded-lg text-sm font-medium transition-colors duration-200 ${
           $activeTab === tab.id
             ? 'bg-primary text-dark font-semibold'
             : 'text-text-muted hover:bg-dark-lighter/60 hover:text-text-soft'
@@ -119,19 +113,6 @@
     {/each}
   </div>
 
-  <!-- Compose button (mobile) - Hidden since we have floating button on feed pages -->
-  {#if $activeTab !== 'home' && $activeTab !== 'long-reads'}
-    <button
-      on:click={handleCompose}
-      class="md:hidden relative flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-dark font-semibold transition-colors duration-200"
-      title="Compose"
-    >
-      <div class="flex h-6 w-6 items-center justify-center">
-        <SquarePenIcon size={20} color="currentColor" strokeWidth={2} />
-      </div>
-    </button>
-  {/if}
-
   <!-- Account button (mobile) -->
   <button
     on:click={toggleMobileMenu}
@@ -149,17 +130,6 @@
 
   <!-- Desktop compose & account -->
   <div class="hidden md:flex md:mt-auto md:w-full md:flex-col md:items-center md:gap-6 md:pb-4">
-    <!-- Hide compose button on feed pages (floating button will show instead) -->
-    {#if $activeTab !== 'home' && $activeTab !== 'long-reads'}
-      <button
-        on:click={handleCompose}
-        class="w-12 h-12 flex items-center justify-center rounded-xl bg-primary text-dark transition-colors duration-200 hover:bg-primary/90"
-        title="Compose"
-      >
-        <SquarePenIcon size={22} color="currentColor" strokeWidth={1.75} />
-      </button>
-    {/if}
-
     <div class="relative">
       <button
         on:click={toggleDesktopMenu}

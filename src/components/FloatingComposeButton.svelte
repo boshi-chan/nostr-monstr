@@ -3,16 +3,33 @@
   import { showCompose } from '$stores/feed'
   import SquarePenIcon from './icons/SquarePenIcon.svelte'
   import type { NavTab } from '$stores/nav'
+  import { activeRoute } from '$stores/router'
+  import type { Route } from '$stores/router'
 
   let currentTab: NavTab = 'home'
   $: currentTab = $activeTab
+  let route: Route = { type: 'page', tab: 'home' }
+  $: route = $activeRoute
 
   // Only show on feed pages (home and long-reads)
   let shouldShow = false
-  $: shouldShow = currentTab === 'home' || currentTab === 'long-reads'
+  $: shouldShow = computeShouldShow(route, currentTab)
 
   function handleCompose() {
     showCompose.set(true)
+  }
+
+  function computeShouldShow(route: Route, tab: NavTab): boolean {
+    if (route.type === 'profile') {
+      return true
+    }
+    if (route.type === 'post') {
+      return route.originTab === 'home' || route.originTab === 'long-reads' || route.originTab === 'profile'
+    }
+    if (route.type === 'page') {
+      return route.tab === 'home' || route.tab === 'long-reads' || route.tab === 'profile'
+    }
+    return tab === 'home' || tab === 'long-reads'
   }
 </script>
 

@@ -293,9 +293,9 @@ $: filteredPosts = posts.filter(event => {
         </div>
 
         <div class="relative px-5 pb-6 md:px-8 md:pb-8">
-          <div class="-mt-12 flex flex-col gap-4 md:-mt-14 md:flex-row md:items-end md:justify-between">
-            <div class="flex items-end gap-4">
-              <div class="h-24 w-24 overflow-hidden rounded-3xl border-4 border-dark bg-dark shadow-lg md:h-32 md:w-32">
+          <div class="-mt-12 flex flex-col gap-4 md:-mt-14 md:flex-row md:items-center md:justify-between">
+            <div class="flex items-center gap-4">
+              <div class="h-24 w-24 overflow-hidden rounded-full border-4 border-dark bg-dark shadow-lg md:h-28 md:w-28">
                 {#if avatarUrl}
                   <img src={avatarUrl} alt={displayName} class="h-full w-full object-cover" />
                 {:else}
@@ -307,23 +307,15 @@ $: filteredPosts = posts.filter(event => {
 
               <div class="pb-2">
                 <div class="flex flex-wrap items-center gap-3">
-                  <h1 class="text-2xl font-semibold text-white md:text-3xl">{displayName}</h1>
-                  {#if isOwnProfile}
-                    <button
-                      type="button"
-                      class="rounded-full border border-dark-border/70 bg-dark px-4 py-2 text-sm font-medium text-text-soft transition-colors duration-200 hover:border-primary/60 hover:text-white"
-                    >
-                      Edit Profile
-                    </button>
-                  {/if}
+                  <h1 class="text-xl font-semibold text-white md:text-3xl">{displayName}</h1>
                 </div>
                 <p class="mt-2 text-sm text-text-muted/80">{nip05 || targetPubkey.slice(0, 12)}</p>
               </div>
             </div>
 
-            <div class="flex flex-col gap-3 md:items-end">
+            <div class="flex w-full flex-col gap-3 md:w-auto md:items-end md:text-right">
               {#if !isOwnProfile && resolvedPubkey}
-                <div class="flex gap-2">
+                <div class="flex flex-wrap gap-2 justify-start md:justify-end">
                   <button
                     type="button"
                     on:click={handleOpenDM}
@@ -336,24 +328,26 @@ $: filteredPosts = posts.filter(event => {
                   <FollowButton pubkey={resolvedPubkey} size="md" />
                 </div>
               {/if}
-              <div class="flex items-center gap-3 md:gap-6 rounded-2xl border border-dark-border/70 bg-dark px-3 md:px-6 py-3 md:py-4 shadow-md">
-                <div class="flex-1 text-center md:text-left">
-                  <p class="text-[10px] md:text-xs uppercase tracking-[0.2em] md:tracking-[0.3em] text-text-muted">Following</p>
-                  <p class="mt-1 text-base md:text-lg font-semibold text-white">
-                    {loadingStats ? '...' : followingCount}
-                  </p>
-                </div>
-                <div class="flex-1 text-center md:text-left">
-                  <p class="text-[10px] md:text-xs uppercase tracking-[0.2em] md:tracking-[0.3em] text-text-muted">Followers</p>
-                  <p class="mt-1 text-base md:text-lg font-semibold text-white">
-                    {loadingStats ? '...' : followersCount}
-                  </p>
-                </div>
-                <div class="flex-1 text-center md:text-left">
-                  <p class="text-[10px] md:text-xs uppercase tracking-[0.2em] md:tracking-[0.3em] text-text-muted">Posts</p>
-                  <p class="mt-1 text-base md:text-lg font-semibold text-white">
-                    {loadingPosts ? '...' : posts.length}
-                  </p>
+              <div class="w-full rounded-2xl border border-dark-border/70 bg-dark px-3 py-3 shadow-md md:px-6 md:py-4">
+                <div class="flex items-center gap-3 md:gap-6">
+                  <div class="flex-1 min-w-[90px] text-center md:text-left">
+                    <p class="text-[10px] md:text-xs uppercase tracking-[0.2em] md:tracking-[0.3em] text-text-muted">Following</p>
+                    <p class="mt-1 text-base md:text-lg font-semibold text-white">
+                      {loadingStats ? '...' : followingCount}
+                    </p>
+                  </div>
+                  <div class="flex-1 min-w-[90px] text-center md:text-left">
+                    <p class="text-[10px] md:text-xs uppercase tracking-[0.2em] md:tracking-[0.3em] text-text-muted">Followers</p>
+                    <p class="mt-1 text-base md:text-lg font-semibold text-white">
+                      {loadingStats ? '...' : followersCount}
+                    </p>
+                  </div>
+                  <div class="flex-1 min-w-[90px] text-center md:text-left">
+                    <p class="text-[10px] md:text-xs uppercase tracking-[0.2em] md:tracking-[0.3em] text-text-muted">Posts</p>
+                    <p class="mt-1 text-base md:text-lg font-semibold text-white">
+                      {loadingPosts ? '...' : posts.length}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
