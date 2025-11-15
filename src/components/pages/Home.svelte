@@ -1,11 +1,11 @@
 <script lang="ts">
+  import { get } from 'svelte/store'
   import {
     feedEvents,
     feedLoading,
     feedError,
   } from '$stores/feed'
-
-import { feedSource, type FeedSource } from '$stores/feedSource'
+  import { feedSource, type FeedSource } from '$stores/feedSource'
 
   import type { NostrEvent } from '$types/nostr'
   import Post from '../Post.svelte'
@@ -22,7 +22,7 @@ import { feedSource, type FeedSource } from '$stores/feedSource'
     { id: 'global', label: 'Global', icon: GlobeIcon },
   ]
 
-  let activeFeed: FeedSource = 'following'
+  let activeFeed: FeedSource = get(feedSource)
   let hasLoadedOnce = false
 
   $: activeFeed = $feedSource
