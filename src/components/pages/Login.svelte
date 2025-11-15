@@ -2,12 +2,15 @@
   import { onMount } from 'svelte'
   import { loginWithNostrConnect, loginWithExtension, hasNostrExtension } from '$lib/auth'
   import Button from '../Button.svelte'
+  import { toDataURL as qrToDataURL } from 'qrcode'
 
   let isLoading = false
   let error = ''
   let connectUrl = ''
   let showQR = false
   let hasExtension = false
+  let qrDataUrl: string | null = null
+  let qrError: string | null = null
 
   // Check for extensions on component mount
   onMount(() => {
@@ -44,6 +47,22 @@
       navigator.clipboard.writeText(connectUrl)
       alert('Connection URL copied to clipboard')
     }
+  }
+
+  $: if (showQR && connectUrl) {
+    qrDataUrl = null
+    qrError = null
+    qrToDataURL(connectUrl, { margin: 1, scale: 5 })
+      .then(url => {
+        qrDataUrl = url
+      })
+      .catch(err => {
+        qrError = 'Failed to render QR code'
+        console.error('QR generation error', err)
+      })
+  } else if (!showQR) {
+    qrDataUrl = null
+    qrError = null
   }
 </script>
 
@@ -97,7 +116,7 @@
           <div class="p-4 bg-bg-tertiary rounded-lg border border-bg-tertiary/50">
             <h3 class="font-semibold text-white mb-2">Nostr Connect (NIP-46)</h3>
             <p class="text-sm text-text-tertiary mb-4">
-              Connect mobile wallet or bunker
+              Generate a Nostr Connect URI for mobile wallets or bunkers.
             </p>
             <Button
               variant="primary"
@@ -128,9 +147,15 @@
               Scan with your wallet or copy the connection URL:
             </p>
             <div class="bg-white p-4 rounded-lg mb-3 flex items-center justify-center min-h-64">
-              <p class="text-sm text-text-tertiary text-center">
-                QR Code would appear here
-              </p>
+              {#if qrDataUrl}
+                <img src={qrDataUrl} alt="Nostr Connect QR" class="w-full max-w-xs" />
+              {:else if qrError}
+                <p class="text-sm text-red-500">{qrError}</p>
+              {:else}
+                <p class="text-sm text-text-tertiary text-center">
+                  Generating QR code...
+                </p>
+              {/if}
             </div>
             <textarea
               readonly

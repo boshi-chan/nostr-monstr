@@ -26,6 +26,7 @@ import { getSetting, saveSetting } from './db'
 import { loginWithNIP07, logoutNDK } from './ndk'
 import type { User } from '$types/user'
 import type { NDKUser } from '@nostr-dev-kit/ndk'
+import { generateSecretKey, getPublicKey } from 'nostr-tools'
 import { warmupMessagingPermissions, resetMessagingState } from '$lib/messaging-simple'
 import { stopAllSubscriptions, clearFeed } from './feed-ndk'
 import { stopNotificationListener } from '$lib/notifications'
@@ -47,22 +48,39 @@ function ndkUserToUser(ndkUser: NDKUser): User {
  * Generate Nostr Connect URL (NIP-46)
  * Creates a connection URL that can be shared with wallets or displayed as QR
  */
-export async function loginWithNostrConnect(): Promise<string> {
-  // Generate a random token for this session
-  const token = Array(32)
-    .fill(0)
-    .map(() => Math.floor(Math.random() * 16).toString(16))
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map(b => b.toString(16).padStart(2, '0'))
     .join('')
+}
 
-  // Generate relay URL for NIP-46
-  const relayUrl = 'wss://relay.damus.io' // Could be customizable
+function randomHex(size = 32): string {
+  const arr = new Uint8Array(size)
+  const cryptoObj = globalThis.crypto
+  if (cryptoObj?.getRandomValues) {
+    cryptoObj.getRandomValues(arr)
+  } else {
+    for (let i = 0; i < size; i++) {
+      arr[i] = Math.floor(Math.random() * 256)
+    }
+  }
+  return bytesToHex(arr)
+}
 
-  // Create NIP-46 connection string
-  // Format: nostr+walletconnect://pubkey?relay=relayUrl&token=token
-  const connectUrl = `nostr+walletconnect://${token}?relay=${encodeURIComponent(relayUrl)}`
+export async function loginWithNostrConnect(): Promise<string> {
+  // Generate app keypair for this session
+  const rawSecretKey = generateSecretKey()
+  const appSecretKey = bytesToHex(rawSecretKey)
+  const appPubkey = getPublicKey(rawSecretKey)
 
-  // Store connection info for later use
-  await saveSetting('nostrConnectToken', token)
+  // Generate shared secret for encryption
+  const sharedSecret = randomHex(32)
+
+  const relayUrl = 'wss://relay.damus.io'
+  const connectUrl = `nostr+walletconnect://${appPubkey}?relay=${encodeURIComponent(relayUrl)}&secret=${sharedSecret}`
+
+  await saveSetting('nostrConnectAppSecret', appSecretKey)
+  await saveSetting('nostrConnectSecret', sharedSecret)
   await saveSetting('nostrConnectRelay', relayUrl)
 
   return connectUrl
