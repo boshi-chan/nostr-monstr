@@ -90,7 +90,13 @@ export async function loginWithNostrConnect(): Promise<string> {
   const sharedSecretBytes = randomBytes(32)
   const sharedSecret = bytesToBase64(sharedSecretBytes)
 
-  const relayUrl = 'wss://relay.damus.io'
+  const relayChoices = [
+    'wss://relay.damus.io',
+    'wss://nos.lol',
+    'wss://relay.nostr.band',
+    'wss://nostr.mom',
+  ]
+  const relayUrl = relayChoices[Math.floor(Math.random() * relayChoices.length)]
   const connectUrl =
     `nostr+walletconnect://${appPubkey}` +
     `?relay=${encodeURIComponent(relayUrl)}` +

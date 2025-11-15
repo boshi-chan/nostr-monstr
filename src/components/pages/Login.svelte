@@ -118,6 +118,9 @@
             <p class="text-sm text-text-tertiary mb-4">
               Generate a Nostr Connect URI for Amber or other remote key managers.
             </p>
+            <p class="text-xs text-text-tertiary mb-4">
+              Uses relays: relay.damus.io, nos.lol, relay.nostr.band, nostr.mom
+            </p>
             <Button
               variant="primary"
               size="lg"
