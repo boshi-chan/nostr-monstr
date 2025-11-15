@@ -64,14 +64,20 @@
   let lastFeedSource: string | null = null
   let interactionsLoadedFor: string | null = null
   let interactionCacheHydratedFor: string | null = null
+  let lastAuthKey: string | null = null
 
   // switching tabs changes subscription here
   // Following AI_Guidelines: Be explicit about reactive dependencies
-  $: if ($isInitialized && $feedSource !== lastFeedSource) {
+  $: if ($isInitialized) {
     const targetFeed = $feedSource
     const authed = $isAuthenticated
     const pubkey = $currentUser?.pubkey ?? null
-    lastFeedSource = targetFeed
+    const authKey = authed ? pubkey ?? 'auth' : 'guest'
+    if (targetFeed === lastFeedSource && authKey === lastAuthKey) {
+      // No relevant change
+    } else {
+      lastFeedSource = targetFeed
+      lastAuthKey = authKey
 
     ;(async () => {
       // Stop all subscriptions and clear feed
@@ -124,6 +130,7 @@
       feedError.set(String(err))
       feedLoading.set(false)
     })
+    }
   }
 
   // Filtering is now handled automatically by the derived feedEvents store in feed.ts
