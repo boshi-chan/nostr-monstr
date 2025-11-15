@@ -19,11 +19,18 @@ import { showCanaryModal, showDonateModal } from '$stores/modals'
     $walletState.isSyncing && $walletState.syncProgress !== null
       ? Math.max(0, Math.min(100, Math.round($walletState.syncProgress)))
       : null
+  $: hasSyncedOnce = Boolean($walletState.lastSyncedAt)
   $: statusChip = (() => {
     if (!$walletState.hasWallet || !$walletState.isReady || $walletState.locked) {
       const label = !$walletState.hasWallet ? 'No wallet' : $walletState.locked ? 'Locked' : 'Unsynced'
       return {
         label,
+        classes: 'border border-rose-500/50 bg-rose-500/10 text-rose-100',
+      }
+    }
+    if (!$walletState.isSyncing && !hasSyncedOnce) {
+      return {
+        label: 'Unsynced — try refreshing or another node',
         classes: 'border border-rose-500/50 bg-rose-500/10 text-rose-100',
       }
     }
@@ -104,6 +111,8 @@ import { showCanaryModal, showDonateModal } from '$stores/modals'
             No wallet
           {:else if $walletState.locked}
             Locked
+          {:else if (!$walletState.isSyncing && !hasSyncedOnce && $walletState.isReady)}
+            Unsynced — try refreshing or another node
           {:else if ($walletState.isSyncing || syncPercent !== null) && $walletState.isReady}
             {syncPercent !== null ? `Syncing ${syncPercent}%` : 'Syncing…'}
           {:else if ($walletState.isReady)}

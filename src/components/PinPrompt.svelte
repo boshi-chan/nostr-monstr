@@ -2,16 +2,25 @@
   import { fade } from 'svelte/transition'
   import { tick } from 'svelte'
   import { pinPrompt, closePinPrompt } from '$stores/pinPrompt'
+  import type { PinPromptRequest } from '$stores/pinPrompt'
 
   let pin = ''
   let localError: string | null = null
   let pinInput: HTMLInputElement | null = null
   let submitting = false
+  let request: PinPromptRequest | null = null
+  let lastRequest: PinPromptRequest | null = null
   $: request = $pinPrompt
-  $: if (!request) {
+  $: if (request !== lastRequest) {
+    lastRequest = request
     pin = ''
     localError = null
     submitting = false
+    if (request) {
+      queueMicrotask(() => {
+        pinInput?.focus()
+      })
+    }
   }
 
   function validatePin(value: string): boolean {
@@ -26,12 +35,6 @@
     localError = null
     return true
   }
-
-$: if (request) {
-  queueMicrotask(() => {
-    pinInput?.focus()
-  })
-}
 
   async function submit(): Promise<void> {
     const trimmed = pin.trim()

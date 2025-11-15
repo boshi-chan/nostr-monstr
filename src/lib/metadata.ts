@@ -13,6 +13,38 @@ const metadataCache = new Map<string, UserMetadata & { fetched: number }>()
 const pendingFetches = new Set<string>()
 const CACHE_TTL = 3600000 // 1 hour
 
+// Keep the local TTL-aware cache in sync with the Svelte store, even if other modules update it
+metadataCacheStore.subscribe(cache => {
+  const storeKeys = new Set(cache.keys())
+
+  for (const [pubkey, metadata] of cache.entries()) {
+    const existing = metadataCache.get(pubkey)
+    metadataCache.set(pubkey, {
+      ...metadata,
+      fetched: existing?.fetched ?? Date.now(),
+    })
+  }
+
+  for (const key of Array.from(metadataCache.keys())) {
+    if (!storeKeys.has(key)) {
+      metadataCache.delete(key)
+    }
+  }
+})
+
+function cacheMetadataEntry(pubkey: string, metadata: UserMetadata): void {
+  metadataCache.set(pubkey, {
+    ...metadata,
+    fetched: Date.now(),
+  })
+
+  metadataCacheStore.update(cache => {
+    const next = new Map(cache)
+    next.set(pubkey, metadata)
+    return next
+  })
+}
+
 /**
  * Get user metadata (cached)
  */
@@ -54,7 +86,7 @@ export async function fetchUserMetadata(pubkey: string): Promise<void> {
       limit: 1,
     }
 
-    const sub = ndk.subscribe(filter, { closeOnEose: true }, undefined, false)
+    const sub = ndk.subscribe(filter, { closeOnEose: true })
 
     sub.on('event', (event: any) => {
       const raw = normalizeEvent(event)
@@ -78,18 +110,7 @@ export function parseMetadataEvent(event: NostrEvent): UserMetadata | null {
   try {
     const metadata = JSON.parse(event.content) as UserMetadata
     
-    // Cache it
-    metadataCache.set(event.pubkey, {
-      ...metadata,
-      fetched: Date.now(),
-    })
-    
-    // Update reactive store for UI updates
-    metadataCacheStore.update(cache => {
-      const newCache = new Map(cache)
-      newCache.set(event.pubkey, metadata)
-      return newCache
-    })
+    cacheMetadataEntry(event.pubkey, metadata)
     
     return metadata
   } catch (err) {
@@ -133,4 +154,5 @@ export function getNip05Display(nip05?: string): string | null {
   if (!nip05) return null
   return nip05
 }
+
 
