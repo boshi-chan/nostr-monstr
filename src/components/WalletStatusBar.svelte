@@ -75,7 +75,7 @@ import { showCanaryModal, showDonateModal } from '$stores/modals'
 </script>
 
 <div class="w-full border-b border-dark-border/60 bg-dark/90 px-3 py-1 backdrop-blur-2xl">
-  <div class="flex flex-wrap items-center gap-2 text-[11px] text-text-soft sm:flex-nowrap">
+  <div class="flex flex-nowrap items-center gap-2 text-[11px] text-text-soft">
     <!-- Wallet pill -->
     <div class="flex flex-shrink-0 items-center gap-2 rounded-full border border-dark-border/60 bg-dark/60 px-2 py-1 shadow-sm shadow-black/20">
       {#if $walletState.hasWallet}
@@ -125,10 +125,10 @@ import { showCanaryModal, showDonateModal } from '$stores/modals'
     </div>
 
     <!-- Search pill -->
-    <div class="flex min-w-[120px] flex-1 justify-center">
+    <div class="flex min-w-0 flex-1 justify-center">
       <button
         type="button"
-        class="inline-flex w-full max-w-[200px] items-center justify-center gap-1 rounded-full border border-white/10 bg-dark/60 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-soft transition hover:border-emerald-400/60 hover:text-white"
+        class="inline-flex w-full items-center justify-center gap-1 rounded-full border border-white/10 bg-dark/60 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-soft transition hover:border-emerald-400/60 hover:text-white"
         on:click={() => showSearch.set(true)}
       >
         <SearchIcon size={16} />
