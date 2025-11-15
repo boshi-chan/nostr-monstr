@@ -116,7 +116,7 @@
           <div class="p-4 bg-bg-tertiary rounded-lg border border-bg-tertiary/50">
             <h3 class="font-semibold text-white mb-2">Nostr Connect (NIP-46)</h3>
             <p class="text-sm text-text-tertiary mb-4">
-              Generate a Nostr Connect URI for mobile wallets or bunkers.
+              Generate a Nostr Connect URI for Amber or other remote key managers.
             </p>
             <Button
               variant="primary"
@@ -125,7 +125,7 @@
               on:click={handleNostrConnect}
               className="w-full"
             >
-              {isLoading ? 'Generating...' : 'Connect Wallet'}
+              {isLoading ? 'Generating...' : 'Generate Connect URI'}
             </Button>
           </div>
 
@@ -202,3 +202,4 @@
     cursor: default;
   }
 </style>
+
