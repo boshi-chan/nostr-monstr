@@ -1,9 +1,12 @@
-/**
+﻿/**
  * Lazy loading wrapper for wallet functionality
  * This ensures the large monero-ts library is only loaded when actually needed
  */
 
+import { getSetting } from '$lib/db'
+
 let walletModulePromise: Promise<typeof import('./index')> | null = null
+let walletModule: typeof import('./index') | null = null
 let walletExistsCache: boolean | null = null
 
 /**
@@ -12,7 +15,10 @@ let walletExistsCache: boolean | null = null
 function loadWalletModule() {
   if (!walletModulePromise) {
     logger.info('📦 Lazy loading wallet module (monero-ts)...')
-    walletModulePromise = import('./index')
+    walletModulePromise = import('./index').then(mod => {
+      walletModule = mod
+      return mod
+    })
   }
   return walletModulePromise
 }
@@ -26,7 +32,6 @@ export async function checkWalletExists(): Promise<boolean> {
     return walletExistsCache
   }
 
-  const { getSetting } = await import('$lib/db')
   const [hasWalletSecrets, hasWalletMeta] = await Promise.all([
     getSetting('walletEncrypted'),
     getSetting('walletMetaInfo')
@@ -148,18 +153,22 @@ export async function hasStoredWallet() {
   return wallet.hasStoredWallet()
 }
 
-// Note: These will only work after wallet module is loaded (i.e., after hydrateWalletStateLazy or other wallet operations)
-// They return null if wallet module isn't loaded yet, which is fine since they're only used in wallet UI
 export function getCachedMnemonic(): string | null {
-  if (!walletModulePromise) return null
-  // This is a synchronous getter, but we can't await here
-  // The modal using this will only be shown after wallet is loaded
-  return null // Placeholder - will be handled by the modal loading the wallet first
+  return walletModule?.getCachedMnemonic() ?? null
 }
 
 export function getCachedSeed(): string | null {
-  if (!walletModulePromise) return null
-  return null // Placeholder
+  return walletModule?.getCachedSeed() ?? null
+}
+
+export async function requireWalletMasterKey(): Promise<string> {
+  const wallet = await loadWalletModule()
+  return wallet.requireWalletMasterKey()
+}
+
+export async function readWalletMasterKey(options: { allowCancel?: boolean } = {}): Promise<string | null> {
+  const wallet = await loadWalletModule()
+  return wallet.readWalletMasterKey(options)
 }
 
 // Better approach: Export a function that loads these on demand
@@ -172,4 +181,3 @@ export async function loadCachedSeed(): Promise<string | null> {
   const wallet = await loadWalletModule()
   return wallet.getCachedSeed()
 }
-

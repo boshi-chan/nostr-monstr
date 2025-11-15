@@ -3,7 +3,7 @@
  * Provides a clean interface to NDK with proper reactivity
  */
 
-import NDK, { NDKUser, NDKNip07Signer, NDKPrivateKeySigner } from '@nostr-dev-kit/ndk'
+import NDK, { type NDKUser, NDKNip07Signer, NDKPrivateKeySigner } from '@nostr-dev-kit/ndk'
 import { writable } from 'svelte/store'
 
 // Default relays - can be customized later

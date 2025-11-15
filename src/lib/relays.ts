@@ -4,6 +4,7 @@
  */
 
 import { getNDK, getCurrentNDKUser } from './ndk'
+import { NDKEvent } from '@nostr-dev-kit/ndk'
 
 export interface RelayConfig {
   url: string
@@ -84,7 +85,7 @@ export async function publishRelays(relays: RelayConfig[]): Promise<void> {
       throw new Error('No signer available')
     }
 
-    const event = new (await import('@nostr-dev-kit/ndk')).NDKEvent(ndk, {
+    const event = new NDKEvent(ndk, {
       kind: 10002,
       content: '',
       tags: relays.map(r => {

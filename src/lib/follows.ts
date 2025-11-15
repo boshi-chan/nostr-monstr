@@ -7,6 +7,7 @@
 import { getNDK, getCurrentNDKUser } from './ndk'
 import { following } from '$stores/feed'
 import { get } from 'svelte/store'
+import { NDKEvent } from '@nostr-dev-kit/ndk'
 
 /**
  * Get current contacts (follows) from NIP-03 (kind 3)
@@ -69,7 +70,7 @@ async function publishContactsList(contacts: Set<string>): Promise<void> {
       throw new Error('No signer available')
     }
 
-    const event = new (await import('@nostr-dev-kit/ndk')).NDKEvent(ndk, {
+    const event = new NDKEvent(ndk, {
       kind: 3,
       content: '',
       tags: Array.from(contacts).map(pubkey => ['p', pubkey]),

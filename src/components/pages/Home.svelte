@@ -5,8 +5,7 @@
     feedError,
   } from '$stores/feed'
 
-  import { feedSource, type FeedSource } from '$stores/feedSource'
-  import { showSearch } from '$stores/search'
+import { feedSource, type FeedSource } from '$stores/feedSource'
 
   import type { NostrEvent } from '$types/nostr'
   import Post from '../Post.svelte'
@@ -15,7 +14,6 @@
   import UsersIcon from '../icons/UsersIcon.svelte'
   import CircleIcon from '../icons/CircleIcon.svelte'
   import GlobeIcon from '../icons/GlobeIcon.svelte'
-  import SearchIcon from '../icons/SearchIcon.svelte'
   import { openPost, openProfile } from '$stores/router'
 
   const feedTabs: { id: FeedSource; label: string; icon: typeof UsersIcon }[] = [
@@ -70,16 +68,6 @@
         {/each}
       </div>
 
-      <!-- Search button (desktop only, moved to mobile menu) -->
-      <button
-        type="button"
-        on:click={() => showSearch.set(true)}
-        class="hidden md:flex h-10 w-10 items-center justify-center rounded-xl text-text-muted hover:text-text-soft hover:bg-dark/30 transition-colors duration-200 flex-shrink-0"
-        title="Search"
-        aria-label="Search"
-      >
-        <SearchIcon size={20} color="currentColor" strokeWidth={2} />
-      </button>
     </div>
 
     <!-- Filter Bar -->

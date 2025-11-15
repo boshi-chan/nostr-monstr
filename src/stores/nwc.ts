@@ -1,6 +1,6 @@
 import { writable, derived } from 'svelte/store'
 import { encryptWalletData, decryptWalletData } from '$lib/crypto'
-import { requireWalletMasterKey, readWalletMasterKey } from '$lib/wallet'
+import { requireWalletMasterKey, readWalletMasterKey } from '$lib/wallet/lazy'
 
 /**
  * Nostr Wallet Connect (NWC) state management

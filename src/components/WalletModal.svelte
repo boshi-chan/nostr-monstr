@@ -11,8 +11,10 @@
     deleteWallet,
     getTransactionHistory,
     unlockWallet,
+    getCachedMnemonic,
+    loadCachedMnemonic,
   } from '$lib/wallet/lazy'
-  import { getCachedMnemonic, type WalletInfo } from '$lib/wallet'
+  import type { WalletInfo } from '$types/wallet'
   import { toDataURL as qrToDataURL } from 'qrcode'
   import { CUSTOM_NODE_ID, DEFAULT_NODES, type MoneroNode } from '$lib/wallet/nodes'
   import LayoutGridIcon from 'lucide-svelte/icons/layout-grid'
@@ -31,6 +33,9 @@
   let loading = false
   let showSeedPhrase = false
   let recentWallet: WalletInfo | null = null
+  let cachedMnemonic: string | null = null
+  let mnemonicLoading = false
+  let mnemonicAttempted = false
   let nodeBusy: string | null = null
   let sendAddress = ''
   let sendAmount = ''
@@ -68,12 +73,34 @@
       : null
   $: nodes = customNodeEntry ? [...builtInNodes, customNodeEntry] : [...builtInNodes]
   $: selectedNodeId = $walletState.selectedNode ?? nodes[0]?.id
+  $: if (
+    walletMode === 'ready' &&
+    isOpen &&
+    !mnemonicAttempted &&
+    !cachedMnemonic &&
+    !mnemonicLoading
+  ) {
+    mnemonicAttempted = true
+    mnemonicLoading = true
+    loadCachedMnemonic()
+      .then(value => {
+        cachedMnemonic = value
+      })
+      .catch(err => {
+        console.warn('Failed to load cached mnemonic', err)
+      })
+      .finally(() => {
+        mnemonicLoading = false
+      })
+  }
+
   $: displayMnemonic =
     walletMode === 'ready'
-      ? recentWallet?.mnemonic ?? getCachedMnemonic()
+      ? recentWallet?.mnemonic ?? cachedMnemonic ?? getCachedMnemonic()
       : recentWallet?.mnemonic ?? null
   $: if (walletMode !== 'ready') {
     activePanel = 'overview'
+    mnemonicAttempted = false
   }
   $: if (!isOpen) {
     resetForm()
@@ -121,6 +148,8 @@
     customNodeError = null
     customNodeBusy = false
     customFormTouched = false
+    mnemonicAttempted = false
+    mnemonicLoading = false
   }
 
   function closeModal(): void {

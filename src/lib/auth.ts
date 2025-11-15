@@ -4,11 +4,31 @@
  */
 
 import { currentUser } from '$stores/auth'
+import {
+  likedEvents,
+  repostedEvents,
+  zappedEvents,
+  metadataCache,
+  userEventIds,
+  following,
+  circles,
+} from '$stores/feed'
+import {
+  conversations,
+  conversationMetadata,
+  conversationMessages,
+  activeConversation,
+  unreadCounts,
+  messagesLoading,
+  messagesError,
+} from '$stores/messages'
 import { getSetting, saveSetting } from './db'
 import { loginWithNIP07, logoutNDK } from './ndk'
 import type { User } from '$types/user'
 import type { NDKUser } from '@nostr-dev-kit/ndk'
 import { warmupMessagingPermissions, resetMessagingState } from '$lib/messaging-simple'
+import { stopAllSubscriptions, clearFeed } from './feed-ndk'
+import { stopNotificationListener } from '$lib/notifications'
 
 /**
  * Convert NDK user to our User type
@@ -147,80 +167,50 @@ export async function restoreSession(): Promise<User | null> {
  * Logout - properly cleanup NDK and stores
  */
 export async function logout(): Promise<void> {
-  logger.info('🚪 logout() called - starting cleanup')
+  logger.info('logout() called - starting cleanup')
 
   // Clear NDK signer
-  logger.info('🚪 Clearing NDK signer')
+  logger.info('Clearing NDK signer')
   logoutNDK()
 
   // Stop all feed subscriptions and clear feed
-  logger.info('🚪 Stopping subscriptions and clearing feed')
-  const { stopAllSubscriptions, clearFeed } = await import('./feed-ndk')
+  logger.info('Stopping subscriptions and clearing feed')
   stopAllSubscriptions()
   clearFeed()
   resetMessagingState()
 
   // Clear all feed state stores
-  logger.info('🚪 Clearing all feed state')
-  try {
-    const {
-      likedEvents,
-      repostedEvents,
-      zappedEvents,
-      metadataCache,
-      userEventIds,
-      following,
-      circles,
-    } = await import('$stores/feed')
+  logger.info('Clearing all feed state')
+  likedEvents.set(new Set())
+  repostedEvents.set(new Set())
+  zappedEvents.set(new Map())
+  metadataCache.set(new Map())
+  userEventIds.set(new Set())
+  following.set(new Set())
+  circles.set(new Set())
 
-    likedEvents.set(new Set())
-    repostedEvents.set(new Set())
-    zappedEvents.set(new Map())
-    metadataCache.set(new Map())
-    userEventIds.set(new Set())
-    following.set(new Set())
-    circles.set(new Set())
-
-    const {
-      conversations,
-      conversationMetadata,
-      conversationMessages,
-      activeConversation,
-      unreadCounts,
-      messagesLoading,
-      messagesError,
-    } = await import('$stores/messages')
-
-    conversations.set(new Map())
-    conversationMetadata.set(new Map())
-    conversationMessages.set([])
-    activeConversation.set(null)
-    unreadCounts.set(new Map())
-    messagesLoading.set(false)
-    messagesError.set(null)
-  } catch (err) {
-    logger.warn('Failed to clear feed stores:', err)
-  }
+  conversations.set(new Map())
+  conversationMetadata.set(new Map())
+  conversationMessages.set([])
+  activeConversation.set(null)
+  unreadCounts.set(new Map())
+  messagesLoading.set(false)
+  messagesError.set(null)
 
   // Stop notifications
-  logger.info('🚪 Stopping notifications')
-  try {
-    const { stopNotificationListener } = await import('$lib/notifications')
-    stopNotificationListener()
-  } catch (err) {
-    logger.warn('Failed to stop notifications:', err)
-  }
+  logger.info('Stopping notifications')
+  stopNotificationListener()
 
   // Clear storage
-  logger.info('🚪 Clearing storage')
+  logger.info('Clearing storage')
   await saveSetting('currentUser', null)
   await saveSetting('authMethod', null)
   await saveSetting('nostrConnectToken', null)
 
   // Clear store - this triggers reactive updates
-  logger.info('🚪 Setting currentUser to null (should trigger isAuthenticated = false)')
+  logger.info('Setting currentUser to null (should trigger isAuthenticated = false)')
   currentUser.set(null)
-  logger.info('🚪 Logout complete - currentUser.set(null) called')
+  logger.info('Logout complete - currentUser.set(null) called')
 }
 
 /**

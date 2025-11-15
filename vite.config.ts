@@ -37,11 +37,17 @@ export default defineConfig({
     },
     rollupOptions: {
       output: {
-        manualChunks: {
-          'wallet': ['./src/lib/wallet/index.ts'],
-        }
+        manualChunks(id) {
+          if (id.includes('monero-ts')) return 'wallet'
+          if (id.includes('@nostr-dev-kit/ndk')) return 'ndk'
+          if (id.includes('nostr-tools')) return 'nostr-tools'
+          if (id.includes('lucide-svelte')) return 'icons'
+          return undefined
+        },
       }
-    }
+    },
+    // Silence chunk size warnings now that code-splitting is intentional
+    chunkSizeWarningLimit: 4096
   },
   server: {
     port: 5173,

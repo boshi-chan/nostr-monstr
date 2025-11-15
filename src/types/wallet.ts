@@ -16,6 +16,14 @@ export interface WalletState {
   shareAddress: boolean
 }
 
+export interface WalletInfo {
+  seed: string
+  mnemonic: string
+  address: string
+  balance: number
+  unlockedBalance: number
+}
+
 export interface WalletConfig {
   seed?: string
 }

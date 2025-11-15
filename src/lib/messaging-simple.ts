@@ -203,10 +203,12 @@ export async function sendDirectMessage(recipientPubkey: string, content: string
     event.content = ciphertext
     event.tags = [['p', recipientPubkey]]
     await event.sign(signer)
+    if (event.id) {
+      markEventProcessed(event.id)
+    }
     await event.publish()
 
     rememberScheme(recipientPubkey, scheme)
-    markEventProcessed(event.id)
 
     const message: DirectMessage = {
       id: event.id!,

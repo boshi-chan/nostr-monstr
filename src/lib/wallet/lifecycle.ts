@@ -1,7 +1,7 @@
 import { get } from 'svelte/store'
 import { walletState } from '$stores/wallet'
 import { currentUser } from '$stores/auth'
-import { refreshWallet } from '$lib/wallet'
+import { refreshWallet } from '$lib/wallet/lazy'
 import type { User } from '$types/user'
 
 const SYNC_INTERVAL_MS = 60_000

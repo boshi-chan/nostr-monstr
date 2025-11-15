@@ -23,7 +23,7 @@ const notificationEventCache = new Map<string, NostrEvent>()
 async function getNotificationMetadata(pubkey: string) {
   let metadata = getUserMetadata(pubkey)
   if (!metadata) {
-    await fetchUserMetadata(pubkey)
+    void fetchUserMetadata(pubkey)
     metadata = getUserMetadata(pubkey)
   }
   return metadata ?? null
@@ -394,21 +394,28 @@ async function handleMentionNotification(event: NostrEvent, userPubkey: string):
 
 async function handleZapNotification(event: NostrEvent, userPubkey: string): Promise<boolean> {
   const targetEventId = findFirstEventReference(event)
-  if (!targetEventId) return false
-
   const amountTag = event.tags.find(tag => tag[0] === 'amount')?.[1]
   const amount = amountTag ? Math.floor(parseInt(amountTag, 10) / 1000) : 0
   if (!amount) return false
 
-  const userEvents = get(userEventIds)
-  if (!userEvents.has(targetEventId)) {
-    const target = await getTargetEvent(targetEventId)
-    if (!target || target.pubkey !== userPubkey) return false
-    ensureUserEventId(targetEventId)
-  }
+  let targetEvent: NostrEvent | null = null
+  let finalEventId: string = event.id
 
-  const targetEvent = await getTargetEvent(targetEventId)
-  if (!targetEvent || targetEvent.pubkey !== userPubkey) return false
+  if (targetEventId) {
+    const userEvents = get(userEventIds)
+    if (!userEvents.has(targetEventId)) {
+      const target = await getTargetEvent(targetEventId)
+      if (!target || target.pubkey !== userPubkey) return false
+      ensureUserEventId(targetEventId)
+    }
+
+    targetEvent = await getTargetEvent(targetEventId)
+    if (!targetEvent || targetEvent.pubkey !== userPubkey) return false
+    finalEventId = targetEventId
+  } else {
+    const profileTarget = findFirstTagValue(event, 'p')
+    if (profileTarget !== userPubkey) return false
+  }
 
   const metadata = await getNotificationMetadata(event.pubkey)
 
@@ -418,8 +425,8 @@ async function handleZapNotification(event: NostrEvent, userPubkey: string): Pro
     fromPubkey: event.pubkey,
     fromName: metadata?.name || metadata?.display_name || 'User',
     fromAvatar: metadata?.picture,
-    eventId: targetEventId,
-    eventContent: targetEvent.content.substring(0, 180),
+    eventId: finalEventId,
+    eventContent: targetEvent?.content.substring(0, 180) || event.content.substring(0, 180),
     amount,
     createdAt: event.created_at,
     read: false,

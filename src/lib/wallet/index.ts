@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Monero wallet integration powered by monero-ts.
  * Keys are generated client-side and stored encrypted with a local master key.
  * Integrates Monero hot wallet functionality plus Ember tipping helpers.
@@ -9,6 +9,7 @@ import { requestPinModal } from '$stores/pinPrompt'
 import { encryptWalletData, decryptWalletData } from '$lib/crypto'
 import { getSetting, saveSetting } from '$lib/db'
 import { getNDK, getCurrentNDKUser } from '$lib/ndk'
+import type { WalletInfo } from '$types/wallet'
 import type moneroTs from 'monero-ts'
 import { NDKEvent } from '@nostr-dev-kit/ndk'
 import type { MoneroNode } from './nodes'
@@ -17,14 +18,6 @@ import { getBrowserFs, resetBrowserFs } from './browser-fs'
 import type { SendMoneroOptions, SendMoneroResult } from '$types/wallet'
 import { EMBER_EVENT_KIND, EMBER_TAG, encodeEmberPayload } from '$lib/ember'
 import { setEmberAddressMetadata } from '$lib/profile'
-
-export interface WalletInfo {
-  seed: string
-  mnemonic: string
-  address: string
-  balance: number
-  unlockedBalance: number
-}
 
 type StoredWalletSecrets = {
   seed: string
@@ -784,27 +777,12 @@ export async function hydrateWalletState(): Promise<void> {
   let isReady = false
   let locked = hasWallet
 
-  if (hasWallet && meta) {
-    const key = await readMasterKey()
-    if (key) {
-      const secrets = await tryDecodeSecrets(encrypted, key)
-      if (secrets) {
-        cachedSecrets = secrets
-        walletKey = key
-        isReady = true
-        locked = false
-        // CRITICAL FIX: Don't sync profile address immediately during hydration!
-        // The metadata cache is empty at this point, which would wipe the profile.
-        // Instead, sync will happen later when the app is fully initialized and metadata is loaded.
-        // See: syncProfileAddressWhenReady() in App.svelte
-        logger.info('⏳ Wallet hydrated. Profile address sync will happen when metadata is ready.')
-        void refreshWalletInternal()
-      } else {
-        locked = true
-      }
-    } else {
-      locked = true
-    }
+    if (hasWallet && meta) {
+    // Stay locked until the user explicitly unlocks; do not prompt during hydration.
+    cachedSecrets = null
+    walletKey = null
+    isReady = false
+    locked = true
   } else {
     cachedSecrets = null
     walletKey = null
@@ -1137,4 +1115,6 @@ export async function requireWalletMasterKey(): Promise<string> {
 export async function readWalletMasterKey(opts: { allowCancel?: boolean } = {}): Promise<string | null> {
   return await readMasterKey(opts)
 }
+
+
 
