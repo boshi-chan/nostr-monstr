@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { walletState, showWallet } from '$stores/wallet'
+  import { walletState } from '$stores/wallet'
   import { showSearch } from '$stores/search'
-import { lockWallet, unlockWallet } from '$lib/wallet/lazy'
-import { showCanaryModal, showDonateModal } from '$stores/modals'
+  import { lockWallet, unlockWallet } from '$lib/wallet/lazy'
+  import { showCanaryModal, showDonateModal } from '$stores/modals'
+  import { navigateToPage } from '$stores/router'
   import LockIcon from 'lucide-svelte/icons/lock'
   import LockOpenIcon from 'lucide-svelte/icons/lock-open'
   import WalletIcon from 'lucide-svelte/icons/wallet'
@@ -101,7 +102,7 @@ import { showCanaryModal, showDonateModal } from '$stores/modals'
         type="button"
         class="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-white/10 text-emerald-200 transition hover:border-emerald-400/60 hover:text-emerald-100"
         aria-label={$walletState.hasWallet ? 'Open wallet' : 'Create wallet'}
-        on:click={() => showWallet.set(true)}
+        on:click={() => navigateToPage('settings')}
       >
         <WalletIcon size={15} />
       </button>

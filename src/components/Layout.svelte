@@ -12,12 +12,11 @@
   import Messages from './pages/Messages.svelte'
   import Profile from './pages/Profile.svelte'
   import { activeRoute } from '$stores/router'
-  import { showWallet, showEmberModal } from '$stores/wallet'
+  import { showEmberModal } from '$stores/wallet'
 
   let NotificationsPage: ComponentType | null = null
   let SettingsPage: ComponentType | null = null
   let PostViewPage: ComponentType | null = null
-  let WalletModalComp: ComponentType | null = null
   let EmberModalComp: ComponentType | null = null
   let LongReadsPage: ComponentType | null = null
 
@@ -25,7 +24,6 @@
   $: shouldLoadSettings = $activeRoute.type === 'page' && $activeRoute.tab === 'settings'
   $: shouldLoadPostView = $activeRoute.type === 'post'
   $: shouldLoadLongReads = $activeRoute.type === 'page' && $activeRoute.tab === 'long-reads'
-  $: shouldLoadWalletModal = $showWallet
   $: shouldLoadEmberModal = $showEmberModal
 
   $: if (shouldLoadNotifications && !NotificationsPage) {
@@ -42,10 +40,6 @@
 
   $: if (shouldLoadLongReads && !LongReadsPage) {
     import('./pages/LongReads.svelte').then(mod => (LongReadsPage = mod.default))
-  }
-
-  $: if (shouldLoadWalletModal && !WalletModalComp) {
-    import('./WalletModal.svelte').then(mod => (WalletModalComp = mod.default))
   }
 
   $: if (shouldLoadEmberModal && !EmberModalComp) {
@@ -121,9 +115,6 @@
   <ZapModal />
   <CanaryModal />
   <DonateModal />
-  {#if WalletModalComp}
-    <svelte:component this={WalletModalComp} />
-  {/if}
   {#if EmberModalComp}
     <svelte:component this={EmberModalComp} />
   {/if}

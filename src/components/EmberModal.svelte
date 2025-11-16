@@ -1,10 +1,11 @@
 <script lang="ts">
   import { fade } from 'svelte/transition'
-  import { walletState, showEmberModal, showWallet, emberTarget } from '$stores/wallet'
+  import { walletState, showEmberModal, emberTarget } from '$stores/wallet'
   import { sendMonero } from '$lib/wallet/lazy'
   import { incrementEmberTotal } from '$stores/ember'
   import EmberIcon from './icons/EmberIcon.svelte'
   import { EMBER_PRESET_AMOUNTS } from '$lib/ember'
+  import { navigateToPage } from '$stores/router'
 
   let amountInput = '0.001'
   let noteInput = ''
@@ -163,7 +164,7 @@
               type="button"
               class="ml-2 text-amber-200 underline"
               on:click={() => {
-                showWallet.set(true)
+                navigateToPage('settings')
                 closeModal()
               }}
             >

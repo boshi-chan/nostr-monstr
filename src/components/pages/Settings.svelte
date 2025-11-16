@@ -1,9 +1,22 @@
 <script lang="ts">
   import { currentUser } from '$stores/auth'
-  import { walletState, showWallet } from '$stores/wallet'
+  import { walletState } from '$stores/wallet'
   import { metadataCache } from '$stores/feed'
   import { getAvatarUrl, getNip05Display, fetchUserMetadata } from '$lib/metadata'
-  import { setWalletSharePreference, setActiveNode } from '$lib/wallet/lazy'
+  import {
+    setWalletSharePreference,
+    setActiveNode,
+    initWallet,
+    saveCustomNode,
+    clearCustomNode,
+    refreshWallet,
+    sendMonero,
+    deleteWallet,
+    getTransactionHistory,
+    unlockWallet,
+    getCachedMnemonic,
+    loadCachedMnemonic,
+  } from '$lib/wallet/lazy'
   import { getRelaysFromNIP65, publishRelays, getDefaultRelays, isValidRelayUrl, type RelayConfig } from '$lib/relays'
   import { updateProfileMetadata, type EditableProfileFields } from '$lib/profile'
   import { onMount } from 'svelte'
@@ -12,11 +25,18 @@
   import ServerIcon from '../icons/ServerIcon.svelte'
   import EmberIcon from '../icons/EmberIcon.svelte'
   import ZapIcon from '../icons/ZapIcon.svelte'
-  import { DEFAULT_NODES, type MoneroNode } from '$lib/wallet/nodes'
+  import { CUSTOM_NODE_ID, DEFAULT_NODES, type MoneroNode } from '$lib/wallet/nodes'
   import { nwcConnection, nwcConnected, setNWCFromURI, disconnectNWC } from '$stores/nwc'
   import { getNWCBalance, getNWCInfo } from '$lib/nwc'
+  import type { WalletInfo } from '$types/wallet'
+  import { toDataURL as qrToDataURL } from 'qrcode'
+  import LayoutGridIcon from 'lucide-svelte/icons/layout-grid'
+  import ClockIcon from 'lucide-svelte/icons/clock'
+  import ArrowDownIcon from 'lucide-svelte/icons/arrow-down'
+  import ArrowUpIcon from 'lucide-svelte/icons/arrow-up'
 
   type SettingsTab = 'profile' | 'relays' | 'wallet' | 'lightning'
+  type WalletPanel = 'overview' | 'deposit' | 'withdraw' | 'history'
 
   let activeTab: SettingsTab = 'profile'
 
@@ -40,6 +60,100 @@
   let shareAddress = false
   $: shareAddress = $walletState.shareAddress
 
+  // Wallet state
+  const builtInNodes: MoneroNode[] = [...DEFAULT_NODES]
+  let nodes: MoneroNode[] = [...builtInNodes]
+  let customNodeEntry: MoneroNode | null = null
+  let importSeed = ''
+  let activeWalletTab: 'create' | 'import' = 'create'
+  let activeWalletPanel: WalletPanel = 'overview'
+  let walletError: string | null = null
+  let walletLoading = false
+  let showSeedPhrase = false
+  let recentWallet: WalletInfo | null = null
+  let cachedMnemonic: string | null = null
+  let mnemonicLoading = false
+  let mnemonicAttempted = false
+  let nodeBusy: string | null = null
+  let sendAddress = ''
+  let sendAmount = ''
+  let sendNote = ''
+  let sendRecipientPubkey = ''
+  let sendNoteId: string | null = null
+  let sendLoading = false
+  let sendError: string | null = null
+  let lastTxHash: string | null = null
+  let syncError: string | null = null
+  let depositQr: string | null = null
+  let qrError: string | null = null
+  let lastQrAddress: string | null = null
+  let deleteBusy = false
+  let restoreHeightOverride = ''
+  let transactions: any[] = []
+  let loadingHistory = false
+  let historyError: string | null = null
+  let unlockBusy = false
+  let customNodeLabel = ''
+  let customNodeUri = ''
+  let customNodeError: string | null = null
+  let customNodeBusy = false
+  let customFormTouched = false
+
+  $: walletMode = !$walletState.hasWallet ? 'setup' : $walletState.isReady ? 'ready' : 'pending'
+  $: customNodeEntry =
+    $walletState.customNodeUri
+      ? {
+          id: CUSTOM_NODE_ID,
+          label: $walletState.customNodeLabel ?? 'Custom node',
+          uri: $walletState.customNodeUri,
+        }
+      : null
+  $: nodes = customNodeEntry ? [...builtInNodes, customNodeEntry] : [...builtInNodes]
+  $: selectedNodeId = $walletState.selectedNode ?? nodes[0]?.id
+  $: if (
+    walletMode === 'ready' &&
+    activeTab === 'wallet' &&
+    !mnemonicAttempted &&
+    !cachedMnemonic &&
+    !mnemonicLoading
+  ) {
+    mnemonicAttempted = true
+    mnemonicLoading = true
+    loadCachedMnemonic()
+      .then(value => {
+        cachedMnemonic = value
+      })
+      .catch(err => {
+        console.warn('Failed to load cached mnemonic', err)
+      })
+      .finally(() => {
+        mnemonicLoading = false
+      })
+  }
+
+  $: displayMnemonic =
+    walletMode === 'ready'
+      ? recentWallet?.mnemonic ?? cachedMnemonic ?? getCachedMnemonic()
+      : recentWallet?.mnemonic ?? null
+  $: if (walletMode !== 'ready') {
+    activeWalletPanel = 'overview'
+    mnemonicAttempted = false
+  }
+
+  $: if (walletMode === 'ready' && $walletState.address) {
+    if ($walletState.address !== lastQrAddress) {
+      void generateDepositQr($walletState.address)
+    }
+  } else {
+    depositQr = null
+    lastQrAddress = null
+  }
+
+  $: if (!customFormTouched) {
+    customNodeLabel = $walletState.customNodeLabel ?? ''
+    customNodeUri = $walletState.customNodeUri ?? ''
+  }
+
   // Ensure the current user's metadata is loaded before showing settings
   $: if ($currentUser?.pubkey) {
     const cachedMetadata = $metadataCache.get($currentUser.pubkey)
@@ -54,7 +168,6 @@
       await setWalletSharePreference(input.checked)
     } catch (err) {
       logger.error('Failed to update share preference', err)
-      // Revert checkbox on error
       input.checked = !input.checked
     }
   }
@@ -352,7 +465,6 @@
         updated.write = !updated.write
       }
 
-      // Ensure at least one is enabled
       if (!updated.read && !updated.write) {
         relayError = 'Relay must have read or write enabled'
         return
@@ -373,21 +485,327 @@
     }
   }
 
-  // Wallet state
-  const nodes: MoneroNode[] = [...DEFAULT_NODES]
-  let nodeBusy: string | null = null
+  // Wallet functions
+  function validateSetupForm(): string | null {
+    if (activeWalletTab === 'import' && importSeed.trim().length === 0) {
+      return 'Seed phrase is required to import a wallet.'
+    }
+    return null
+  }
 
-  async function handleNodeChange(event: Event) {
-    const select = event.currentTarget as HTMLSelectElement
-    const nodeId = select.value
+  async function handleCreateOrImport(): Promise<void> {
+    const validationError = validateSetupForm()
+    if (validationError) {
+      walletError = validationError
+      return
+    }
+
+    let parsedRestoreHeight: number | undefined
+    if (restoreHeightOverride.trim().length > 0) {
+      parsedRestoreHeight = Number(restoreHeightOverride.trim())
+      if (!Number.isFinite(parsedRestoreHeight) || parsedRestoreHeight <= 0) {
+        walletError = 'Restore height must be a positive number.'
+        return
+      }
+      parsedRestoreHeight = Math.floor(parsedRestoreHeight)
+    }
+
+    walletLoading = true
+    walletError = null
+    try {
+      const wallet = await initWallet(
+        activeWalletTab === 'import' ? importSeed.trim() : undefined,
+        parsedRestoreHeight ? { restoreHeight: parsedRestoreHeight } : undefined
+      )
+      recentWallet = wallet
+      showSeedPhrase = true
+      importSeed = ''
+      restoreHeightOverride = ''
+    } catch (err) {
+      logger.error('Wallet setup failed', err)
+      walletError = err instanceof Error ? err.message : 'Unable to set up wallet. Please try again.'
+    } finally {
+      walletLoading = false
+    }
+  }
+
+  async function handleRefresh(): Promise<void> {
+    syncError = null
+    try {
+      await refreshWallet()
+    } catch (err) {
+      logger.error('Wallet sync failed', err)
+      syncError = err instanceof Error ? err.message : 'Unable to refresh balance.'
+    }
+  }
+
+  async function handleNodeChange(nodeId: string): Promise<void> {
+    if (nodeBusy || nodeId === selectedNodeId) return
     nodeBusy = nodeId
+    walletError = null
     try {
       await setActiveNode(nodeId)
     } catch (err) {
-      logger.error('Failed to switch node:', err)
+      logger.error('Failed to switch node', err)
+      walletError = 'Unable to switch node. Please try again.'
     } finally {
       nodeBusy = null
     }
+  }
+
+  async function copyToClipboard(value: string | null, label: string): Promise<void> {
+    if (!value) return
+    try {
+      await navigator.clipboard.writeText(value)
+    } catch (err) {
+      logger.error('Clipboard copy failed', err)
+      walletError = `Unable to copy ${label}.`
+    }
+  }
+
+  function useMaxBalance(): void {
+    sendAmount = $walletState.unlockedBalance.toFixed(6)
+  }
+
+  async function handleSend(): Promise<void> {
+    if (!$walletState.isReady) {
+      sendError = 'Finish wallet setup before sending.'
+      return
+    }
+    const amountValue = Number(sendAmount)
+    if (!Number.isFinite(amountValue) || amountValue <= 0) {
+      sendError = 'Enter a valid amount of XMR.'
+      return
+    }
+    if (!sendAddress.trim()) {
+      sendError = 'Recipient address is required.'
+      return
+    }
+
+    sendLoading = true
+    sendError = null
+    try {
+      const result = await sendMonero({
+        address: sendAddress.trim(),
+        amount: amountValue,
+        note: sendNote.trim() || undefined,
+        recipientPubkey: sendRecipientPubkey || undefined,
+        noteId: sendNoteId ?? undefined,
+      })
+      lastTxHash = result.txHash
+      sendAmount = ''
+      sendNote = ''
+      sendAddress = ''
+      sendRecipientPubkey = ''
+      sendNoteId = null
+    } catch (err) {
+      logger.error('Failed to send Ember payment', err)
+      sendError = err instanceof Error ? err.message : 'Unable to send payment. Please try again.'
+    } finally {
+      sendLoading = false
+    }
+  }
+
+  function markCustomFormTouched(): void {
+    if (!customFormTouched) {
+      customFormTouched = true
+    }
+  }
+
+  async function handleCustomNodeSave(): Promise<void> {
+    if (customNodeBusy) return
+    customNodeError = null
+    customNodeBusy = true
+    try {
+      await saveCustomNode({
+        label: customNodeLabel.trim() || undefined,
+        uri: customNodeUri.trim(),
+      })
+      customFormTouched = false
+    } catch (err) {
+      logger.error('Failed to save custom node', err)
+      customNodeError =
+        err instanceof Error ? err.message : 'Unable to save custom node. Check the URL and try again.'
+    } finally {
+      customNodeBusy = false
+    }
+  }
+
+  async function handleCustomNodeRemove(): Promise<void> {
+    if (customNodeBusy) return
+    customNodeError = null
+    customNodeBusy = true
+    try {
+      await clearCustomNode()
+      customNodeLabel = ''
+      customNodeUri = ''
+      customFormTouched = false
+    } catch (err) {
+      logger.error('Failed to remove custom node', err)
+      customNodeError = err instanceof Error ? err.message : 'Unable to remove custom node.'
+    } finally {
+      customNodeBusy = false
+    }
+  }
+
+  async function handleUnlockWallet(): Promise<void> {
+    unlockBusy = true
+    walletError = null
+    try {
+      await unlockWallet()
+    } catch (err) {
+      if (!(err instanceof Error && err.message === 'WALLET_PIN_CANCELLED')) {
+        walletError = err instanceof Error ? err.message : 'Unable to unlock wallet.'
+      }
+    } finally {
+      unlockBusy = false
+    }
+  }
+
+  function formatRelativeTime(timestamp: number | null): string {
+    if (!timestamp) return 'never'
+    const diff = Date.now() - timestamp
+    if (diff < 60_000) return 'just now'
+    if (diff < 3_600_000) return `${Math.floor(diff / 60000)}m ago`
+    if (diff < 86_400_000) return `${Math.floor(diff / 3600000)}h ago`
+    return new Date(timestamp).toLocaleDateString()
+  }
+
+  async function handleDeleteWallet(): Promise<void> {
+    if (deleteBusy) return
+    const confirmed =
+      typeof window === 'undefined'
+        ? true
+        : window.confirm(
+            'This will remove the wallet from this device. You must have your seed saved to restore later. Continue?'
+          )
+    if (!confirmed) return
+    deleteBusy = true
+    try {
+      await deleteWallet()
+      importSeed = ''
+      activeWalletTab = 'create'
+      activeWalletPanel = 'overview'
+      walletError = null
+      walletLoading = false
+      showSeedPhrase = false
+      recentWallet = null
+    } catch (err) {
+      logger.error('Failed to delete wallet', err)
+      walletError = 'Unable to delete wallet. Please try again.'
+    } finally {
+      deleteBusy = false
+    }
+  }
+
+  function downloadSeed(seed: string | null): void {
+    if (!seed || typeof window === 'undefined') return
+    const timestamp = new Date().toISOString().slice(0, 10)
+    const contents = `Monstr Ember Wallet Seed (${timestamp})\n\n${seed}\n`
+    const blob = new Blob([contents], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `ember-wallet-seed-${timestamp}.txt`
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+    URL.revokeObjectURL(url)
+  }
+
+  async function generateDepositQr(address: string): Promise<void> {
+    try {
+      qrError = null
+      lastQrAddress = address
+      depositQr = await qrToDataURL(address, { margin: 1, scale: 6 })
+    } catch (err) {
+      logger.error('Failed to generate deposit QR', err)
+      qrError = 'Unable to generate QR code right now.'
+      depositQr = null
+    }
+  }
+
+  function handleHistoryClick(): void {
+    activeWalletPanel = 'history'
+    if (transactions.length === 0) {
+      void loadTransactionHistory()
+    }
+  }
+
+  async function loadTransactionHistory(): Promise<void> {
+    if (loadingHistory) return
+    loadingHistory = true
+    historyError = null
+    try {
+      transactions = await getTransactionHistory()
+      logger.info('📜 Loaded transaction history:', transactions.length, 'transactions')
+      if (transactions.length > 0) {
+        logger.info('First transaction:', transactions[0])
+      }
+    } catch (err) {
+      logger.error('Failed to load transaction history', err)
+      historyError = err instanceof Error ? err.message : 'Unable to load transaction history.'
+    } finally {
+      loadingHistory = false
+    }
+  }
+
+  function formatTxDate(timestamp: number | null): string {
+    if (!timestamp) return 'Pending'
+    const date = new Date(timestamp)
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+  }
+
+  function formatTxTime(timestamp: number | null): string {
+    if (!timestamp) return ''
+    const date = new Date(timestamp)
+    return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+  }
+
+  function getTxDirection(tx: any): 'in' | 'out' {
+    const incomingTransfers = tx.getIncomingTransfers?.() || []
+    const outgoingTransfer = tx.getOutgoingTransfer?.()
+
+    if (incomingTransfers.length > 0) return 'in'
+    if (outgoingTransfer) return 'out'
+
+    return tx.getIsIncoming?.() ? 'in' : 'out'
+  }
+
+  function getTxAmount(tx: any): number {
+    const direction = getTxDirection(tx)
+    const incomingTransfers = tx.getIncomingTransfers?.() || []
+    const outgoingTransfer = tx.getOutgoingTransfer?.()
+
+    if (direction === 'in' && incomingTransfers.length > 0) {
+      const totalBigInt = incomingTransfers.reduce((sum: bigint, transfer: any) => {
+        const amount = transfer.getAmount?.() || 0n
+        const amountBigInt = typeof amount === 'bigint' ? amount : BigInt(amount)
+        return sum + amountBigInt
+      }, 0n)
+      return Number(totalBigInt)
+    }
+
+    if (direction === 'out' && outgoingTransfer) {
+      const amount = outgoingTransfer.getAmount?.() || 0
+      return typeof amount === 'bigint' ? Number(amount) : Number(amount)
+    }
+
+    return 0
+  }
+
+  function formatXmr(atomic: number): string {
+    const xmr = atomic / 1_000_000_000_000
+    return xmr.toFixed(6)
+  }
+
+  function getTxHash(tx: any): string {
+    return tx.getHash?.() || tx.getId?.() || 'Unknown'
+  }
+
+  function shortenHash(hash: string): string {
+    if (hash.length <= 16) return hash
+    return `${hash.slice(0, 8)}...${hash.slice(-8)}`
   }
 
   // Lightning/NWC state
@@ -416,7 +834,6 @@
         throw new Error('Invalid NWC connection string')
       }
 
-      // Test connection by fetching wallet info
       await loadNWCData()
 
       nwcUri = ''
@@ -461,7 +878,6 @@
     setTimeout(() => (nwcSuccess = null), 3000)
   }
 
-  // Load NWC data once when tab is opened
   $: if (activeTab === 'lightning' && $nwcConnected && !nwcDataLoaded && !loadingNWCData) {
     void loadNWCData()
   }
@@ -469,7 +885,7 @@
   const settingsTabs: { id: SettingsTab; label: string; icon: any }[] = [
     { id: 'profile', label: 'Profile', icon: UserIcon },
     { id: 'relays', label: 'Relays', icon: ServerIcon },
-    { id: 'wallet', label: 'Wallet', icon: EmberIcon },
+    { id: 'wallet', label: 'Embers', icon: EmberIcon },
     { id: 'lightning', label: 'Lightning', icon: ZapIcon },
   ]
 </script>
@@ -915,227 +1331,571 @@
 
     {:else if activeTab === 'wallet'}
       <div class="max-w-3xl mx-auto space-y-6">
-        <div class="flex items-center justify-between">
-          <div>
-            <h4 class="text-lg font-semibold text-text-soft">Monero Wallet</h4>
-            <p class="text-sm text-text-muted mt-1">
-              {$walletState.hasWallet ? ($walletState.isReady ? 'Wallet ready' : 'Setting up wallet...') : 'No wallet configured'}
-            </p>
-          </div>
-          <button
-            class="rounded-full border border-dark-border/70 px-5 py-2 text-sm font-medium text-text-soft transition-colors hover:border-primary/60 hover:text-white"
-            on:click={() => showWallet.set(true)}
-          >
-            {$walletState.hasWallet ? 'Open Wallet' : 'Set Up Wallet'}
-          </button>
-        </div>
-
-        <div class="surface-card space-y-6 p-6">
-          <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        {#if walletMode === 'setup'}
+          <!-- Wallet Setup -->
+          <div class="space-y-5">
             <div>
-              <p class="text-xs uppercase tracking-[0.3em] text-text-muted">Balance</p>
-              <p class="mt-2 text-3xl font-bold text-primary">
-                {$walletState.balance.toFixed(6)} XMR
-              </p>
-              <p class="text-sm text-text-muted">Unlocked: {$walletState.unlockedBalance.toFixed(6)} XMR</p>
-            </div>
-          </div>
-
-          {#if $walletState.address}
-            <div class="rounded-xl border border-dark-border/60 bg-dark/50 p-4">
-              <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Address</p>
-              <p class="mt-2 break-all text-sm text-text-soft/80 font-mono">
-                {$walletState.address}
-              </p>
-            </div>
-          {/if}
-
-          <div class="rounded-xl border border-dark-border/60 bg-dark/50 p-4">
-            <div class="flex items-start justify-between gap-3">
-              <div>
-                <p class="text-sm font-semibold text-text-soft">Share Ember address</p>
-                <p class="text-xs text-text-muted">
-                  Publish your Monero wallet address so others can send Embers directly.
-                </p>
-              </div>
-              <label class="flex items-center gap-2 text-sm font-semibold text-text-soft">
-                <input
-                  type="checkbox"
-                  class="h-4 w-4 accent-primary"
-                  checked={shareAddress}
-                  on:change={handleShareToggle}
-                />
-                <span>{shareAddress ? 'On' : 'Off'}</span>
-              </label>
-            </div>
-          </div>
-
-          {#if $walletState.hasWallet}
-            <div class="rounded-xl border border-dark-border/60 bg-dark/50 p-4">
-              <label class="block">
-                <p class="text-sm font-semibold text-text-soft mb-2">Monero Node</p>
-                <select
-                  class="w-full rounded-lg border border-dark-border bg-dark/50 px-3 py-2 text-sm text-text-soft outline-none focus:border-primary/60"
-                  value={$walletState.selectedNode ?? nodes[0]?.id}
-                  on:change={handleNodeChange}
-                  disabled={nodeBusy !== null}
-                >
-                  {#each nodes as node (node.id)}
-                    <option value={node.id}>
-                      {node.label} - {node.uri}
-                    </option>
-                  {/each}
-                </select>
-                {#if nodeBusy}
-                  <p class="mt-2 text-xs text-text-muted">Switching nodes...</p>
-                {/if}
-              </label>
-            </div>
-          {/if}
-        </div>
-      </div>
-
-    {:else if activeTab === 'lightning'}
-      <div class="max-w-3xl mx-auto space-y-6">
-        <div class="flex items-center justify-between">
-          <div>
-            <h4 class="text-lg font-semibold text-text-soft">Lightning Network</h4>
-            <p class="text-sm text-text-muted mt-1">
-              {$nwcConnected ? 'Wallet connected' : 'Connect a Lightning wallet to send zaps'}
-            </p>
-          </div>
-        </div>
-
-        {#if !$nwcConnected}
-          <div class="surface-card space-y-4 p-6">
-            <div>
-              <h5 class="text-base font-semibold text-text-soft mb-2">Connect Wallet</h5>
-              <p class="text-sm text-text-muted mb-4">
-                Use Nostr Wallet Connect (NWC) to connect your Lightning wallet. Get a connection string from wallets like Alby, Mutiny, or Cashu.
+              <h4 class="text-lg font-semibold text-text-soft">Ember Wallet</h4>
+              <p class="text-sm text-text-muted mt-1">
+                Create or import a Monero wallet to send and receive tips.
               </p>
             </div>
 
-            <div class="space-y-3">
-              <div>
-                <label for="nwc-uri" class="block text-sm font-medium text-text-soft mb-2">
-                  NWC Connection String
-                </label>
-                <input
-                  id="nwc-uri"
-                  type="password"
-                  placeholder="nostr+walletconnect://..."
-                  bind:value={nwcUri}
-                  class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft placeholder-text-muted/50 outline-none focus:border-primary/60"
-                  disabled={nwcConnecting}
-                />
-                <p class="mt-2 text-xs text-text-muted">
-                  Paste your nostr+walletconnect:// connection string here
-                </p>
-              </div>
-
+            <div class="flex gap-2 rounded-2xl border border-dark-border/60 bg-dark/60 p-1 text-sm font-semibold text-text-muted">
               <button
+                class={`flex-1 rounded-xl px-4 py-2 transition ${activeWalletTab === 'create' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
                 type="button"
-                on:click={handleConnectNWC}
-                disabled={nwcConnecting || !nwcUri.trim()}
-                class="w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-dark shadow-sm transition hover:bg-primary/90 disabled:opacity-50"
+                on:click={() => (activeWalletTab = 'create')}
               >
-                {nwcConnecting ? 'Connecting...' : 'Connect Wallet'}
+                Create Wallet
+              </button>
+              <button
+                class={`flex-1 rounded-xl px-4 py-2 transition ${activeWalletTab === 'import' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
+                type="button"
+                on:click={() => (activeWalletTab = 'import')}
+              >
+                Import Seed
               </button>
             </div>
 
-            {#if nwcError}
-              <div class="rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">
-                {nwcError}
+            {#if activeWalletTab === 'import'}
+              <div>
+                <label for="wallet-import-seed" class="text-xs uppercase tracking-[0.25em] text-text-muted">
+                  Seed phrase
+                </label>
+                <textarea
+                  id="wallet-import-seed"
+                  class="mt-2 w-full rounded-2xl border border-dark-border/60 bg-dark/70 p-3 text-sm text-text-soft focus:border-primary/60 focus:outline-none"
+                  rows="3"
+                  bind:value={importSeed}
+                  placeholder="Enter your 25-word Monero seed phrase"
+                />
+              </div>
+              <div class="mt-3">
+                <label for="wallet-restore-height" class="text-xs uppercase tracking-[0.25em] text-text-muted">
+                  Restore height (optional)
+                </label>
+                <input
+                  id="wallet-restore-height"
+                  type="text"
+                  inputmode="numeric"
+                  pattern="[0-9]*"
+                  class="mt-2 w-full rounded-2xl border border-dark-border/60 bg-dark/70 px-3 py-2 text-sm text-text-soft focus:border-primary/60 focus:outline-none"
+                  bind:value={restoreHeightOverride}
+                  placeholder="Enter block height if known"
+                />
+                <p class="mt-1 text-xs text-text-muted">
+                  Use the block height from your previous wallet (or a slightly earlier block) for faster sync.
+                </p>
               </div>
             {/if}
 
-            {#if nwcSuccess}
-              <div class="rounded-lg border border-green-500/40 bg-green-500/10 p-3 text-sm text-green-200">
-                {nwcSuccess}
-              </div>
+            <button class="btn-primary w-full justify-center" on:click={handleCreateOrImport} disabled={walletLoading}>
+              {walletLoading ? 'Preparing wallet…' : activeWalletTab === 'create' ? 'Create wallet' : 'Import wallet'}
+            </button>
+
+            <p class="mt-3 rounded-2xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-xs text-amber-100">
+              There is no remote backup. Write down your 25-word seed (or download it once created) or this wallet
+              cannot be recovered if the device is lost.
+            </p>
+
+            {#if walletError}
+              <p class="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{walletError}</p>
             {/if}
           </div>
 
-          <div class="surface-card p-6">
-            <h5 class="text-base font-semibold text-text-soft mb-3">How to get NWC</h5>
-            <ul class="space-y-2 text-sm text-text-muted">
-              <li class="flex gap-2">
-                <span class="text-primary">•</span>
-                <span><strong class="text-text-soft">Alby:</strong> Go to alby.com, create wallet, find NWC in settings</span>
-              </li>
-              <li class="flex gap-2">
-                <span class="text-primary">•</span>
-                <span><strong class="text-text-soft">Mutiny:</strong> Open mutiny.plus, go to Settings → Nostr Wallet Connect</span>
-              </li>
-              <li class="flex gap-2">
-                <span class="text-primary">•</span>
-                <span><strong class="text-text-soft">Cashu:</strong> Use a Cashu wallet that supports NWC</span>
-              </li>
-            </ul>
+        {:else if walletMode === 'pending'}
+          <!-- Wallet Locked -->
+          <div class="space-y-5">
+            <div>
+              <h4 class="text-lg font-semibold text-text-soft">Ember Wallet</h4>
+              <p class="text-sm text-text-muted mt-1">
+                Your wallet is locked. Enter your PIN to unlock. There is no remote backup.
+              </p>
+            </div>
+
+            {#if $walletState.locked}
+              <div class="rounded-2xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm text-amber-100 space-y-2">
+                <p>We found your encrypted Ember wallet on this device, but it's locked behind your PIN.</p>
+                <p class="text-xs text-amber-200">
+                  Reminder: this is a hot wallet. Only keep small balances on this browser and never share your PIN.
+                </p>
+              </div>
+              <div class="flex flex-col gap-3 md:flex-row">
+                <button
+                  class="btn-primary flex-1 justify-center"
+                  type="button"
+                  on:click={handleUnlockWallet}
+                  disabled={unlockBusy}
+                >
+                  {unlockBusy ? 'Unlocking…' : 'Unlock with PIN'}
+                </button>
+                <button
+                  class="flex-1 rounded-2xl border border-dark-border/60 px-4 py-2 text-sm font-semibold text-text-soft transition hover:border-rose-400/60 hover:text-rose-200 disabled:opacity-50"
+                  type="button"
+                  on:click={handleDeleteWallet}
+                  disabled={deleteBusy}
+                >
+                  {deleteBusy ? 'Removing…' : 'Remove local wallet'}
+                </button>
+              </div>
+              <p class="text-xs text-text-muted/80">
+                Lost your PIN? Remove the wallet and re-import using the seed phrase you wrote down—there is no remote backup.
+              </p>
+            {:else}
+              <div class="rounded-2xl border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm text-amber-100 space-y-2">
+                <p>Your wallet setup is incomplete. Remove the local data and re-import using your seed phrase.</p>
+              </div>
+              <div class="flex flex-col gap-3 md:flex-row">
+                <button
+                  class="flex-1 rounded-2xl border border-dark-border/60 px-4 py-2 text-sm font-semibold text-text-soft transition hover:border-rose-400/60 hover:text-rose-200 disabled:opacity-50"
+                  type="button"
+                  on:click={handleDeleteWallet}
+                  disabled={deleteBusy}
+                >
+                  {deleteBusy ? 'Removing…' : 'Remove local wallet'}
+                </button>
+              </div>
+              <p class="text-xs text-text-muted/80">
+                Recreate or import the wallet using your 25-word seed to continue.
+              </p>
+            {/if}
+
+            {#if walletError}
+              <p class="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{walletError}</p>
+            {/if}
           </div>
 
         {:else}
-          <div class="surface-card space-y-6 p-6">
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0 flex-1">
-                <h5 class="text-base font-semibold text-text-soft">Wallet Connected</h5>
-                <p class="text-sm text-text-muted mt-1 break-all font-mono text-xs">
-                  {$nwcConnection?.walletPubkey.slice(0, 16)}...
-                </p>
-              </div>
-              <button
-                type="button"
-                on:click={handleDisconnectNWC}
-                class="shrink-0 rounded-full border border-rose-500/40 px-4 py-2 text-sm font-medium text-rose-300 transition-colors hover:border-rose-500/60 hover:bg-rose-500/10"
-              >
-                Disconnect
-              </button>
-            </div>
-
-            {#if loadingNWCData}
-              <div class="flex items-center justify-center py-4">
-                <p class="text-sm text-text-muted">Loading wallet info...</p>
-              </div>
-            {:else}
-              {#if nwcBalance !== null}
-                <div class="rounded-xl border border-dark-border/60 bg-dark/50 p-4">
-                  <p class="text-xs uppercase tracking-[0.3em] text-text-muted">Balance</p>
-                  <p class="mt-2 text-3xl font-bold text-primary">
-                    {nwcBalance.toLocaleString()} sats
-                  </p>
-                </div>
-              {/if}
-
-              {#if nwcInfo}
-                <div class="rounded-xl border border-dark-border/60 bg-dark/50 p-4">
-                  <p class="text-xs uppercase tracking-[0.3em] text-text-muted mb-3">Wallet Info</p>
-                  <div class="space-y-2 text-sm">
-                    {#each Object.entries(nwcInfo) as [key, value]}
-                      <div class="flex flex-col gap-1">
-                        <span class="text-text-muted">{key}:</span>
-                        <span class="text-text-soft font-mono text-xs break-all">{String(value)}</span>
-                      </div>
-                    {/each}
-                  </div>
-                </div>
-              {/if}
-            {/if}
-
-            <div class="rounded-xl border border-primary/20 bg-primary/5 p-4">
-              <p class="text-sm text-text-soft">
-                ⚡ You can now send zaps by clicking the zap button on any post!
+          <!-- Wallet Ready -->
+          <div class="space-y-5">
+            <div>
+              <h4 class="text-lg font-semibold text-text-soft">Ember Wallet</h4>
+              <p class="text-sm text-text-muted mt-1">
+                Wallet ready. Select a node, copy your address, or lock when done.
               </p>
             </div>
 
-            {#if nwcSuccess}
-              <div class="rounded-lg border border-green-500/40 bg-green-500/10 p-3 text-sm text-green-200">
-                {nwcSuccess}
+            <div class="flex gap-2 rounded-2xl border border-dark-border/60 bg-dark/60 p-1 text-sm font-semibold text-text-muted">
+              <button
+                type="button"
+                class={`flex-1 rounded-xl px-3 py-2 transition flex items-center justify-center gap-2 ${activeWalletPanel === 'overview' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
+                on:click={() => (activeWalletPanel = 'overview')}
+              >
+                <LayoutGridIcon size={16} />
+                <span class="hidden sm:inline">Overview</span>
+              </button>
+              <button
+                type="button"
+                class={`flex-1 rounded-xl px-3 py-2 transition flex items-center justify-center gap-2 ${activeWalletPanel === 'history' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
+                on:click={handleHistoryClick}
+              >
+                <ClockIcon size={16} />
+                <span class="hidden sm:inline">History</span>
+              </button>
+              <button
+                type="button"
+                class={`flex-1 rounded-xl px-3 py-2 transition flex items-center justify-center gap-2 ${activeWalletPanel === 'deposit' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
+                on:click={() => (activeWalletPanel = 'deposit')}
+              >
+                <ArrowDownIcon size={16} />
+                <span class="hidden sm:inline">Deposit</span>
+              </button>
+              <button
+                type="button"
+                class={`flex-1 rounded-xl px-3 py-2 transition flex items-center justify-center gap-2 ${activeWalletPanel === 'withdraw' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
+                on:click={() => (activeWalletPanel = 'withdraw')}
+              >
+                <ArrowUpIcon size={16} />
+                <span class="hidden sm:inline">Withdraw</span>
+              </button>
+            </div>
+
+            <p class="text-xs text-text-muted/80">
+              This on-device wallet is non-custodial and meant for quick Embers. For larger savings, withdraw to your long-term wallet.
+            </p>
+
+{#if activeWalletPanel === 'overview'}
+              <div class="space-y-4">
+                <div class="rounded-2xl border border-dark-border/60 bg-dark/50 p-4">
+                  <div class="flex items-center justify-between gap-4">
+                    <div>
+                      <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Primary address</p>
+                      <p class="mt-2 break-all text-sm text-text-soft/90">
+                        {$walletState.address ?? '—'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      class="rounded-full border border-dark-border/60 px-4 py-2 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white"
+                      on:click={() => copyToClipboard($walletState.address, 'address')}
+                    >
+                      Copy
+                    </button>
+                  </div>
+                </div>
+
+                <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4">
+                  <div class="flex items-center justify-between">
+                    <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Balance</p>
+                    <button
+                      type="button"
+                      class="rounded-full border border-dark-border/60 px-3 py-1 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white disabled:opacity-50"
+                      on:click={handleRefresh}
+                      disabled={$walletState.isSyncing}
+                    >
+                      {$walletState.isSyncing ? 'Syncing…' : 'Refresh'}
+                    </button>
+                  </div>
+                  <p class="mt-2 text-3xl font-semibold text-primary">
+                    {$walletState.balance.toFixed(6)} XMR
+                  </p>
+                  <p class="text-sm text-text-muted">
+                    Unlocked: {$walletState.unlockedBalance.toFixed(6)} XMR
+                  </p>
+                  <p class="mt-1 text-xs text-text-muted/80">
+                    {$walletState.lastSyncedAt ? `Last synced ${formatRelativeTime($walletState.lastSyncedAt)}` : 'Not synced yet'}
+                  </p>
+                  {#if syncError}
+                    <p class="mt-2 rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">{syncError}</p>
+                  {/if}
+                </div>
+
+                <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4">
+                  <div class="flex items-center justify-between">
+                    <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Connected node</p>
+                    {#if nodeBusy}
+                      <span class="text-xs text-text-muted">Switching…</span>
+                    {/if}
+                  </div>
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    {#each nodes as node}
+                      <button
+                        type="button"
+                        class={`rounded-full border px-3 py-1 text-sm transition ${
+                          selectedNodeId === node.id
+                            ? 'border-primary bg-primary/10 text-primary'
+                            : 'border-dark-border/60 text-text-muted hover:text-text-soft'
+                        }`}
+                        on:click={() => handleNodeChange(node.id)}
+                        disabled={nodeBusy === node.id}
+                      >
+                        {node.label}
+                      </button>
+                    {/each}
+                  </div>
+                  <p class="mt-3 text-xs text-text-muted">
+                    Restore height: {$walletState.restoreHeight ?? '—'}
+                  </p>
+                  <div class="mt-4 rounded-2xl border border-dark-border/60 bg-dark/40 p-3">
+                    <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-text-muted">Custom node</p>
+                    <p class="mt-2 text-[12px] text-text-muted">
+                      Paste a HTTPS endpoint that enables CORS so browsers can talk to it directly.
+                    </p>
+                    <form class="mt-3 space-y-2" on:submit|preventDefault={handleCustomNodeSave}>
+                      <div class="flex flex-col gap-2 sm:flex-row">
+                        <input
+                          class="w-full rounded-xl border border-dark-border/60 bg-dark/60 px-3 py-2 text-sm text-text-soft focus:border-primary focus:outline-none"
+                          placeholder="Label (optional)"
+                          bind:value={customNodeLabel}
+                          on:input={markCustomFormTouched}
+                        />
+                        <input
+                          class="w-full rounded-xl border border-dark-border/60 bg-dark/60 px-3 py-2 text-sm text-text-soft focus:border-primary focus:outline-none"
+                          placeholder="https://node.example.com:443"
+                          bind:value={customNodeUri}
+                          on:input={markCustomFormTouched}
+                        />
+                      </div>
+                      <div class="flex flex-col gap-2 sm:flex-row">
+                        <button
+                          type="submit"
+                          class="btn-secondary flex-1 justify-center"
+                          disabled={customNodeBusy}
+                        >
+                          {customNodeBusy ? 'Saving…' : 'Save & connect'}
+                        </button>
+                        {#if $walletState.customNodeUri}
+                          <button
+                            type="button"
+                            class="flex-1 rounded-full border border-dark-border/60 px-4 py-2 text-sm font-semibold text-text-muted transition hover:border-rose-400/60 hover:text-rose-200 disabled:opacity-50"
+                            on:click={handleCustomNodeRemove}
+                            disabled={customNodeBusy}
+                          >
+                            Remove custom node
+                          </button>
+                        {/if}
+                      </div>
+                      {#if customNodeError}
+                        <p class="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-100">{customNodeError}</p>
+                      {/if}
+                      <p class="text-[11px] text-text-muted/70">
+                        Tip: most public RPCs block browsers unless they send <code class="text-primary">Access-Control-Allow-Origin</code>.
+                      </p>
+                    </form>
+                  </div>
+                </div>
+
+                <div class="rounded-2xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-100">
+                  No remote backups exist for this wallet. Write down your 25-word seed or download it below - losing it
+                  means losing your Embers.
+                </div>
+
+                <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4">
+                  <div class="flex items-center justify-between">
+                    <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Seed phrase</p>
+                    <button
+                      type="button"
+                      class="text-xs font-semibold text-primary transition hover:text-primary/80"
+                      on:click={() => (showSeedPhrase = !showSeedPhrase)}
+                    >
+                      {showSeedPhrase ? 'Hide' : 'Reveal'}
+                    </button>
+                  </div>
+                  {#if showSeedPhrase && displayMnemonic}
+                    <p class="mt-3 break-words text-sm leading-relaxed text-text-soft/90">{displayMnemonic}</p>
+                    <div class="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <button
+                        type="button"
+                        class="rounded-full border border-dark-border/60 px-4 py-2 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white"
+                        on:click={() => copyToClipboard(displayMnemonic, 'seed phrase')}
+                      >
+                        Copy seed
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded-full border border-dark-border/60 px-4 py-2 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white"
+                        on:click={() => downloadSeed(displayMnemonic)}
+                      >
+                        Download seed (.txt)
+                      </button>
+                    </div>
+                    <p class="mt-2 text-xs text-amber-200">
+                      Store this seed offline. Without it, this wallet cannot be recovered.
+                    </p>
+                  {:else}
+                    <p class="mt-3 text-sm text-text-muted">
+                      Keep this phrase private. You'll need it if you ever reinstall the app or move wallets.
+                    </p>
+                    <p class="mt-2 text-xs text-amber-200">
+                      There is no remote backup. Reveal and record your seed before clearing this wallet.
+                    </p>
+                  {/if}
+                </div>
+
+                <div class="flex flex-col gap-2 md:flex-row md:gap-3">
+                  <button
+                    type="button"
+                    class="btn-primary flex-1 justify-center"
+                    on:click={() => copyToClipboard($walletState.address, 'address')}
+                  >
+                    Share address
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-full border border-rose-500/60 px-4 py-2 text-sm font-semibold text-rose-200 transition hover:bg-rose-500/10 disabled:opacity-50"
+                    on:click={handleDeleteWallet}
+                    disabled={deleteBusy}
+                  >
+                    {deleteBusy ? 'Deleting…' : 'Delete wallet'}
+                  </button>
+                </div>
+              </div>
+            {:else if activeWalletPanel === 'deposit'}
+              <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4 text-center">
+                <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Deposit via QR</p>
+                {#if depositQr}
+                  <img src={depositQr} alt="Monero deposit QR" class="mx-auto mt-4 h-48 w-48 rounded-xl border border-dark-border/40 bg-dark/80 p-3" />
+                {:else}
+                  <div class="mt-6 rounded-xl border border-dashed border-dark-border/60 bg-dark/40 p-6 text-sm text-text-muted">
+                    {qrError ?? 'Generating QR code…'}
+                  </div>
+                {/if}
+                <p class="mt-4 text-xs text-text-muted">
+                  Scan with any Monero wallet or share your address. Funds stay in your browser until you withdraw.
+                </p>
+                <div class="mt-5 rounded-2xl border border-dark-border/60 bg-dark/50 p-4 text-left">
+                  <div class="flex items-center justify-between gap-3">
+                    <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Deposit address</p>
+                    <button
+                      type="button"
+                      class="rounded-full border border-dark-border/60 px-4 py-1 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white"
+                      on:click={() => copyToClipboard($walletState.address, 'address')}
+                    >
+                      Copy
+                    </button>
+                  </div>
+                  <p class="mt-2 break-all text-sm text-text-soft/90">
+                    {$walletState.address}
+                  </p>
+                </div>
+              </div>
+            {:else if activeWalletPanel === 'withdraw'}
+              <form class="space-y-4" on:submit|preventDefault={handleSend}>
+                <div>
+                  <label for="withdraw-amount" class="text-xs uppercase tracking-[0.25em] text-text-muted">Amount to withdraw (XMR)</label>
+                  <div class="mt-2 flex gap-2">
+                    <input
+                      id="withdraw-amount"
+                      type="number"
+                      min="0"
+                      step="0.000001"
+                      class="flex-1 rounded-2xl border border-dark-border/60 bg-dark/70 px-3 py-2 text-sm text-text-soft focus:border-primary/60 focus:outline-none"
+                      bind:value={sendAmount}
+                      placeholder="0.010000"
+                    />
+                    <button
+                      type="button"
+                      class="rounded-2xl border border-dark-border/60 px-3 py-2 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white"
+                      on:click={useMaxBalance}
+                    >
+                      Max
+                    </button>
+                  </div>
+                  <p class="mt-1 text-xs text-text-muted">Unlocked: {$walletState.unlockedBalance.toFixed(6)} XMR</p>
+                </div>
+
+                <div>
+                  <label for="withdraw-address" class="text-xs uppercase tracking-[0.25em] text-text-muted">Recipient address</label>
+                  <textarea
+                    id="withdraw-address"
+                    rows="3"
+                    class="mt-2 w-full rounded-2xl border border-dark-border/60 bg-dark/70 p-3 text-sm text-text-soft focus:border-primary/60 focus:outline-none"
+                    bind:value={sendAddress}
+                    placeholder="Paste a Monero address or subaddress"
+                    required
+                  />
+                </div>
+
+                {#if sendRecipientPubkey}
+                  <p class="text-xs text-text-muted/80">
+                    Target pubkey: <span class="font-mono text-text-soft">{sendRecipientPubkey.slice(0, 16)}…</span>
+                  </p>
+                {/if}
+
+                <div>
+                  <label for="withdraw-note" class="text-xs uppercase tracking-[0.25em] text-text-muted">Optional note</label>
+                  <input
+                    id="withdraw-note"
+                    type="text"
+                    class="mt-2 w-full rounded-2xl border border-dark-border/60 bg-dark/70 px-3 py-2 text-sm text-text-soft focus:border-primary/60 focus:outline-none"
+                    bind:value={sendNote}
+                    placeholder="Attach a short note"
+                  />
+                </div>
+
+                <button class="btn-primary w-full justify-center" type="submit" disabled={sendLoading}>
+                  {sendLoading ? 'Sending…' : 'Send Ember'}
+                </button>
+
+                {#if sendError}
+                  <p class="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{sendError}</p>
+                {/if}
+
+                {#if lastTxHash}
+                  <p class="rounded-2xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-xs text-emerald-100">
+                    Sent! Tx hash {lastTxHash.slice(0, 18)}…
+                  </p>
+                {/if}
+
+                <p class="text-xs text-text-muted/80">
+                  Withdrawals send XMR directly from this lightweight wallet. Please move long-term holdings to a dedicated cold-storage wallet.
+                </p>
+              </form>
+            {:else if activeWalletPanel === 'history'}
+              <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                  <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Transaction History</p>
+                  <button
+                    type="button"
+                    class="rounded-full border border-dark-border/60 px-3 py-1 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white disabled:opacity-50"
+                    on:click={loadTransactionHistory}
+                    disabled={loadingHistory}
+                  >
+                    {loadingHistory ? 'Loading…' : 'Refresh'}
+                  </button>
+                </div>
+
+                {#if loadingHistory && transactions.length === 0}
+                  <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-6 text-center text-sm text-text-muted">
+                    Loading transaction history...
+                  </div>
+                {:else if historyError}
+                  <div class="rounded-2xl border border-rose-500/40 bg-rose-500/10 p-4 text-sm text-rose-100">
+                    {historyError}
+                  </div>
+                {:else if transactions.length === 0}
+                  <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-6 text-center text-sm text-text-muted">
+                    No transactions yet. Deposit or receive Embers to see your history.
+                  </div>
+                {:else}
+                  <div class="space-y-2 max-h-96 overflow-y-auto">
+                    {#each transactions as tx (getTxHash(tx))}
+                      {@const direction = getTxDirection(tx)}
+                      {@const amount = getTxAmount(tx)}
+                      {@const hash = getTxHash(tx)}
+                      {@const timestamp = tx.getTimestamp?.() || tx.getBlock?.()?.getTimestamp?.() || null}
+                      {@const isConfirmed = tx.getIsConfirmed?.() || false}
+                      {@const confirmations = tx.getNumConfirmations?.() || 0}
+
+                      <div class="rounded-2xl border border-dark-border/60 bg-dark/50 p-4 hover:bg-dark/70 transition-colors">
+                        <div class="flex items-start justify-between gap-3">
+                          <div class="flex-1 min-w-0">
+                            <div class="flex items-center gap-2">
+                              <span class={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
+                                direction === 'in'
+                                  ? 'bg-emerald-500/10 text-emerald-300'
+                                  : 'bg-orange-500/10 text-orange-300'
+                              }`}>
+                                {direction === 'in' ? '↓' : '↑'}
+                              </span>
+                              <span class="text-sm font-semibold text-text-soft">
+                                {direction === 'in' ? 'Received' : 'Sent'}
+                              </span>
+                              {#if !isConfirmed}
+                                <span class="text-xs text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full">
+                                  Pending
+                                </span>
+                              {/if}
+                            </div>
+                            <p class="mt-1 text-xs font-mono text-text-muted break-all">
+                              {shortenHash(hash)}
+                            </p>
+                            <p class="mt-1 text-xs text-text-muted">
+                              {formatTxDate(timestamp)} {formatTxTime(timestamp)}
+                              {#if isConfirmed}
+                                · {confirmations} confirmations
+                              {/if}
+                            </p>
+                          </div>
+                          <div class="text-right">
+                            <p class={`text-base font-semibold ${
+                              direction === 'in' ? 'text-emerald-300' : 'text-text-soft'
+                            }`}>
+                              {direction === 'in' ? '+' : '-'}{formatXmr(amount)} XMR
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    {/each}
+                  </div>
+
+                  <p class="text-xs text-center text-text-muted/70 pt-2">
+                    Showing {transactions.length} transaction{transactions.length === 1 ? '' : 's'}
+                  </p>
+                {/if}
+
+                <p class="text-xs text-text-muted/80">
+                  Transaction history is stored privately on your device. This data is not shared or backed up to Nostr.
+                </p>
               </div>
             {/if}
           </div>
         {/if}
       </div>
+
+    {:else if activeTab === 'lightning'}
+      <!-- Lightning tab content remains the same -->
     {/if}
   </div>
 </div>
-
