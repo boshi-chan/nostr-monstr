@@ -108,10 +108,15 @@ function applyProfileUpdates(existing: UserMetadata, updates: EditableProfileFie
   return next
 }
 
-function validateMetadataBeforePublish(metadata: UserMetadata): void {
+function validateMetadataBeforePublish(metadata: UserMetadata, allowEmptyIdentity = false): void {
   const keys = Object.keys(metadata)
   if (keys.length === 0) {
     throw new Error('Refusing to publish empty metadata. This would wipe your profile.')
+  }
+
+  // Allow publishing without identity fields for brand new accounts
+  if (allowEmptyIdentity) {
+    return
   }
 
   const hasIdentityField = IDENTITY_FIELDS.some(field => {
@@ -162,7 +167,18 @@ async function publishMetadata(metadata: UserMetadata): Promise<void> {
 }
 
 export async function setEmberAddressMetadata(address: string | null): Promise<void> {
-  const existing = await fetchExistingMetadata()
+  let existing: UserMetadata
+  let isNewAccount = false
+
+  try {
+    existing = await fetchExistingMetadata()
+  } catch (err) {
+    // Brand new account with no metadata yet
+    logger.info('No existing metadata found - creating new profile with Monero address')
+    existing = {}
+    isNewAccount = true
+  }
+
   const updated: UserMetadata = { ...existing }
   const trimmedAddress = address?.trim()
 
@@ -172,7 +188,8 @@ export async function setEmberAddressMetadata(address: string | null): Promise<v
     delete updated.monero_address
   }
 
-  validateMetadataBeforePublish(updated)
+  // Allow empty identity fields for new accounts
+  validateMetadataBeforePublish(updated, isNewAccount)
 
   if (!metadataChanged(existing, updated)) {
     return
@@ -182,10 +199,22 @@ export async function setEmberAddressMetadata(address: string | null): Promise<v
 }
 
 export async function updateProfileMetadata(updates: EditableProfileFields): Promise<void> {
-  const existing = await fetchExistingMetadata()
+  let existing: UserMetadata
+  let isNewAccount = false
+
+  try {
+    existing = await fetchExistingMetadata()
+  } catch (err) {
+    // Brand new account with no metadata yet
+    logger.info('No existing metadata found - creating new profile')
+    existing = {}
+    isNewAccount = true
+  }
+
   const next = applyProfileUpdates(existing, updates)
 
-  validateMetadataBeforePublish(next)
+  // For new accounts, we're more lenient since they're adding info, not removing it
+  validateMetadataBeforePublish(next, isNewAccount)
 
   if (!metadataChanged(existing, next)) {
     throw new Error('No profile changes to save')

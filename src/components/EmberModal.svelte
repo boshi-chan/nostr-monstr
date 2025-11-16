@@ -36,7 +36,7 @@
 
   async function handleSend(): Promise<void> {
     if (!target?.address) {
-      error = 'Recipient has not published a Monero address.'
+      error = 'Recipient has not published a Monero address in their profile or bio.'
       return
     }
 

@@ -857,6 +857,9 @@ export async function initWallet(
     shareAddress: shareAddressPreference,
   })
 
+  // Persist the share preference (defaults to true for new wallets)
+  await saveSetting(WALLET_SHARE_KEY, shareAddressPreference)
+
   void refreshWalletInternal()
 
   // Sync address to profile metadata if sharing is enabled
@@ -866,7 +869,9 @@ export async function initWallet(
       await syncProfileAddress(address)
       logger.info('✅ Monero address published to profile')
     } catch (err) {
-      logger.warn('⚠️ Failed to sync address to profile (non-fatal):', err)
+      logger.error('⚠️ Failed to sync address to profile (non-fatal):', err)
+      // Don't throw - wallet is created successfully, address just didn't publish
+      // User can toggle the setting to retry
     }
   }
 

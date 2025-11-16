@@ -229,6 +229,8 @@
 
   function resolveMoneroAddress(): string | null {
     if (!metadata) return null
+
+    // Check metadata fields first (most reliable)
     const candidates = ['monero_address', 'moneroAddress', 'xmr_address', 'ember_address']
     for (const key of candidates) {
       const value = metadata[key]
@@ -236,6 +238,19 @@
         return value
       }
     }
+
+    // Fall back to parsing bio for Monero address
+    if (metadata.about) {
+      // Matches primary addresses (4...) and subaddresses (8...)
+      // Monero addresses are 95 characters: 1 byte network + 64 bytes public spend + public view + 4 bytes checksum
+      const moneroRegex = /\b([48][0-9AB][1-9A-HJ-NP-Za-km-z]{93})\b/g
+      const match = metadata.about.match(moneroRegex)
+      if (match && match[0]) {
+        logger.info('Found Monero address in bio')
+        return match[0]
+      }
+    }
+
     return null
   }
 
