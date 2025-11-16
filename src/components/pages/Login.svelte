@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import {  loginWithExtension, hasNostrExtension } from '$lib/auth'
+  import { onMount, onDestroy } from 'svelte'
+  import {  loginWithExtension, hasNostrExtension, startNostrConnectLogin, finishNostrConnectLogin } from '$lib/auth'
   import Button from '../Button.svelte'
   import { toDataURL as qrToDataURL } from 'qrcode'
+  import type { NDKNip46Signer } from '@nostr-dev-kit/ndk'
 
   let isLoading = false
   let error = ''
@@ -11,13 +12,21 @@
   let hasExtension = false
   let qrDataUrl: string | null = null
   let qrError: string | null = null
+  let currentSigner: NDKNip46Signer | null = null
+  let connectionStatus = 'waiting' // waiting | connecting | connected | error
 
   // Check for extensions on component mount
   onMount(() => {
     hasExtension = hasNostrExtension()
   })
 
-  
+  // Cleanup on destroy
+  onDestroy(() => {
+    if (currentSigner) {
+      currentSigner.stop()
+      currentSigner = null
+    }
+  })
 
   async function handleExtensionLogin() {
     try {
@@ -29,6 +38,50 @@
     } finally {
       isLoading = false
     }
+  }
+
+  async function handleMobileSignerLogin() {
+    try {
+      isLoading = true
+      error = ''
+      connectionStatus = 'waiting'
+
+      // Start the Nostr Connect flow
+      const result = await startNostrConnectLogin()
+      currentSigner = result.signer
+      connectUrl = result.uri
+
+      // Show QR code
+      showQR = true
+      isLoading = false
+
+      // Wait for connection in background
+      connectionStatus = 'connecting'
+      await finishNostrConnectLogin(result.signer)
+      connectionStatus = 'connected'
+
+      // Login successful - component will be unmounted as user is authenticated
+    } catch (err) {
+      connectionStatus = 'error'
+      error = String(err)
+      showQR = false
+      isLoading = false
+      if (currentSigner) {
+        currentSigner.stop()
+        currentSigner = null
+      }
+    }
+  }
+
+  function handleCancelMobileSigner() {
+    if (currentSigner) {
+      currentSigner.stop()
+      currentSigner = null
+    }
+    showQR = false
+    connectUrl = ''
+    connectionStatus = 'waiting'
+    error = ''
   }
 
   function handleCopyUrl() {
@@ -100,13 +153,30 @@
               </Button>
             </div>
           {/if}
+
+          <!-- Mobile Signer Option -->
+          <div class="p-4 bg-bg-tertiary rounded-lg border border-dark-border/60">
+            <h3 class="font-semibold text-white mb-2">Mobile Signer</h3>
+            <p class="text-sm text-text-tertiary mb-4">
+              Connect with Amber or other mobile signers via QR code
+            </p>
+            <Button
+              variant="secondary"
+              size="lg"
+              loading={isLoading}
+              on:click={handleMobileSignerLogin}
+              className="w-full"
+            >
+              {isLoading ? 'Generating...' : 'Connect Mobile Signer'}
+            </Button>
+          </div>
+
           <!-- Supported Methods -->
           <div class="text-xs text-text-tertiary space-y-1 p-3 bg-bg-tertiary rounded">
             <p class="font-medium text-text-secondary">Supported:</p>
             <ul class="space-y-1">
-              <li>Browser extensions (Alby, nos2x, SoapBox Signer.)</li>
-              <li>Amber (Coming soon)</li>
-              
+              <li>Browser extensions (Alby, nos2x, Flamingo, etc.)</li>
+              <li>Mobile signers (Amber, Keystache, etc.)</li>
             </ul>
           </div>
         </div>
@@ -115,7 +185,7 @@
         <div class="space-y-4">
           <div class="p-4 bg-bg-tertiary rounded-lg">
             <p class="text-sm text-text-secondary mb-3">
-              Scan with your wallet or copy the connection URL:
+              Scan this QR code with your mobile signer app (e.g., Amber):
             </p>
             <div class="bg-white p-4 rounded-lg mb-3 flex items-center justify-center min-h-64">
               {#if qrDataUrl}
@@ -128,10 +198,25 @@
                 </p>
               {/if}
             </div>
+
+            <!-- Connection Status -->
+            {#if connectionStatus === 'connecting'}
+              <div class="p-3 bg-blue-500/10 border border-blue-500/20 rounded text-blue-400 text-sm text-center">
+                <div class="flex items-center justify-center gap-2">
+                  <div class="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
+                  <span>Waiting for approval from your mobile signer...</span>
+                </div>
+              </div>
+            {:else if connectionStatus === 'connected'}
+              <div class="p-3 bg-green-500/10 border border-green-500/20 rounded text-green-400 text-sm text-center">
+                ✓ Connected! Logging you in...
+              </div>
+            {/if}
+
             <textarea
               readonly
               value={connectUrl}
-              class="w-full px-3 py-2 bg-bg-primary border border-bg-tertiary rounded text-white text-xs resize-none"
+              class="w-full px-3 py-2 bg-bg-primary border border-bg-tertiary rounded text-white text-xs resize-none mt-3"
               rows="3"
             />
           </div>
@@ -149,16 +234,22 @@
             <Button
               variant="secondary"
               size="lg"
-              on:click={() => (showQR = false)}
+              on:click={handleCancelMobileSigner}
               className="w-full"
+              disabled={connectionStatus === 'connecting'}
             >
-              Back
+              Cancel
             </Button>
           </div>
 
-          <p class="text-xs text-text-tertiary text-center">
-            Waiting for wallet connection...
-          </p>
+          <div class="text-xs text-text-tertiary text-center space-y-1">
+            <p class="font-medium">Instructions:</p>
+            <ol class="list-decimal list-inside space-y-1 text-left max-w-sm mx-auto">
+              <li>Open your mobile signer app (Amber, Keystache, etc.)</li>
+              <li>Scan the QR code above or paste the connection URL</li>
+              <li>Approve the connection request in your app</li>
+            </ol>
+          </div>
         </div>
       {/if}
     </div>

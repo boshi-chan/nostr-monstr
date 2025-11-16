@@ -3,7 +3,7 @@
  * Provides a clean interface to NDK with proper reactivity
  */
 
-import NDK, { type NDKUser, NDKNip07Signer, NDKPrivateKeySigner } from '@nostr-dev-kit/ndk'
+import NDK, { type NDKUser, NDKNip07Signer, NDKPrivateKeySigner, NDKNip46Signer } from '@nostr-dev-kit/ndk'
 import { writable } from 'svelte/store'
 
 // Default relays - can be customized later
@@ -80,7 +80,7 @@ export function getNDK(): NDK {
 /**
  * Set NDK signer for authenticated actions
  */
-export async function setNDKSigner(signer: NDKNip07Signer | NDKPrivateKeySigner): Promise<void> {
+export async function setNDKSigner(signer: NDKNip07Signer | NDKPrivateKeySigner | NDKNip46Signer): Promise<void> {
   const ndk = getNDK()
   ndk.signer = signer
 }
@@ -122,6 +122,54 @@ export async function loginWithPrivateKey(privateKey: string): Promise<NDKUser> 
     throw new Error('Failed to derive public key from private key')
   }
 
+  return user
+}
+
+/**
+ * Create Nostr Connect signer for NIP-46 (mobile signers like Amber)
+ * This generates a connection URI that should be displayed as QR code
+ * @returns The NDKNip46Signer instance and the connection URI
+ */
+export async function createNostrConnectSigner(relay?: string): Promise<{
+  signer: NDKNip46Signer
+  uri: string
+}> {
+  const ndk = getNDK()
+
+  // Use provided relay or pick a random one
+  const relayUrl = relay || DEFAULT_RELAYS[Math.floor(Math.random() * DEFAULT_RELAYS.length)]
+
+  // Create signer with nostrconnect:// flow
+  const signer = NDKNip46Signer.nostrconnect(ndk, relayUrl)
+
+  // The URI to display as QR code
+  const uri = signer.nostrConnectUri || ''
+
+  logger.info('Created Nostr Connect signer with URI:', uri)
+
+  return { signer, uri }
+}
+
+/**
+ * Complete Nostr Connect login after mobile signer approves
+ * @param signer The signer instance from createNostrConnectSigner
+ * @returns The authenticated user
+ */
+export async function completeNostrConnectLogin(signer: NDKNip46Signer): Promise<NDKUser> {
+  const ndk = getNDK()
+
+  // Set as active signer
+  ndk.signer = signer
+
+  // Wait for the remote signer to connect and provide user info
+  logger.info('Waiting for Nostr Connect handshake...')
+  const user = await signer.blockUntilReadyNostrConnect()
+
+  if (!user.pubkey) {
+    throw new Error('Failed to get public key from remote signer')
+  }
+
+  logger.info('Nostr Connect login successful:', user.pubkey)
   return user
 }
 

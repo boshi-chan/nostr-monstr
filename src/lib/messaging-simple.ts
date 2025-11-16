@@ -68,12 +68,14 @@ export async function loadConversations(): Promise<void> {
     const ndk = getNDK()
     if (!ndk.signer) throw new Error('No signer available')
 
-    const receivedFilter: NDKFilter = { kinds: DM_KINDS, '#p': [user.pubkey], limit: 500 }
-    const sentFilter: NDKFilter = { kinds: DM_KINDS, authors: [user.pubkey], limit: 500 }
+    // Reduced from 500 to 200 per direction for faster initial load
+    const receivedFilter: NDKFilter = { kinds: DM_KINDS, '#p': [user.pubkey], limit: 200 }
+    const sentFilter: NDKFilter = { kinds: DM_KINDS, authors: [user.pubkey], limit: 200 }
 
+    // Use closeOnEose to immediately return results instead of waiting for all relays
     const [received, sent] = await Promise.all([
-      ndk.fetchEvents(receivedFilter),
-      ndk.fetchEvents(sentFilter),
+      ndk.fetchEvents(receivedFilter, { closeOnEose: true }),
+      ndk.fetchEvents(sentFilter, { closeOnEose: true }),
     ])
 
     const map = new Map<string, NostrEvent>()
@@ -88,15 +90,41 @@ export async function loadConversations(): Promise<void> {
     )
 
     const convMap = new Map<string, DirectMessage[]>()
-    for (const event of sorted) {
-      markEventProcessed(event.id)
-      const partner = getPartner(event, user.pubkey)
-      if (!partner) continue
-      const message = await decryptEvent(event, user.pubkey, partner)
-      if (!convMap.has(partner)) convMap.set(partner, [])
-      convMap.get(partner)!.push(message)
+
+    // Decrypt all messages in parallel for massive speed improvement
+    // Process in batches of 100 to show progressive updates
+    const BATCH_SIZE = 100
+    for (let i = 0; i < sorted.length; i += BATCH_SIZE) {
+      const batch = sorted.slice(i, i + BATCH_SIZE)
+
+      const decryptPromises = batch.map(async (event) => {
+        markEventProcessed(event.id)
+        const partner = getPartner(event, user.pubkey)
+        if (!partner) return null
+        const message = await decryptEvent(event, user.pubkey, partner)
+        return { partner, message }
+      })
+
+      const results = await Promise.all(decryptPromises)
+
+      for (const result of results) {
+        if (!result) continue
+        const { partner, message } = result
+        if (!convMap.has(partner)) convMap.set(partner, [])
+        convMap.get(partner)!.push(message)
+      }
+
+      // Update UI progressively after each batch
+      if (i % (BATCH_SIZE * 2) === 0 || i + BATCH_SIZE >= sorted.length) {
+        convMap.forEach((list, partner) => {
+          list.sort((a, b) => a.createdAt - b.createdAt)
+          setConversationEntry(partner, list)
+          void fetchUserMetadata(partner)
+        })
+      }
     }
 
+    // Final update to ensure all conversations are set
     convMap.forEach((list, partner) => {
       list.sort((a, b) => a.createdAt - b.createdAt)
       setConversationEntry(partner, list)
@@ -133,7 +161,8 @@ export async function loadConversation(pubkey: string): Promise<void> {
       { kinds: DM_KINDS, authors: [pubkey], '#p': [user.pubkey], limit: 200 },
     ]
 
-    const results = await Promise.all(filters.map(f => ndk.fetchEvents(f)))
+    // Use closeOnEose to immediately return results instead of waiting for all relays
+    const results = await Promise.all(filters.map(f => ndk.fetchEvents(f, { closeOnEose: true })))
     const map = new Map<string, NostrEvent>()
     for (const set of results) {
       for (const event of set) {
@@ -147,11 +176,13 @@ export async function loadConversation(pubkey: string): Promise<void> {
       (a, b) => (a.created_at ?? 0) - (b.created_at ?? 0)
     )
 
-    const messages: DirectMessage[] = []
-    for (const event of events) {
+    // Decrypt all messages in parallel
+    const decryptPromises = events.map(async (event) => {
       markEventProcessed(event.id)
-      messages.push(await decryptEvent(event, user.pubkey, pubkey))
-    }
+      return await decryptEvent(event, user.pubkey, pubkey)
+    })
+
+    const messages = await Promise.all(decryptPromises)
 
     setConversationEntry(pubkey, messages)
     conversationMessages.set(messages)

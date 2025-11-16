@@ -23,10 +23,9 @@ import {
   messagesError,
 } from '$stores/messages'
 import { getSetting, saveSetting } from './db'
-import { loginWithNIP07, logoutNDK } from './ndk'
+import { loginWithNIP07, logoutNDK, createNostrConnectSigner, completeNostrConnectLogin } from './ndk'
 import type { User } from '$types/user'
-import type { NDKUser } from '@nostr-dev-kit/ndk'
-import { generateSecretKey, getPublicKey } from 'nostr-tools'
+import type { NDKUser, NDKNip46Signer } from '@nostr-dev-kit/ndk'
 import { warmupMessagingPermissions, resetMessagingState } from '$lib/messaging-simple'
 import { stopAllSubscriptions, clearFeed } from './feed-ndk'
 import { stopNotificationListener } from '$lib/notifications'
@@ -45,86 +44,51 @@ function ndkUserToUser(ndkUser: NDKUser): User {
 }
 
 /**
- * Generate Nostr Connect URL (NIP-46)
- * Creates a connection URL that can be shared with wallets or displayed as QR
+ * Start Nostr Connect login flow (NIP-46)
+ * Creates a connection URI that should be displayed as QR code for mobile signers
+ * @returns Object with signer instance and URI to display
  */
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('')
-}
-
-function randomBytes(size = 32): Uint8Array {
-  const arr = new Uint8Array(size)
-  if (typeof globalThis.crypto?.getRandomValues === 'function') {
-    globalThis.crypto.getRandomValues(arr)
-  } else {
-    for (let i = 0; i < size; i++) {
-      arr[i] = Math.floor(Math.random() * 256)
-    }
-  }
-  return arr
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  if (typeof globalThis.btoa === 'function') {
-    let binary = ''
-    for (let i = 0; i < bytes.length; i++) {
-      binary += String.fromCharCode(bytes[i])
-    }
-    return globalThis.btoa(binary)
-  }
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(bytes).toString('base64')
-  }
-  throw new Error('Base64 encoder not available')
-}
-
-export async function loginWithNostrConnect(): Promise<string> {
-  // Generate app keypair for this session
-  const rawSecretKey = generateSecretKey()
-  const appSecretKey = bytesToHex(rawSecretKey)
-  const appPubkey = getPublicKey(rawSecretKey)
-
-  // Generate shared secret for encryption (base64 per NIP-46)
-  const sharedSecretBytes = randomBytes(32)
-  const sharedSecret = bytesToBase64(sharedSecretBytes)
-
-  const relayChoices = [
-    'wss://relay.damus.io',
-    'wss://nos.lol',
-    'wss://relay.nostr.band',
-    'wss://nostr.mom',
-  ]
-  const relayUrl = relayChoices[Math.floor(Math.random() * relayChoices.length)]
-  const connectUrl =
-    `nostr+walletconnect://${appPubkey}` +
-    `?relay=${encodeURIComponent(relayUrl)}` +
-    `&secret=${encodeURIComponent(sharedSecret)}`
-
-  await saveSetting('nostrConnectAppSecret', appSecretKey)
-  await saveSetting('nostrConnectSecret', sharedSecret)
-  await saveSetting('nostrConnectRelay', relayUrl)
-
-  return connectUrl
+export async function startNostrConnectLogin(): Promise<{
+  signer: NDKNip46Signer
+  uri: string
+}> {
+  const result = await createNostrConnectSigner()
+  logger.info('Nostr Connect flow started, URI generated')
+  return result
 }
 
 /**
- * Handle Nostr Connect callback
- * Called when wallet responds with user's public key
+ * Complete Nostr Connect login
+ * Waits for the mobile signer to approve and complete the connection
+ * @param signer The signer instance from startNostrConnectLogin
+ * @returns The authenticated user
  */
-export async function handleNostrConnectCallback(pubkey: string): Promise<User> {
-  const user: User = {
-    pubkey,
-    // No privateKey stored - all signing happens in the wallet
+export async function finishNostrConnectLogin(signer: NDKNip46Signer): Promise<User> {
+  try {
+    // Wait for connection handshake
+    const ndkUser = await completeNostrConnectLogin(signer)
+
+    // Fetch profile metadata
+    await ndkUser.fetchProfile()
+
+    const user = ndkUserToUser(ndkUser)
+
+    // Save to store and persistence
+    await saveSetting('currentUser', user)
+    await saveSetting('authMethod', 'nostrconnect')
+    await saveSetting('lastLogin', new Date().toISOString())
+
+    // Serialize signer for session restore
+    const signerPayload = signer.toPayload()
+    await saveSetting('nostrConnectSigner', signerPayload)
+
+    currentUser.set(user)
+    void warmupMessagingPermissions()
+
+    return user
+  } catch (err) {
+    throw new Error(`Nostr Connect login failed: ${err}`)
   }
-
-  // Store user info (public data only)
-  await saveSetting('currentUser', user)
-  await saveSetting('lastLogin', new Date().toISOString())
-
-  currentUser.set(user)
-  return user
 }
 
 /**
@@ -194,6 +158,33 @@ export async function restoreSession(): Promise<User | null> {
       }
     }
 
+    // If they used Nostr Connect, try to restore signer
+    if (authMethod === 'nostrconnect') {
+      try {
+        const signerPayload = await getSetting('nostrConnectSigner')
+        if (signerPayload) {
+          // Restore signer from serialized payload
+          const { getNDK } = await import('./ndk')
+          const { NDKNip46Signer } = await import('@nostr-dev-kit/ndk')
+          const ndk = getNDK()
+          const signer = await NDKNip46Signer.fromPayload(signerPayload, ndk)
+
+          // Set as active signer
+          ndk.signer = signer
+
+          // Verify it's the same user
+          const user = await signer.user()
+          if (user.pubkey === savedUser.pubkey) {
+            currentUser.set(savedUser)
+            void warmupMessagingPermissions()
+            return savedUser
+          }
+        }
+      } catch (err) {
+        logger.warn('Failed to restore Nostr Connect session:', err)
+      }
+    }
+
     // Fallback: Load user without signer (read-only mode)
     currentUser.set(savedUser)
     void warmupMessagingPermissions()
@@ -246,7 +237,7 @@ export async function logout(): Promise<void> {
   logger.info('Clearing storage')
   await saveSetting('currentUser', null)
   await saveSetting('authMethod', null)
-  await saveSetting('nostrConnectToken', null)
+  await saveSetting('nostrConnectSigner', null)
 
   // Clear store - this triggers reactive updates
   logger.info('Setting currentUser to null (should trigger isAuthenticated = false)')

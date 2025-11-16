@@ -19,6 +19,9 @@ import {
   repostedEvents,
   zappedEvents,
   commentedThreads,
+  canLoadMore,
+  isLoadingMore,
+  oldestTimestamp,
 } from '$stores/feed'
 import { parseMetadataEvent, fetchUserMetadata } from './metadata'
 import { feedSource, type FeedSource } from '$stores/feedSource'
@@ -1296,6 +1299,162 @@ export async function loadUserInteractions(): Promise<void> {
     persistInteractionsSnapshot()
   } catch (err) {
     logger.error('Failed to load user interactions:', err)
+  }
+}
+
+/**
+ * Load older posts for infinite scroll
+ * Fetches posts older than the current oldest timestamp
+ */
+export async function loadOlderPosts(): Promise<void> {
+  // Prevent multiple simultaneous loads
+  if (get(isLoadingMore)) {
+    logger.info('Already loading more posts, skipping...')
+    return
+  }
+
+  // Check if we can load more
+  if (!get(canLoadMore)) {
+    logger.info('No more posts to load')
+    return
+  }
+
+  const currentFeedSource = get(feedSource)
+  const currentEvents = get(unfilteredFeedEvents)
+
+  // Find oldest timestamp from current events
+  let until = get(oldestTimestamp)
+  if (!until && currentEvents.length > 0) {
+    until = Math.min(...currentEvents.map(e => e.created_at))
+    oldestTimestamp.set(until)
+  }
+
+  if (!until) {
+    logger.warn('No timestamp to paginate from')
+    canLoadMore.set(false)
+    return
+  }
+
+  logger.info(`Loading older posts before timestamp ${until}`)
+  isLoadingMore.set(true)
+
+  try {
+    const ndk = getNDK()
+    const LOAD_MORE_LIMIT = 50
+
+    let filter: any
+    let closeOnEose = true
+
+    // Build filter based on current feed source
+    switch (currentFeedSource) {
+      case 'following': {
+        const user = getCurrentNDKUser()
+        if (!user?.pubkey) {
+          isLoadingMore.set(false)
+          return
+        }
+        const followingSet = get(following)
+        if (followingSet.size === 0) {
+          isLoadingMore.set(false)
+          canLoadMore.set(false)
+          return
+        }
+        filter = {
+          authors: Array.from(followingSet),
+          kinds: [1, 6, 16],
+          until,
+          limit: LOAD_MORE_LIMIT,
+        }
+        break
+      }
+
+      case 'circles': {
+        const user = getCurrentNDKUser()
+        if (!user?.pubkey) {
+          isLoadingMore.set(false)
+          return
+        }
+        const circlesSet = get(circles)
+        if (circlesSet.size === 0) {
+          isLoadingMore.set(false)
+          canLoadMore.set(false)
+          return
+        }
+        const limitedAuthors = limitAuthors(circlesSet)
+        filter = {
+          authors: limitedAuthors,
+          kinds: [1, 6, 16],
+          until,
+          limit: LOAD_MORE_LIMIT,
+        }
+        break
+      }
+
+      case 'global': {
+        filter = {
+          kinds: [1],
+          until,
+          limit: LOAD_MORE_LIMIT,
+        }
+        break
+      }
+
+      default:
+        logger.warn(`Unknown feed source: ${currentFeedSource}`)
+        isLoadingMore.set(false)
+        return
+    }
+
+    // Fetch older events
+    const events = await ndk.fetchEvents(filter, { closeOnEose })
+    const olderEvents = Array.from(events)
+      .map(e => normalizeEvent(e.rawEvent()))
+      .filter(Boolean) as NostrEvent[]
+
+    logger.info(`Loaded ${olderEvents.length} older posts`)
+
+    if (olderEvents.length === 0) {
+      // No more posts available
+      canLoadMore.set(false)
+      isLoadingMore.set(false)
+      return
+    }
+
+    // Update oldest timestamp
+    const newOldest = Math.min(...olderEvents.map(e => e.created_at))
+    oldestTimestamp.set(newOldest)
+
+    // Append to feed (don't replace)
+    unfilteredFeedEvents.update(existing => {
+      const combined = [...existing, ...olderEvents]
+      // Deduplicate by ID
+      const seen = new Set<string>()
+      const deduped = combined.filter(e => {
+        if (seen.has(e.id)) return false
+        seen.add(e.id)
+        return true
+      })
+      // Sort by created_at descending
+      deduped.sort((a, b) => b.created_at - a.created_at)
+      return deduped
+    })
+
+    // Queue engagement hydration for new events
+    const engagementIds: string[] = []
+    for (const event of olderEvents) {
+      engagementIds.push(...collectEngagementTargets(event))
+    }
+    queueEngagementHydration(engagementIds)
+
+    // If we got fewer events than requested, we've likely hit the end
+    if (olderEvents.length < LOAD_MORE_LIMIT) {
+      canLoadMore.set(false)
+    }
+
+  } catch (err) {
+    logger.error('Failed to load older posts:', err)
+  } finally {
+    isLoadingMore.set(false)
   }
 }
 

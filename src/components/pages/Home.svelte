@@ -1,11 +1,15 @@
 <script lang="ts">
   import { get } from 'svelte/store'
+  import { onMount, onDestroy } from 'svelte'
   import {
     feedEvents,
     feedLoading,
     feedError,
+    canLoadMore,
+    isLoadingMore,
   } from '$stores/feed'
   import { feedSource, type FeedSource } from '$stores/feedSource'
+  import { loadOlderPosts } from '$lib/feed-ndk'
 
   import type { NostrEvent } from '$types/nostr'
   import Post from '../Post.svelte'
@@ -24,6 +28,8 @@
 
   let activeFeed: FeedSource = get(feedSource)
   let hasLoadedOnce = false
+  let loadMoreTrigger: HTMLDivElement | null = null
+  let observer: IntersectionObserver | null = null
 
   $: activeFeed = $feedSource
 
@@ -31,6 +37,33 @@
   $: if ($feedEvents.length > 0) {
     hasLoadedOnce = true
   }
+
+  // Set up IntersectionObserver for infinite scroll
+  onMount(() => {
+    if (typeof IntersectionObserver !== 'undefined') {
+      observer = new IntersectionObserver(
+        (entries) => {
+          const entry = entries[0]
+          if (entry.isIntersecting && $canLoadMore && !$isLoadingMore) {
+            void loadOlderPosts()
+          }
+        },
+        {
+          rootMargin: '200px', // Trigger 200px before reaching the bottom
+        }
+      )
+
+      if (loadMoreTrigger) {
+        observer.observe(loadMoreTrigger)
+      }
+    }
+  })
+
+  onDestroy(() => {
+    if (observer) {
+      observer.disconnect()
+    }
+  })
 
   function setActiveFeed(tab: FeedSource) {
     feedSource.set(tab)
@@ -120,9 +153,17 @@
           />
         {/each}
 
-        {#if $feedLoading}
+        <!-- Infinite scroll trigger -->
+        <div bind:this={loadMoreTrigger} class="h-1"></div>
+
+        <!-- Loading more indicator -->
+        {#if $isLoadingMore}
           <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-4 text-center text-sm text-text-muted">
-            Loading more...
+            Loading older posts...
+          </div>
+        {:else if !$canLoadMore && $feedEvents.length > 0}
+          <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-4 text-center text-sm text-text-muted">
+            You've reached the end
           </div>
         {/if}
       {/if}

@@ -48,6 +48,11 @@ export const feedEvents = derived(
 export const feedLoading = writable(false)
 export const feedError = writable<string | null>(null)
 
+// Infinite scroll state
+export const canLoadMore = writable(true) // Whether more posts can be loaded
+export const isLoadingMore = writable(false) // Whether currently loading older posts
+export const oldestTimestamp = writable<number | null>(null) // Timestamp of oldest post for pagination
+
 // Metadata cache for user profiles
 export const metadataCache = writable<Map<string, UserMetadata>>(new Map())
 export const userEventIds = writable<Set<string>>(new Set())
