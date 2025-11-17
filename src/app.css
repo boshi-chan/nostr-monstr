@@ -92,15 +92,31 @@
     background-color: rgba(21, 29, 39, 0.72);
   }
 
-  /* Better avatar rendering */
+  /* Better avatar rendering - optimized for small high-res images */
   img[class*="rounded-full"] {
     aspect-ratio: 1 / 1;
     object-position: center;
-    image-rendering: smooth;
-    image-rendering: -webkit-optimize-contrast;
+    /* Smooth high-quality downsampling (default behavior) */
+    image-rendering: auto;
+    /* Force GPU acceleration for smoother rendering */
+    transform: translate3d(0, 0, 0);
     backface-visibility: hidden;
-    transform: translateZ(0);
-    -webkit-font-smoothing: subpixel-antialiased;
+    /* Reduce artifacts and improve clarity */
+    -webkit-backface-visibility: hidden;
+    -webkit-transform: translate3d(0, 0, 0);
+  }
+
+  /* For very small avatars (timeline, comments), add slight sharpening */
+  .h-8.rounded-full img,
+  .h-10.rounded-full img,
+  .w-8.rounded-full img,
+  .w-10.rounded-full img,
+  img.h-8.rounded-full,
+  img.h-10.rounded-full,
+  img.w-8.rounded-full,
+  img.w-10.rounded-full {
+    /* Subtle sharpening filter to counteract blur from downsampling */
+    filter: contrast(1.03) saturate(1.05);
   }
 }
 

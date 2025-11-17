@@ -85,6 +85,27 @@ function getTargetEventId(event: NostrEvent | any): string | null {
 
 function parseZapAmount(event: NostrEvent | any): number {
   if (!event?.tags) return 0
+
+  // For kind 9735 (zap receipt), amount is in the description tag
+  if (event.kind === 9735) {
+    const descriptionTag = event.tags.find((t: string[]) => t[0] === 'description')
+    if (descriptionTag && descriptionTag[1]) {
+      try {
+        const zapRequest = JSON.parse(descriptionTag[1])
+        const amountTag = zapRequest.tags?.find((t: string[]) => t[0] === 'amount' && typeof t[1] === 'string')
+        if (amountTag) {
+          const raw = parseInt(amountTag[1], 10)
+          if (!Number.isNaN(raw)) {
+            return Math.max(raw / 1000, 0) // convert msats -> sats
+          }
+        }
+      } catch (err) {
+        // Failed to parse description, fall through to direct amount check
+      }
+    }
+  }
+
+  // For kind 9734 (zap request) or fallback, check for direct amount tag
   const tag = event.tags.find((t: string[]) => t[0] === 'amount' && typeof t[1] === 'string')
   if (!tag) return 0
   const raw = parseInt(tag[1], 10)

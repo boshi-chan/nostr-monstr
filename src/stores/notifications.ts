@@ -1,4 +1,5 @@
 import { writable, derived } from 'svelte/store'
+import { logger } from '$lib/logger'
 
 /**
  * Notification types

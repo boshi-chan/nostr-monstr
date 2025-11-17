@@ -15,6 +15,7 @@ import { getNDK } from '$lib/ndk'
 import type { NDKEvent, NDKFilter, NDKSubscription, NDKSubscriptionOptions } from '@nostr-dev-kit/ndk'
 import { EMBER_EVENT_KIND, EMBER_TAG, atomicToXmr, decodeEmberPayload } from '$lib/ember'
 import { normalizeEvent } from '$lib/event-validation'
+import { logger } from '$lib/logger'
 
 let notificationSubscription: NDKSubscription | null = null
 const processedNotifications = new Set<string>()
@@ -148,8 +149,11 @@ function addNotificationSorted(notification: Notification): void {
  */
 export async function startNotificationListener(pubkey: string): Promise<void> {
   if (notificationSubscription) {
+    logger.info('[NOTIF] Already have active subscription, stopping it first')
     stopNotificationListener()
   }
+
+  logger.info('[NOTIF] Starting notification listener for pubkey:', pubkey.substring(0, 8))
 
   await ensureUserEvents(pubkey)
 
@@ -165,6 +169,13 @@ export async function startNotificationListener(pubkey: string): Promise<void> {
   if (userEventList.length > 0) {
     filter['#e'] = userEventList.slice(0, 500)
   }
+
+  logger.info('[NOTIF] Subscribing with filter:', {
+    kinds: filter.kinds,
+    pTag: pubkey.substring(0, 8),
+    sinceDate: new Date((filter.since || 0) * 1000).toISOString(),
+    eTagCount: userEventList.length
+  })
 
   notificationSubscription = ndk.subscribe(
     filter,
@@ -182,6 +193,8 @@ export async function startNotificationListener(pubkey: string): Promise<void> {
   ;(notificationSubscription as any).on?.('error', (err: unknown) => {
     logger.warn('Notification listener error:', err)
   })
+
+  logger.info('[NOTIF] Notification listener started successfully')
 }
 
 /**
@@ -193,6 +206,8 @@ async function processNotificationEvent(event: NostrEvent, userPubkey: string): 
   const notificationId = `${event.id}:${event.pubkey}`
   if (processedNotifications.has(notificationId)) return
   processedNotifications.add(notificationId)
+
+  logger.info('[NOTIF] Processing notification event:', { kind: event.kind, id: event.id.substring(0, 8) })
 
   try {
     switch (event.kind) {
@@ -208,6 +223,7 @@ async function processNotificationEvent(event: NostrEvent, userPubkey: string): 
         break
       case 9734:
       case 9735:
+        logger.info('[NOTIF] Received zap event (kind 9734/9735)')
         if (await handleZapNotification(event, userPubkey)) return
         break
       case EMBER_EVENT_KIND:
@@ -393,10 +409,36 @@ async function handleMentionNotification(event: NostrEvent, userPubkey: string):
 }
 
 async function handleZapNotification(event: NostrEvent, userPubkey: string): Promise<boolean> {
+  logger.info('[ZAP] Processing zap event:', { kind: event.kind, id: event.id, pubkey: event.pubkey })
+
   const targetEventId = findFirstEventReference(event)
-  const amountTag = event.tags.find(tag => tag[0] === 'amount')?.[1]
-  const amount = amountTag ? Math.floor(parseInt(amountTag, 10) / 1000) : 0
-  if (!amount) return false
+
+  // For kind 9735 (zap receipt), amount is in the description tag (which contains the zap request)
+  let amount = 0
+  if (event.kind === 9735) {
+    const descriptionTag = event.tags.find(tag => tag[0] === 'description')?.[1]
+    if (descriptionTag) {
+      try {
+        const zapRequest = JSON.parse(descriptionTag)
+        const amountTag = zapRequest.tags?.find((tag: string[]) => tag[0] === 'amount')?.[1]
+        amount = amountTag ? Math.floor(parseInt(amountTag, 10) / 1000) : 0
+        logger.info('[ZAP] Parsed amount from description:', { amount, amountTag })
+      } catch (err) {
+        logger.warn('[ZAP] Failed to parse description tag:', err)
+      }
+    }
+  } else {
+    // For kind 9734 (zap request), amount is directly in tags
+    const amountTag = event.tags.find(tag => tag[0] === 'amount')?.[1]
+    amount = amountTag ? Math.floor(parseInt(amountTag, 10) / 1000) : 0
+  }
+
+  logger.info('[ZAP] Found amount:', { amount, targetEventId, kind: event.kind })
+
+  if (!amount) {
+    logger.warn('[ZAP] No amount found, skipping')
+    return false
+  }
 
   let targetEvent: NostrEvent | null = null
   let finalEventId: string = event.id
@@ -419,6 +461,13 @@ async function handleZapNotification(event: NostrEvent, userPubkey: string): Pro
 
   const metadata = await getNotificationMetadata(event.pubkey)
 
+  logger.info('[ZAP] Creating zap notification:', {
+    eventId: finalEventId,
+    amount,
+    fromPubkey: event.pubkey,
+    fromName: metadata?.name || metadata?.display_name || 'User'
+  })
+
   addNotificationSorted({
     id: event.id,
     type: 'zap',
@@ -431,6 +480,8 @@ async function handleZapNotification(event: NostrEvent, userPubkey: string): Pro
     createdAt: event.created_at,
     read: false,
   })
+
+  logger.info('[ZAP] Zap notification created successfully')
 
   return true
 }

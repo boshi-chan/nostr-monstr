@@ -7,6 +7,8 @@
     markAsRead,
     removeNotification,
   } from '$stores/notifications'
+  import { metadataCache } from '$stores/feed'
+  import { fetchUserMetadata } from '$lib/metadata'
   import { openPostById, openProfile } from '$stores/router'
   import type { Notification } from '$stores/notifications'
   import LikeIcon from '../icons/LikeIcon.svelte'
@@ -17,6 +19,23 @@
   import EmberIcon from '../icons/EmberIcon.svelte'
 
   type IconComponent = typeof LikeIcon
+
+  // Helper function to get metadata for a pubkey
+  function getMetadata(pubkey: string) {
+    return $metadataCache.get(pubkey)
+  }
+
+  // Helper function to get display name
+  function getDisplayName(notification: Notification): string {
+    const metadata = getMetadata(notification.fromPubkey)
+    return metadata?.name || metadata?.display_name || notification.fromName || 'User'
+  }
+
+  // Helper function to get avatar
+  function getAvatar(notification: Notification): string | null {
+    const metadata = getMetadata(notification.fromPubkey)
+    return metadata?.picture || notification.fromAvatar || null
+  }
 
   interface NotificationVisual {
     icon: IconComponent
@@ -82,6 +101,15 @@
 
   let orderedNotifications: Notification[] = []
   $: orderedNotifications = [...$notifications].sort((a, b) => b.createdAt - a.createdAt)
+
+  // Fetch metadata for all notification senders
+  $: {
+    for (const notification of orderedNotifications) {
+      if (notification.fromPubkey && !getMetadata(notification.fromPubkey)) {
+        fetchUserMetadata(notification.fromPubkey)
+      }
+    }
+  }
 
   function handleNotificationClick(notification: Notification) {
     markAsRead(notification.id)
@@ -182,17 +210,17 @@
                   }
                 }}
               >
-                {#if notification.fromAvatar}
+                {#if getAvatar(notification)}
                   <img
-                    src={notification.fromAvatar}
-                    alt={notification.fromName}
+                    src={getAvatar(notification)}
+                    alt={getDisplayName(notification)}
                     class="h-full w-full rounded-full object-cover"
                     loading="lazy"
                     decoding="async"
                   />
                 {:else}
                   <span class="text-sm font-semibold text-text-muted">
-                    {notification.fromName?.charAt(0) || '?'}
+                    {getDisplayName(notification).charAt(0) || '?'}
                   </span>
                 {/if}
               </button>
@@ -202,7 +230,7 @@
                   <span class={`flex h-7 w-7 items-center justify-center rounded-full ${config.background} ${config.accent}`}>
                     <svelte:component this={config.icon} size={16} color="currentColor" strokeWidth={1.75} />
                   </span>
-                  <span class="font-semibold text-text-soft truncate">{notification.fromName ?? 'User'}</span>
+                  <span class="font-semibold text-text-soft truncate">{getDisplayName(notification)}</span>
                   <span class="text-text-muted">{config.label}</span>
                   {#if notification.type === 'zap' && notification.amount}
                     <span class={`${config.accent} font-semibold`}>{notification.amount} sats</span>
