@@ -6,7 +6,7 @@
   import { initNDK } from '$lib/ndk'
   import { restoreSession } from '$lib/auth'
 
-  import { feedSource } from '$stores/feedSource'
+  import { feedSource, lastTimelineFeed } from '$stores/feedSource'
   import { feedError, feedLoading, following, circles } from '$stores/feed'
   import {
     stopAllSubscriptions,
@@ -31,7 +31,6 @@
   $: $feedSource
 
   import Layout from './components/Layout.svelte'
-  import Login from './components/pages/Login.svelte'
   import PinPrompt from './components/PinPrompt.svelte'
 
   onMount(async () => {
@@ -42,10 +41,14 @@
       await hydrateWalletState()
       initWalletLifecycle()
 
-      // default feed: global on startup
-      await subscribeToGlobalFeed()
-
       isInitialized.set(true)
+
+      // After initialization, subscribe to appropriate feed based on auth status
+      // If authenticated, the reactive statement will handle switching to following
+      // If not authenticated, subscribe to global
+      if (!$isAuthenticated) {
+        feedSource.set('global')
+      }
     } catch (err) {
       logger.error('App initialization error:', err)
       initError.set(String(err))
@@ -65,6 +68,19 @@
   let interactionsLoadedFor: string | null = null
   let interactionCacheHydratedFor: string | null = null
   let lastAuthKey: string | null = null
+  let wasAuthenticated = false
+
+  // When a user logs in, restore their last timeline feed instead of staying on global
+  $: {
+    const authedNow = $isAuthenticated && Boolean($currentUser?.pubkey)
+    if (authedNow && !wasAuthenticated) {
+      const defaultFeed = $lastTimelineFeed ?? 'following'
+      if ($feedSource === 'global') {
+        feedSource.set(defaultFeed)
+      }
+    }
+    wasAuthenticated = authedNow
+  }
 
   // switching tabs changes subscription here
   // Following AI_Guidelines: Be explicit about reactive dependencies
@@ -137,19 +153,23 @@
   // Following AI_Guidelines: Logic lives in stores, reactivity is automatic
 
   // manage notifications and cleanup on logout
-  $: if ($isAuthenticated && $currentUser?.pubkey) {
-    if (interactionCacheHydratedFor !== $currentUser.pubkey) {
-      hydrateInteractionsFromCache($currentUser.pubkey)
-      interactionCacheHydratedFor = $currentUser.pubkey
+  $: if ($isInitialized) {
+    if ($isAuthenticated && $currentUser?.pubkey) {
+      if (interactionCacheHydratedFor !== $currentUser.pubkey) {
+        hydrateInteractionsFromCache($currentUser.pubkey)
+        interactionCacheHydratedFor = $currentUser.pubkey
+      }
+      startNotificationListener($currentUser.pubkey)
+    } else {
+      stopNotificationListener()
+      // Don't clear feed if we're on global - anonymous users can browse global feed
+      if ($feedSource !== 'global') {
+        feedSource.set('global')
+      }
+      following.set(new Set())
+      circles.set(new Set())
+      interactionCacheHydratedFor = null
     }
-    startNotificationListener($currentUser.pubkey)
-  } else {
-    stopNotificationListener()
-    stopAllSubscriptions()
-    clearFeed()
-    following.set(new Set())
-    circles.set(new Set())
-    interactionCacheHydratedFor = null
   }
 
   // Load historical interactions (likes, reposts, zaps) once per session per user
@@ -171,11 +191,7 @@
       Initialization issue: {$initError}
     </div>
   {/if}
-  {#if $isAuthenticated}
-    <Layout />
-  {:else}
-    <Login />
-  {/if}
+  <Layout />
 {:else}
   <div class="flex items-center justify-center h-screen w-screen bg-bg-primary">
     <div class="text-center text-white">

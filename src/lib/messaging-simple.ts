@@ -33,6 +33,103 @@ const dmSubscriptions = new Set<NDKSubscription>()
 const processedDmEvents = new Set<string>()
 let subscriptionOwner: string | null = null
 let processedOwner: string | null = null
+const RELAY_TIMEOUT_MS = 5000
+const MAX_CONCURRENT_DECRYPTS = 6
+const INITIAL_DECRYPT_LIMIT = 80
+
+type DecryptResult = { partner: string; message: DirectMessage }
+
+async function fetchEventsWithTimeout(
+  ndk: ReturnType<typeof getNDK>,
+  filter: NDKFilter,
+  timeoutMs = RELAY_TIMEOUT_MS
+): Promise<Set<NDKEvent>> {
+  const fetchPromise = ndk.fetchEvents(filter, { closeOnEose: true })
+  const timeoutPromise = new Promise<Set<NDKEvent>>(resolve => {
+    setTimeout(() => resolve(new Set()), timeoutMs)
+  })
+  return await Promise.race([fetchPromise, timeoutPromise])
+}
+
+async function decryptEventsWithLimit(events: NostrEvent[], mePubkey: string): Promise<DecryptResult[]> {
+  if (events.length === 0) {
+    return []
+  }
+
+  const results: Array<DecryptResult | null> = new Array(events.length).fill(null)
+  let nextIndex = 0
+
+  const worker = async () => {
+    while (true) {
+      const current = nextIndex++
+      if (current >= events.length) {
+        return
+      }
+
+      const event = events[current]
+      try {
+        markEventProcessed(event.id)
+        const partner = getPartner(event, mePubkey)
+        if (!partner) continue
+        const message = await decryptEvent(event, mePubkey, partner)
+        results[current] = { partner, message }
+      } catch (err) {
+        logger.warn('[DM] Decrypt worker failed:', err)
+      }
+    }
+  }
+
+  const concurrency = Math.min(MAX_CONCURRENT_DECRYPTS, events.length)
+  await Promise.all(Array.from({ length: concurrency }, () => worker()))
+  return results.filter((entry): entry is DecryptResult => Boolean(entry))
+}
+
+function applyDecryptedResults(
+  convMap: Map<string, DirectMessage[]>,
+  results: DecryptResult[]
+): void {
+  if (results.length === 0) return
+
+  const touched = new Set<string>()
+  for (const { partner, message } of results) {
+    if (!convMap.has(partner)) convMap.set(partner, [])
+    convMap.get(partner)!.push(message)
+    touched.add(partner)
+  }
+
+  for (const partner of touched) {
+    const list = convMap.get(partner)
+    if (!list) continue
+    list.sort((a, b) => a.createdAt - b.createdAt)
+    setConversationEntry(partner, list)
+    void fetchUserMetadata(partner)
+  }
+
+  const active = get(activeConversation)
+  if (active) {
+    const current = convMap.get(active)
+    if (current) {
+      conversationMessages.set([...current])
+    }
+  }
+
+  messagesLoading.set(false)
+}
+
+async function processEventChunks(
+  events: NostrEvent[],
+  convMap: Map<string, DirectMessage[]>,
+  mePubkey: string
+): Promise<void> {
+  if (events.length === 0) return
+
+  const BATCH_SIZE = 100
+  for (let i = 0; i < events.length; i += BATCH_SIZE) {
+    const batch = events.slice(i, i + BATCH_SIZE)
+    const results = await decryptEventsWithLimit(batch, mePubkey)
+    applyDecryptedResults(convMap, results)
+  }
+}
 
 export async function warmupMessagingPermissions(): Promise<void> {
   const user = getCurrentNDKUser()
@@ -72,68 +169,34 @@ export async function loadConversations(): Promise<void> {
     const receivedFilter: NDKFilter = { kinds: DM_KINDS, '#p': [user.pubkey], limit: 200 }
     const sentFilter: NDKFilter = { kinds: DM_KINDS, authors: [user.pubkey], limit: 200 }
 
-    // Use closeOnEose to immediately return results instead of waiting for all relays
+    // Use timeouts so a single slow relay doesn't block the entire DM view
     const [received, sent] = await Promise.all([
-      ndk.fetchEvents(receivedFilter, { closeOnEose: true }),
-      ndk.fetchEvents(sentFilter, { closeOnEose: true }),
+      fetchEventsWithTimeout(ndk, receivedFilter),
+      fetchEventsWithTimeout(ndk, sentFilter),
     ])
-
-    const map = new Map<string, NostrEvent>()
-    for (const event of [...received, ...sent]) {
-      const raw = normalizeEvent(event as NDKEvent | NostrEvent)
-      if (!raw) continue
-      map.set(raw.id, raw)
-    }
-
-    const sorted = Array.from(map.values()).sort(
-      (a, b) => (a.created_at ?? 0) - (b.created_at ?? 0)
-    )
 
     const convMap = new Map<string, DirectMessage[]>()
 
-    // Decrypt all messages in parallel for massive speed improvement
-    // Process in batches of 100 to show progressive updates
-    const BATCH_SIZE = 100
-    for (let i = 0; i < sorted.length; i += BATCH_SIZE) {
-      const batch = sorted.slice(i, i + BATCH_SIZE)
-
-      const decryptPromises = batch.map(async (event) => {
-        markEventProcessed(event.id)
-        const partner = getPartner(event, user.pubkey)
-        if (!partner) return null
-        const message = await decryptEvent(event, user.pubkey, partner)
-        return { partner, message }
-      })
-
-      const results = await Promise.all(decryptPromises)
-
-      for (const result of results) {
-        if (!result) continue
-        const { partner, message } = result
-        if (!convMap.has(partner)) convMap.set(partner, [])
-        convMap.get(partner)!.push(message)
-      }
-
-      // Update UI progressively after each batch
-      if (i % (BATCH_SIZE * 2) === 0 || i + BATCH_SIZE >= sorted.length) {
-        convMap.forEach((list, partner) => {
-          list.sort((a, b) => a.createdAt - b.createdAt)
-          setConversationEntry(partner, list)
-          void fetchUserMetadata(partner)
-        })
-      }
+    const allEvents: NostrEvent[] = []
+    for (const event of [...received, ...sent]) {
+      const raw = normalizeEvent(event as NDKEvent | NostrEvent)
+      if (raw) allEvents.push(raw)
     }
 
-    // Final update to ensure all conversations are set
-    convMap.forEach((list, partner) => {
-      list.sort((a, b) => a.createdAt - b.createdAt)
-      setConversationEntry(partner, list)
-      void fetchUserMetadata(partner)
-    })
+    const sorted = allEvents.sort(
+      (a, b) => (a.created_at ?? 0) - (b.created_at ?? 0)
+    )
 
-    const active = get(activeConversation)
-    if (active) {
-      conversationMessages.set([...(convMap.get(active) ?? [])])
+    const initialStart = Math.max(0, sorted.length - INITIAL_DECRYPT_LIMIT)
+    const initialEvents = sorted.slice(initialStart)
+    const remainingEvents = sorted.slice(0, initialStart)
+
+    await processEventChunks(initialEvents, convMap, user.pubkey)
+
+    if (remainingEvents.length > 0) {
+      void processEventChunks(remainingEvents, convMap, user.pubkey).catch(err => {
+        logger.warn('[DM] Background decrypt failed:', err)
+      })
     }
 
     void subscribeToDmEvents(user.pubkey)
@@ -161,8 +224,8 @@ export async function loadConversation(pubkey: string): Promise<void> {
       { kinds: DM_KINDS, authors: [pubkey], '#p': [user.pubkey], limit: 200 },
     ]
 
-    // Use closeOnEose to immediately return results instead of waiting for all relays
-    const results = await Promise.all(filters.map(f => ndk.fetchEvents(f, { closeOnEose: true })))
+    // Use timeouts per relay filter to avoid hanging when one relay never responds
+    const results = await Promise.all(filters.map(f => fetchEventsWithTimeout(ndk, f)))
     const map = new Map<string, NostrEvent>()
     for (const set of results) {
       for (const event of set) {
@@ -176,13 +239,10 @@ export async function loadConversation(pubkey: string): Promise<void> {
       (a, b) => (a.created_at ?? 0) - (b.created_at ?? 0)
     )
 
-    // Decrypt all messages in parallel
-    const decryptPromises = events.map(async (event) => {
-      markEventProcessed(event.id)
-      return await decryptEvent(event, user.pubkey, pubkey)
-    })
-
-    const messages = await Promise.all(decryptPromises)
+    const decrypted = await decryptEventsWithLimit(events, user.pubkey)
+    const messages = decrypted
+      .filter(result => result.partner === pubkey)
+      .map(result => result.message)
 
     setConversationEntry(pubkey, messages)
     conversationMessages.set(messages)
@@ -480,4 +540,3 @@ export function resetMessagingState(): void {
   subscriptionOwner = null
   processedOwner = null
 }
-

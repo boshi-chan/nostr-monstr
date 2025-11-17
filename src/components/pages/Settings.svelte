@@ -25,7 +25,7 @@
   import EmberIcon from '../icons/EmberIcon.svelte'
   import ZapIcon from '../icons/ZapIcon.svelte'
   import { CUSTOM_NODE_ID, DEFAULT_NODES, type MoneroNode } from '$lib/wallet/nodes'
-  import { nwcConnection, nwcConnected, setNWCFromURI, disconnectNWC } from '$stores/nwc'
+import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC, ensureNwcUnlocked } from '$stores/nwc'
   import { getNWCBalance, getNWCInfo } from '$lib/nwc'
   import type { WalletInfo } from '$types/wallet'
   import { toDataURL as qrToDataURL } from 'qrcode'
@@ -93,6 +93,7 @@
   let customNodeError: string | null = null
   let customNodeBusy = false
   let customFormTouched = false
+  let hasLockedLightning = false
 
   $: walletMode = !$walletState.hasWallet ? 'setup' : $walletState.isReady ? 'ready' : 'pending'
   $: customNodeEntry =
@@ -148,6 +149,8 @@
     customNodeLabel = $walletState.customNodeLabel ?? ''
     customNodeUri = $walletState.customNodeUri ?? ''
   }
+
+  $: hasLockedLightning = !$nwcConnected && Boolean($nwcSnapshot)
 
   // Ensure the current user's metadata is loaded before showing settings
   $: if ($currentUser?.pubkey) {
@@ -796,6 +799,8 @@
   // Lightning/NWC state
   let nwcUri = ''
   let nwcConnecting = false
+  let nwcUnlocking = false
+  let nwcUnlockError: string | null = null
   let nwcError: string | null = null
   let nwcSuccess: string | null = null
   let nwcBalance: number | null = null
@@ -822,6 +827,7 @@
       await loadNWCData()
 
       nwcUri = ''
+      nwcUnlockError = null
       nwcSuccess = 'Successfully connected to wallet!'
       setTimeout(() => (nwcSuccess = null), 3000)
     } catch (err) {
@@ -854,12 +860,35 @@
     }
   }
 
+  async function handleUnlockNWC() {
+    if (nwcUnlocking) return
+    nwcUnlocking = true
+    nwcUnlockError = null
+    try {
+      const unlocked = await ensureNwcUnlocked({ silent: false })
+      if (!unlocked) {
+        nwcUnlockError = 'Unlock cancelled'
+      } else {
+        nwcSuccess = 'Lightning wallet unlocked'
+        setTimeout(() => (nwcSuccess = null), 2500)
+        if (activeTab === 'lightning') {
+          void loadNWCData()
+        }
+      }
+    } catch (err) {
+      nwcUnlockError = err instanceof Error ? err.message : 'Failed to unlock wallet'
+    } finally {
+      nwcUnlocking = false
+    }
+  }
+
   function handleDisconnectNWC() {
     disconnectNWC()
     nwcBalance = null
     nwcInfo = null
     nwcDataLoaded = false
     nwcSuccess = 'Wallet disconnected'
+    nwcUnlockError = null
     setTimeout(() => (nwcSuccess = null), 3000)
   }
 
@@ -1891,6 +1920,44 @@
         </div>
 
         {#if !$nwcConnected}
+          {#if hasLockedLightning}
+            <div class="surface-card space-y-4 p-6">
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0 flex-1">
+                  <h5 class="text-base font-semibold text-text-soft">Wallet Locked</h5>
+                  <p class="text-sm text-text-muted mt-1 break-all font-mono text-xs">
+                    {$nwcSnapshot?.walletPubkey.slice(0, 16)}...
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  on:click={handleDisconnectNWC}
+                  class="shrink-0 rounded-full border border-rose-500/40 px-4 py-2 text-sm font-medium text-rose-300 transition-colors hover:border-rose-500/60 hover:bg-rose-500/10"
+                >
+                  Disconnect
+                </button>
+              </div>
+
+              <p class="text-sm text-text-muted">
+                Enter your wallet PIN when prompted to unlock Lightning zaps. Your wallet stays locked until you choose to unlock it.
+              </p>
+
+              {#if nwcUnlockError}
+                <div class="rounded-lg border border-rose-500/40 bg-rose-500/10 p-3 text-sm text-rose-200">
+                  {nwcUnlockError}
+                </div>
+              {/if}
+
+              <button
+                type="button"
+                on:click={handleUnlockNWC}
+                disabled={nwcUnlocking}
+                class="w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-bold text-dark shadow-sm transition hover:bg-primary/90 disabled:opacity-50"
+              >
+                {nwcUnlocking ? 'Unlocking...' : 'Unlock Wallet'}
+              </button>
+            </div>
+          {:else}
           <div class="surface-card space-y-4 p-6">
             <div>
               <h5 class="text-base font-semibold text-text-soft mb-2">Connect Wallet</h5>
@@ -1957,6 +2024,7 @@
               </li>
             </ul>
           </div>
+          {/if}
 
         {:else}
           <div class="surface-card space-y-6 p-6">

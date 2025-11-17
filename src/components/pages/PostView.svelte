@@ -93,7 +93,7 @@
   }
 </script>
 
-<div class="flex h-full flex-col bg-transparent pb-24 md:pb-0">
+<div class="flex h-full flex-col bg-transparent pb-6 md:pb-0">
   <header class="sticky top-0 z-10 flex items-center justify-between border-b border-dark-border/60 bg-dark/70 px-4 py-3 backdrop-blur-2xl md:px-6">
     <button
       type="button"

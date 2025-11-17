@@ -5,6 +5,9 @@
   import { toDataURL as qrToDataURL } from 'qrcode'
   import type { NDKNip46Signer } from '@nostr-dev-kit/ndk'
 
+  // Optional callback when login is successful (used when shown in modal)
+  export let onSuccess: (() => void) | undefined = undefined
+
   let isLoading = false
   let error = ''
   let connectUrl = ''
@@ -33,6 +36,7 @@
       isLoading = true
       error = ''
       await loginWithExtension()
+      onSuccess?.()
     } catch (err) {
       error = String(err)
     } finally {
@@ -60,7 +64,8 @@
       await finishNostrConnectLogin(result.signer)
       connectionStatus = 'connected'
 
-      // Login successful - component will be unmounted as user is authenticated
+      // Login successful - call callback if provided
+      onSuccess?.()
     } catch (err) {
       connectionStatus = 'error'
       error = String(err)

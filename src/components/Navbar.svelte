@@ -1,6 +1,6 @@
 <script lang="ts">
   import { activeTab } from '$stores/nav'
-  import { currentUser } from '$stores/auth'
+  import { currentUser, isAuthenticated } from '$stores/auth'
   import { feedSource, lastTimelineFeed } from '$stores/feedSource'
   import { logout } from '$lib/auth'
 import { navigateToPage } from '$stores/router'
@@ -12,6 +12,17 @@ import MailIcon from 'lucide-svelte/icons/mail'
 import { unreadCount } from '$stores/notifications'
 import { showSearch } from '$stores/search'
 import { unreadCounts } from '$stores/messages'
+
+  let showLoginModal = false
+
+  function openLoginModal() {
+    showLoginModal = true
+    closeMenus()
+  }
+
+  function closeLoginModal() {
+    showLoginModal = false
+  }
 
   const tabs: { id: NavTab; label: string; icon: any }[] = [
     { id: 'home', label: 'Home', icon: HomeIcon },
@@ -114,60 +125,80 @@ import { unreadCounts } from '$stores/messages'
   </div>
 
   <!-- Account button (mobile) -->
-  <button
-    on:click={toggleMobileMenu}
-    class="md:hidden relative flex h-12 w-12 items-center justify-center rounded-xl text-text-muted hover:bg-dark-lighter/60 hover:text-text-soft transition-colors duration-200"
-    title="Account"
-  >
-    {#if $currentUser?.picture}
-      <img src={$currentUser.picture} alt="Account" class="h-9 w-9 rounded-full object-cover border-2 border-transparent" />
-    {:else}
-      <div class="flex h-9 w-9 items-center justify-center rounded-full bg-primary/20 text-sm font-semibold text-primary">
-        {($currentUser?.name || $currentUser?.pubkey || '??').slice(0, 2).toUpperCase()}
-      </div>
-    {/if}
-  </button>
+  {#if $isAuthenticated}
+    <button
+      on:click={toggleMobileMenu}
+      class="md:hidden relative flex h-12 w-12 items-center justify-center rounded-xl text-text-muted hover:bg-dark-lighter/60 hover:text-text-soft transition-colors duration-200"
+      title="Account"
+    >
+      {#if $currentUser?.picture}
+        <img src={$currentUser.picture} alt="Account" class="h-9 w-9 rounded-full object-cover border-2 border-transparent" />
+      {:else}
+        <div class="flex h-9 w-9 items-center justify-center rounded-full bg-primary/20 text-sm font-semibold text-primary">
+          {($currentUser?.name || $currentUser?.pubkey || '??').slice(0, 2).toUpperCase()}
+        </div>
+      {/if}
+    </button>
+  {:else}
+    <button
+      on:click={openLoginModal}
+      class="md:hidden h-12 px-4 flex items-center justify-center rounded-xl bg-primary text-dark font-semibold text-sm hover:bg-primary/90 transition-colors duration-200"
+      title="Login"
+    >
+      Login
+    </button>
+  {/if}
 
   <!-- Desktop compose & account -->
   <div class="hidden md:flex md:mt-auto md:w-full md:flex-col md:items-center md:gap-6 md:pb-4">
-    <div class="relative">
-      <button
-        on:click={toggleDesktopMenu}
-        class="w-12 h-12 flex items-center justify-center rounded-xl border border-dark-border/60 bg-dark-light/80 transition-colors duration-200 hover:border-primary/60"
-        title="Account menu"
-      >
-        {#if $currentUser?.picture}
-          <img src={$currentUser.picture} alt="Account" class="h-10 w-10 rounded-full object-cover" />
-        {:else}
-          <span class="text-sm font-semibold text-text-soft">
-            {($currentUser?.name || $currentUser?.pubkey || '??').slice(0, 2).toUpperCase()}
-          </span>
-        {/if}
-      </button>
+    {#if $isAuthenticated}
+      <div class="relative">
+        <button
+          on:click={toggleDesktopMenu}
+          class="w-12 h-12 flex items-center justify-center rounded-xl border border-dark-border/60 bg-dark-light/80 transition-colors duration-200 hover:border-primary/60"
+          title="Account menu"
+        >
+          {#if $currentUser?.picture}
+            <img src={$currentUser.picture} alt="Account" class="h-10 w-10 rounded-full object-cover" />
+          {:else}
+            <span class="text-sm font-semibold text-text-soft">
+              {($currentUser?.name || $currentUser?.pubkey || '??').slice(0, 2).toUpperCase()}
+            </span>
+          {/if}
+        </button>
 
-      {#if desktopMenuOpen}
-        <div class="absolute left-full top-1/2 z-50 w-48 -translate-y-1/2 translate-x-4 rounded-2xl border border-dark-border/70 bg-dark-light/95 p-2 shadow-xl">
-          <button
-            class="w-full rounded-xl px-3 py-2 text-left text-sm text-text-soft hover:bg-dark-lighter/60"
-            on:click={() => navigate('profile')}
-          >
-            View profile
-          </button>
-          <button
-            class="w-full rounded-xl px-3 py-2 text-left text-sm text-text-soft hover:bg-dark-lighter/60"
-            on:click={() => navigate('settings')}
-          >
-            Settings
-          </button>
-          <button
-            class="w-full rounded-xl px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/20"
-            on:click={handleLogout}
-          >
-            Logout
-          </button>
-        </div>
-      {/if}
-    </div>
+        {#if desktopMenuOpen}
+          <div class="absolute left-full top-1/2 z-50 w-48 -translate-y-1/2 translate-x-4 rounded-2xl border border-dark-border/70 bg-dark-light/95 p-2 shadow-xl">
+            <button
+              class="w-full rounded-xl px-3 py-2 text-left text-sm text-text-soft hover:bg-dark-lighter/60"
+              on:click={() => navigate('profile')}
+            >
+              View profile
+            </button>
+            <button
+              class="w-full rounded-xl px-3 py-2 text-left text-sm text-text-soft hover:bg-dark-lighter/60"
+              on:click={() => navigate('settings')}
+            >
+              Settings
+            </button>
+            <button
+              class="w-full rounded-xl px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/20"
+              on:click={handleLogout}
+            >
+              Logout
+            </button>
+          </div>
+        {/if}
+      </div>
+    {:else}
+      <button
+        on:click={openLoginModal}
+        class="w-full h-12 flex items-center justify-center rounded-xl bg-primary text-dark font-semibold text-sm hover:bg-primary/90 transition-colors duration-200"
+        title="Login"
+      >
+        Login
+      </button>
+    {/if}
   </div>
 </nav>
 
@@ -197,25 +228,47 @@ import { unreadCounts } from '$stores/messages'
     >
       Search
     </button>
-    <button
-      class="w-full rounded-xl px-3 py-2 text-left text-sm text-text-soft hover:bg-dark-lighter/60"
-      on:click={() => navigate('profile')}
-    >
-      View profile
-    </button>
-    <button
-      class="w-full rounded-xl px-3 py-2 text-left text-sm text-text-soft hover:bg-dark-lighter/60"
-      on:click={() => navigate('settings')}
-    >
-      Settings
-    </button>
-    <button
-      class="w-full rounded-xl px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/20"
-      on:click={handleLogout}
-    >
-      Logout
-    </button>
+    {#if $isAuthenticated}
+      <button
+        class="w-full rounded-xl px-3 py-2 text-left text-sm text-text-soft hover:bg-dark-lighter/60"
+        on:click={() => navigate('profile')}
+      >
+        View profile
+      </button>
+      <button
+        class="w-full rounded-xl px-3 py-2 text-left text-sm text-text-soft hover:bg-dark-lighter/60"
+        on:click={() => navigate('settings')}
+      >
+        Settings
+      </button>
+      <button
+        class="w-full rounded-xl px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/20"
+        on:click={handleLogout}
+      >
+        Logout
+      </button>
+    {/if}
   </div>
+{/if}
+
+{#if showLoginModal}
+  {#await import('./pages/Login.svelte') then LoginModule}
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div class="relative w-full max-w-md">
+        <button
+          class="absolute -top-10 right-0 text-text-muted hover:text-text-soft transition-colors"
+          on:click={closeLoginModal}
+          aria-label="Close"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+        <svelte:component this={LoginModule.default} onSuccess={closeLoginModal} />
+      </div>
+    </div>
+  {/await}
 {/if}
 
 <style>

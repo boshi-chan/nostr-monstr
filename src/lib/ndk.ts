@@ -5,14 +5,15 @@
 
 import NDK, { type NDKUser, NDKNip07Signer, NDKPrivateKeySigner, NDKNip46Signer } from '@nostr-dev-kit/ndk'
 import { writable } from 'svelte/store'
+import { logger } from './logger'
 
 // Default relays - can be customized later
 const DEFAULT_RELAYS = [
   'wss://relay.damus.io',
   'wss://relay.nostr.band',
   'wss://nos.lol',
-  'wss://relay.snort.social',
-  'wss://relay.primal.net', // Good for long-form content
+  'wss://nostr.mom',
+  'wss://nostr.oxtr.dev ', // Additional reliable public relay
 ]
 
 // Global NDK instance
@@ -25,6 +26,7 @@ export const ndkError = writable<string | null>(null)
 
 /**
  * Initialize NDK with configuration
+ * Optionally pass custom relays, otherwise uses defaults
  */
 export async function initNDK(relays: string[] = DEFAULT_RELAYS): Promise<NDK> {
   if (ndkInstance) {
@@ -187,6 +189,88 @@ export function getCurrentNDKUser(): NDKUser | null {
 export function logoutNDK(): void {
   const ndk = getNDK()
   ndk.signer = undefined
+}
+
+/**
+ * Reload user relays from NIP-65 and connect to them
+ * This should be called after login to switch from default relays to user's custom relays
+ */
+export async function loadUserRelaysAndConnect(): Promise<void> {
+  if (!ndkInstance) {
+    logger.warn('Cannot load user relays - NDK not initialized')
+    return
+  }
+
+  const user = getCurrentNDKUser()
+  if (!user?.pubkey) {
+    logger.info('No authenticated user - skipping relay reload')
+    return
+  }
+
+  // Wait a bit for NDK to establish initial connections
+  // This prevents fetching before any relays are connected
+  if (ndkInstance.pool.relays.size === 0) {
+    logger.info('Waiting for initial relay connections before loading user relays...')
+    await new Promise(resolve => setTimeout(resolve, 1000))
+  }
+
+  try {
+    logger.info('Loading user relays from NIP-65...')
+
+    // Fetch user's NIP-65 relay list with timeout
+    const fetchPromise = ndkInstance.fetchEvent(
+      {
+        authors: [user.pubkey],
+        kinds: [10002],
+      },
+      { closeOnEose: true }
+    )
+
+    // Add 5 second timeout to prevent hanging
+    const timeoutPromise = new Promise<null>((resolve) =>
+      setTimeout(() => {
+        logger.warn('NIP-65 fetch timed out after 5s, continuing with default relays')
+        resolve(null)
+      }, 5000)
+    )
+
+    const event = await Promise.race([fetchPromise, timeoutPromise])
+
+    if (!event || !event.tags || event.tags.length === 0) {
+      logger.info('No NIP-65 relay list found, keeping default relays')
+      return
+    }
+
+    // Parse relay URLs from tags
+    const userRelayUrls: string[] = []
+    for (const tag of event.tags) {
+      if (tag[0] === 'r' && tag[1] && tag[1].startsWith('wss://')) {
+        userRelayUrls.push(tag[1])
+      }
+    }
+
+    if (userRelayUrls.length === 0) {
+      logger.info('No valid relays in NIP-65 list, keeping default relays')
+      return
+    }
+
+    logger.info(`Found ${userRelayUrls.length} relays from NIP-65:`, userRelayUrls)
+
+    // Add user relays to the pool (NDK will handle deduplication)
+    for (const url of userRelayUrls) {
+      try {
+        const relay = ndkInstance.pool.getRelay(url, true, true)
+        await relay.connect()
+        logger.info(`Connected to user relay: ${url}`)
+      } catch (err) {
+        logger.warn(`Failed to connect to user relay ${url}:`, err)
+      }
+    }
+
+    logger.info('User relays loaded and connected')
+  } catch (err) {
+    logger.error('Failed to load user relays:', err)
+  }
 }
 
 /**

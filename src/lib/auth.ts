@@ -23,7 +23,7 @@ import {
   messagesError,
 } from '$stores/messages'
 import { getSetting, saveSetting } from './db'
-import { loginWithNIP07, logoutNDK, createNostrConnectSigner, completeNostrConnectLogin } from './ndk'
+import { loginWithNIP07, logoutNDK, createNostrConnectSigner, completeNostrConnectLogin, loadUserRelaysAndConnect } from './ndk'
 import type { User } from '$types/user'
 import type { NDKUser, NDKNip46Signer } from '@nostr-dev-kit/ndk'
 import { warmupMessagingPermissions, resetMessagingState } from '$lib/messaging-simple'
@@ -85,6 +85,9 @@ export async function finishNostrConnectLogin(signer: NDKNip46Signer): Promise<U
     currentUser.set(user)
     void warmupMessagingPermissions()
 
+    // Load user's custom relays from NIP-65 and connect to them
+    void loadUserRelaysAndConnect()
+
     return user
   } catch (err) {
     throw new Error(`Nostr Connect login failed: ${err}`)
@@ -123,6 +126,9 @@ export async function loginWithExtension(): Promise<User> {
     currentUser.set(user)
     void warmupMessagingPermissions()
 
+    // Load user's custom relays from NIP-65 and connect to them
+    void loadUserRelaysAndConnect()
+
     return user
   } catch (err) {
     throw new Error(`Extension login failed: ${err}`)
@@ -151,6 +157,7 @@ export async function restoreSession(): Promise<User | null> {
         if (ndkUser.pubkey === savedUser.pubkey) {
           currentUser.set(savedUser)
           void warmupMessagingPermissions()
+          void loadUserRelaysAndConnect()
           return savedUser
         }
       } catch (err) {
@@ -177,6 +184,7 @@ export async function restoreSession(): Promise<User | null> {
           if (user.pubkey === savedUser.pubkey) {
             currentUser.set(savedUser)
             void warmupMessagingPermissions()
+            void loadUserRelaysAndConnect()
             return savedUser
           }
         }
@@ -188,6 +196,7 @@ export async function restoreSession(): Promise<User | null> {
     // Fallback: Load user without signer (read-only mode)
     currentUser.set(savedUser)
     void warmupMessagingPermissions()
+    void loadUserRelaysAndConnect()
     return savedUser
   } catch (err) {
     logger.error('Failed to restore session:', err)

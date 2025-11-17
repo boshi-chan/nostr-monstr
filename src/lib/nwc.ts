@@ -4,7 +4,7 @@
  */
 
 import { get } from 'svelte/store'
-import { nwcConnection } from '$stores/nwc'
+import { nwcConnection, ensureNwcUnlocked } from '$stores/nwc'
 import { getNDK, getCurrentNDKUser } from '$lib/ndk'
 import { NDKEvent, NDKRelaySet, NDKPrivateKeySigner } from '@nostr-dev-kit/ndk'
 import { fetchUserMetadata, getUserMetadata } from '$lib/metadata'
@@ -27,6 +27,9 @@ interface NWCResponse {
  * Send an encrypted NWC request and wait for response
  */
 async function sendNWCRequest(request: NWCRequest): Promise<NWCResponse> {
+  if (!(await ensureNwcUnlocked({ silent: false }))) {
+    throw new Error('Unlock your Lightning wallet to continue')
+  }
   const conn = get(nwcConnection)
   if (!conn) {
     throw new Error('No NWC connection configured')

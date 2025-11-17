@@ -11,6 +11,7 @@
   import Home from './pages/Home.svelte'
   import Messages from './pages/Messages.svelte'
   import Profile from './pages/Profile.svelte'
+  import ScrollToTopButton from './ScrollToTopButton.svelte'
   import { activeRoute } from '$stores/router'
   import { showEmberModal } from '$stores/wallet'
 
@@ -47,6 +48,8 @@
   }
 
   $: isMessagesTab = $activeRoute.type === 'page' && $activeRoute.tab === 'messages'
+
+  let mainEl: HTMLElement | null = null
 </script>
 
 <div class="flex h-screen w-screen flex-col bg-dark" style="height: 100dvh;">
@@ -58,7 +61,10 @@
     </div>
 
     <!-- Main content -->
-    <main class={`flex-1 bg-transparent ${isMessagesTab ? 'overflow-hidden pb-20 md:pb-0' : 'overflow-y-auto pb-20 md:pb-0'}`}>
+    <main
+      bind:this={mainEl}
+      class={`flex-1 bg-transparent ${isMessagesTab ? 'overflow-hidden pb-20 md:pb-0' : 'overflow-y-auto pb-20 md:pb-0'}`}
+    >
       {#if $activeRoute.type === 'page'}
         {#if $activeRoute.tab === 'home'}
           <Home />
@@ -109,6 +115,9 @@
 
   <!-- Floating compose button (only on feed pages) -->
   <FloatingComposeButton />
+  {#if !isMessagesTab}
+    <ScrollToTopButton target={mainEl} />
+  {/if}
 
   <!-- Modals -->
   <Compose />

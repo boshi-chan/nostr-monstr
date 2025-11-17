@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store'
+import { writable, derived, get } from 'svelte/store'
 import { encryptWalletData, decryptWalletData } from '$lib/crypto'
 import { requireWalletMasterKey, readWalletMasterKey } from '$lib/wallet/lazy'
 
@@ -66,6 +66,7 @@ let encryptedNwcSnapshot: StoredNWCConnection | null =
   typeof window !== 'undefined' ? loadStoredNwcConnection() : null
 
 export const nwcConnection = writable<NWCConnection | null>(null)
+export const nwcSnapshot = writable<StoredNWCConnection | null>(encryptedNwcSnapshot)
 
 async function unlockStoredNwcConnection(options?: { silent?: boolean }): Promise<boolean> {
   if (!encryptedNwcSnapshot) return false
@@ -94,13 +95,20 @@ async function unlockStoredNwcConnection(options?: { silent?: boolean }): Promis
   } catch (err) {
     logger.error('Failed to decrypt stored NWC connection, clearing it', err)
     encryptedNwcSnapshot = null
+    nwcSnapshot.set(null)
     saveStoredNwcConnection(null)
     return false
   }
 }
 
-if (typeof window !== 'undefined' && encryptedNwcSnapshot) {
-  void unlockStoredNwcConnection({ silent: true })
+export async function ensureNwcUnlocked(options?: { silent?: boolean }): Promise<boolean> {
+  if (get(nwcConnection)) {
+    return true
+  }
+  if (!encryptedNwcSnapshot) {
+    return false
+  }
+  return await unlockStoredNwcConnection(options)
 }
 
 /**
@@ -149,6 +157,7 @@ export async function setNWCFromURI(uri: string): Promise<boolean> {
     }
 
     encryptedNwcSnapshot = snapshot
+    nwcSnapshot.set(snapshot)
     saveStoredNwcConnection(snapshot)
 
     nwcConnection.set({
@@ -171,6 +180,7 @@ export async function setNWCFromURI(uri: string): Promise<boolean> {
  */
 export function disconnectNWC(): void {
   encryptedNwcSnapshot = null
+  nwcSnapshot.set(null)
   saveStoredNwcConnection(null)
   nwcConnection.set(null)
 }
