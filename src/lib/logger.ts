@@ -10,6 +10,8 @@ function call(method: 'info' | 'warn' | 'error' | 'debug', args: unknown[]): voi
   }
 }
 
+import { debugLogStore } from '$stores/debug'
+
 const importMetaDev = typeof import.meta !== 'undefined' ? (import.meta as any) : {}
 const isDev = Boolean(importMetaDev.env?.DEV)
 
@@ -22,9 +24,21 @@ export const logger = {
   },
   warn: (...args: unknown[]) => {
     call('warn', args)
+    debugLogStore.push({
+      level: 'warn',
+      message: String(args[0]),
+      details: args.slice(1),
+      timestamp: Date.now(),
+    })
   },
   error: (...args: unknown[]) => {
     call('error', args)
+    debugLogStore.push({
+      level: 'error',
+      message: String(args[0]),
+      details: args.slice(1),
+      timestamp: Date.now(),
+    })
   },
 }
 

@@ -9,6 +9,7 @@ import { requestPinModal } from '$stores/pinPrompt'
 import { encryptWalletData, decryptWalletData } from '$lib/crypto'
 import { getSetting, saveSetting } from '$lib/db'
 import { getNDK, getCurrentNDKUser } from '$lib/ndk'
+import { publishToConfiguredRelays } from '$lib/relay-publisher'
 import type { WalletInfo } from '$types/wallet'
 import type moneroTs from 'monero-ts'
 import { NDKEvent } from '@nostr-dev-kit/ndk'
@@ -18,6 +19,7 @@ import { getBrowserFs, resetBrowserFs } from './browser-fs'
 import type { SendMoneroOptions, SendMoneroResult } from '$types/wallet'
 import { EMBER_EVENT_KIND, EMBER_TAG, encodeEmberPayload } from '$lib/ember'
 import { setEmberAddressMetadata } from '$lib/profile'
+import { clearNativeWalletValue, getNativeWalletValue, isNativeWalletStorageAvailable, setNativeWalletValue } from '$lib/native-wallet-storage'
 
 type StoredWalletSecrets = {
   seed: string
@@ -264,6 +266,32 @@ function clearMasterKey(): void {
   }
 }
 
+async function saveSecureSetting(key: string, value: any): Promise<void> {
+  const wroteNative = await setNativeWalletValue(key, value)
+  if (wroteNative) {
+    await saveSetting(key, null)
+  } else {
+    await saveSetting(key, value)
+  }
+}
+
+async function loadSecureSetting<T>(key: string): Promise<T | null> {
+  if (isNativeWalletStorageAvailable()) {
+    const nativeValue = await getNativeWalletValue<T>(key)
+    if (nativeValue !== null) {
+      return nativeValue
+    }
+  }
+  return await getSetting(key)
+}
+
+async function clearSecureSetting(key: string): Promise<void> {
+  if (isNativeWalletStorageAvailable()) {
+    await clearNativeWalletValue(key)
+  }
+  await saveSetting(key, null)
+}
+
 async function loadMonero(): Promise<MoneroLib> {
   if (!isBrowser()) {
     throw new Error('Monero wallet functionality is only available in the browser.')
@@ -281,11 +309,11 @@ async function loadMonero(): Promise<MoneroLib> {
 
 async function persistSecrets(key: string, secrets: StoredWalletSecrets): Promise<void> {
   const encrypted = await encryptWalletData(JSON.stringify(secrets), key)
-  await saveSetting(WALLET_SECRETS_KEY, encrypted)
+  await saveSecureSetting(WALLET_SECRETS_KEY, encrypted)
 }
 
 async function loadEncryptedSecrets(): Promise<any> {
-  return await getSetting(WALLET_SECRETS_KEY)
+  return await loadSecureSetting(WALLET_SECRETS_KEY)
 }
 
 async function tryDecodeSecrets(
@@ -309,11 +337,11 @@ async function tryDecodeSecrets(
 
 async function persistMeta(meta: WalletMetaInfo): Promise<void> {
   cachedMeta = meta
-  await saveSetting(WALLET_META_KEY, meta)
+  await saveSecureSetting(WALLET_META_KEY, meta)
 }
 
 async function loadMeta(): Promise<WalletMetaInfo | null> {
-  const raw = await getSetting(WALLET_META_KEY)
+  const raw = await loadSecureSetting<WalletMetaInfo>(WALLET_META_KEY)
   if (!raw) {
     cachedMeta = null
     return null
@@ -321,7 +349,7 @@ async function loadMeta(): Promise<WalletMetaInfo | null> {
   const normalized = normalizeMeta(raw)
   cachedMeta = normalized
   if (normalized && (raw.restoreHeight !== normalized.restoreHeight || raw.nodeId !== normalized.nodeId)) {
-    await saveSetting(WALLET_META_KEY, normalized)
+    await saveSecureSetting(WALLET_META_KEY, normalized)
   }
   return normalized
 }
@@ -686,8 +714,8 @@ async function publishEmberReceipt(
       ndkEvent.tags.push(['payload', payload])
     }
     ndkEvent.created_at = Math.floor(Date.now() / 1000)
-    await ndkEvent.sign()
-    await ndkEvent.publish()
+      await ndkEvent.sign()
+      await publishToConfiguredRelays(ndkEvent)
   } catch (err) {
     logger.warn('Failed to publish Ember receipt:', err)
   }
@@ -1100,8 +1128,8 @@ export async function deleteWallet(): Promise<void> {
   walletKey = null
   clearMasterKey()
   walletSyncPromise = null
-  await saveSetting(WALLET_SECRETS_KEY, null)
-  await saveSetting(WALLET_META_KEY, null)
+  await clearSecureSetting(WALLET_SECRETS_KEY)
+  await clearSecureSetting(WALLET_META_KEY)
   await saveSetting(WALLET_NODE_KEY, null)
   await resetBrowserFs()
   resetWalletStore()
@@ -1120,6 +1148,3 @@ export async function requireWalletMasterKey(): Promise<string> {
 export async function readWalletMasterKey(opts: { allowCancel?: boolean } = {}): Promise<string | null> {
   return await readMasterKey(opts)
 }
-
-
-

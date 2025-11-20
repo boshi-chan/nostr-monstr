@@ -5,15 +5,16 @@
   import type { NavTab } from '$stores/nav'
   import { activeRoute } from '$stores/router'
   import type { Route } from '$stores/router'
+  import { isAuthenticated } from '$stores/auth'
 
   let currentTab: NavTab = 'home'
   $: currentTab = $activeTab
   let route: Route = { type: 'page', tab: 'home' }
   $: route = $activeRoute
 
-  // Only show on feed pages (home and long-reads)
+  // Only show on feed pages (home and long-reads) when authenticated
   let shouldShow = false
-  $: shouldShow = computeShouldShow(route, currentTab)
+  $: shouldShow = $isAuthenticated && computeShouldShow(route, currentTab)
 
   function handleCompose() {
     showCompose.set(true)

@@ -12,6 +12,7 @@
   export let text: string
   export let onEventClick: ((eventId: string) => void) | undefined = undefined
   export let onProfileClick: ((pubkey: string) => void) | undefined = undefined
+  export let suppressEventIds: string[] = []
 
   interface TextPart {
     type: 'text' | 'uri'
@@ -20,6 +21,10 @@
   }
 
   let parts: TextPart[] = []
+
+  let suppressSet = new Set<string>()
+
+  $: suppressSet = new Set((suppressEventIds || []).map(id => id?.toLowerCase()).filter(Boolean))
 
   $: {
     parts = []
@@ -112,24 +117,27 @@
   {#if part.type === 'text'}
     <span>{part.content}</span>
   {:else if part.uri && part.type === 'uri'}
-    {@const pubkey = getPubkeyFromURI(part.uri)}
-    {@const metadata = pubkey ? $metadataCache.get(pubkey) : undefined}
-    {@const displayName = pubkey ? getDisplayName(pubkey, metadata) : null}
-    <button
-      type="button"
-      on:click|stopPropagation={() => {
-        if (part.uri) {
-          handleURIClick(part.uri)
-        }
-      }}
-      class="text-primary hover:underline focus:outline-none focus:ring-1 focus:ring-primary/40 rounded px-0.5 -mx-0.5"
-      title={part.content}
-    >
-      {#if part.uri.type === 'npub' || part.uri.type === 'nprofile'}
-        @{displayName || pubkey?.slice(0, 8) || 'unknown'}
-      {:else}
-        {getURILabel(part.uri)}
-      {/if}
-    </button>
+    {@const eventId = getEventIdFromURI(part.uri)}
+    {#if !(eventId && suppressSet.has(eventId.toLowerCase()))}
+      {@const pubkey = getPubkeyFromURI(part.uri)}
+      {@const metadata = pubkey ? $metadataCache.get(pubkey) : undefined}
+      {@const displayName = pubkey ? getDisplayName(pubkey, metadata) : null}
+      <button
+        type="button"
+        on:click|stopPropagation={() => {
+          if (part.uri) {
+            handleURIClick(part.uri)
+          }
+        }}
+        class="text-primary hover:underline focus:outline-none focus:ring-1 focus:ring-primary/40 rounded px-0.5 -mx-0.5"
+        title={part.content}
+      >
+        {#if part.uri.type === 'npub' || part.uri.type === 'nprofile'}
+          @{displayName || pubkey?.slice(0, 8) || 'unknown'}
+        {:else}
+          {getURILabel(part.uri)}
+        {/if}
+      </button>
+    {/if}
   {/if}
 {/each}

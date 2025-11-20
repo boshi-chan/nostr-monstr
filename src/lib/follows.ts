@@ -8,6 +8,7 @@ import { getNDK, getCurrentNDKUser } from './ndk'
 import { following } from '$stores/feed'
 import { get } from 'svelte/store'
 import { NDKEvent } from '@nostr-dev-kit/ndk'
+import { publishToConfiguredRelays } from './relay-publisher'
 
 /**
  * Get current contacts (follows) from NIP-03 (kind 3)
@@ -77,7 +78,7 @@ async function publishContactsList(contacts: Set<string>): Promise<void> {
     })
 
     await event.sign(ndk.signer)
-    await event.publish()
+    await publishToConfiguredRelays(event)
 
     logger.info('✓ Contacts list published successfully')
   } catch (err) {

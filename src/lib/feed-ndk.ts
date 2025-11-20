@@ -36,6 +36,8 @@ import {
 } from '$lib/engagement'
 import { persistInteractionsSnapshot } from '$lib/interaction-cache'
 import { normalizeEvent } from '$lib/event-validation'
+import { publishToConfiguredRelays } from './relay-publisher'
+import { nip19 } from 'nostr-tools'
 
 const subscriptionRefs = new Map<string, any>()
 const eventCache = new Map<string, NostrEvent>()
@@ -1044,18 +1046,47 @@ function validatePostContent(content: string): void {
   }
 }
 
+function buildReplyTags(replyTo: NostrEvent): string[][] {
+  const tags: string[][] = []
+  const eTagKeys = new Set<string>()
+  const pTagSet = new Set<string>()
+
+  const explicitRoot = replyTo.tags?.find(tag => tag[0] === 'e' && (tag[3]?.toLowerCase() === 'root' || tag[2]?.toLowerCase() === 'root'))
+  const rootId = explicitRoot?.[1] ?? replyTo.id
+  if (rootId && !eTagKeys.has(`root:${rootId}`)) {
+    tags.push(['e', rootId, '', 'root'])
+    eTagKeys.add(`root:${rootId}`)
+  }
+
+  if (!eTagKeys.has(`reply:${replyTo.id}`)) {
+    tags.push(['e', replyTo.id, '', 'reply'])
+    eTagKeys.add(`reply:${replyTo.id}`)
+  }
+
+  pTagSet.add(replyTo.pubkey)
+  for (const tag of replyTo.tags ?? []) {
+    if (tag[0] === 'p' && tag[1]) {
+      pTagSet.add(tag[1])
+    }
+  }
+
+  for (const pubkey of pTagSet) {
+    tags.push(['p', pubkey])
+  }
+
+  return tags
+}
+
 /**
  * Publish a note with validation
  */
-export async function publishNote(content: string, replyTo?: NostrEvent): Promise<NostrEvent> {
+export async function publishNote(content: string, replyTo?: NostrEvent, quote?: NostrEvent): Promise<NostrEvent> {
   try {
-    // Validate input
     validatePostContent(content)
 
     const ndk = getNDK()
     const user = getCurrentNDKUser()
 
-    // Check authentication
     if (!user?.pubkey) {
       throw new Error('Not authenticated - please log in')
     }
@@ -1068,7 +1099,6 @@ export async function publishNote(content: string, replyTo?: NostrEvent): Promis
       throw new Error('No signer available - please log in again')
     }
 
-    // Validate reply target if provided
     if (replyTo) {
       if (!replyTo.id) {
         throw new Error('Invalid reply target')
@@ -1078,25 +1108,56 @@ export async function publishNote(content: string, replyTo?: NostrEvent): Promis
       }
     }
 
-    const tags: string[][] = []
-
-    // Add reply tags if replying
-    if (replyTo) {
-      tags.push(['e', replyTo.id, '', 'reply'])
-      tags.push(['p', replyTo.pubkey])
+    const tags: string[][] = replyTo ? buildReplyTags(replyTo) : []
+    const pTagValues = new Set<string>()
+    for (const tag of tags) {
+      if (tag[0] === 'p' && tag[1]) {
+        pTagValues.add(tag[1])
+      }
     }
 
-    // Create event
+    let finalContent = content.trim()
+
+    if (quote?.id) {
+      const existingQuoteTag = tags.some(tag => (tag[0] === 'q' || tag[0] === 'e') && tag[1] === quote.id)
+      if (!existingQuoteTag) {
+        const quoteTag: string[] = ['q', quote.id]
+        quoteTag.push('', quote.pubkey ?? '')
+        tags.push(quoteTag)
+      }
+      if (quote.pubkey && !pTagValues.has(quote.pubkey)) {
+        pTagValues.add(quote.pubkey)
+        tags.push(['p', quote.pubkey])
+      }
+
+      const quoteSnippet = quote.content?.trim()
+      if (quoteSnippet) {
+        tags.push(['alt', `Quoted post: ${quoteSnippet.slice(0, 180)}`])
+      }
+
+      try {
+        const nevent = nip19.neventEncode({
+          id: quote.id,
+          author: quote.pubkey,
+        })
+        if (!finalContent.includes(nevent)) {
+          finalContent = finalContent.length > 0 ? `${finalContent}\nnostr:${nevent}` : `nostr:${nevent}`
+        }
+      } catch (err) {
+        logger.warn('Failed to encode nevent for quote:', err)
+      }
+    }
+
     const ndkEvent = new NDKEvent(ndk)
     ndkEvent.kind = 1
-    ndkEvent.content = content.trim()
+    ndkEvent.content = finalContent
     ndkEvent.tags = tags
     ndkEvent.created_at = Math.floor(Date.now() / 1000)
 
     await ndkEvent.sign()
-    await ndkEvent.publish()
+    const relays = await publishToConfiguredRelays(ndkEvent)
 
-    logger.info('✓ Post published:', ndkEvent.id)
+    logger.info('[POST] Published %s via %d relays', ndkEvent.id, relays.length)
 
     const raw = ndkEvent.rawEvent()
     recordUserEvent(raw)
@@ -1114,7 +1175,7 @@ export async function publishNote(content: string, replyTo?: NostrEvent): Promis
     return raw
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err)
-    logger.error('✗ Publish failed:', errorMsg)
+    logger.error('?o- Publish failed:', errorMsg)
     throw new Error(`Failed to publish post: ${errorMsg}`)
   }
 }
@@ -1136,8 +1197,8 @@ export async function publishReaction(eventId: string, emoji: string = '+'): Pro
   ndkEvent.tags = [['e', eventId]]
   ndkEvent.created_at = Math.floor(Date.now() / 1000)
 
-  await ndkEvent.sign()
-  await ndkEvent.publish()
+    await ndkEvent.sign()
+    await publishToConfiguredRelays(ndkEvent)
 
   incrementLikeCount(eventId, 1)
 }
@@ -1162,8 +1223,8 @@ export async function publishRepost(event: NostrEvent): Promise<void> {
   ]
   ndkEvent.created_at = Math.floor(Date.now() / 1000)
 
-  await ndkEvent.sign()
-  await ndkEvent.publish()
+    await ndkEvent.sign()
+    await publishToConfiguredRelays(ndkEvent)
 
   incrementRepostCount(event.id, 1)
 }
@@ -1194,8 +1255,8 @@ export async function publishZapRequest(
   ]
   ndkEvent.created_at = Math.floor(Date.now() / 1000)
 
-  await ndkEvent.sign()
-  await ndkEvent.publish()
+    await ndkEvent.sign()
+    await publishToConfiguredRelays(ndkEvent)
 }
 
 /**

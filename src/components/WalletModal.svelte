@@ -421,17 +421,25 @@
     }
   }
 
-  function formatTxDate(timestamp: number | null): string {
-    if (!timestamp) return 'Pending'
-    const date = new Date(timestamp)
-    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-  }
+function normalizeTimestamp(ts: number | null): number | null {
+  if (!ts) return null
+  // Monero returns seconds since epoch; convert to ms if value looks like seconds
+  return ts < 1e12 ? ts * 1000 : ts
+}
 
-  function formatTxTime(timestamp: number | null): string {
-    if (!timestamp) return ''
-    const date = new Date(timestamp)
-    return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
-  }
+function formatTxDate(timestamp: number | null): string {
+  const ms = normalizeTimestamp(timestamp)
+  if (!ms) return 'Pending'
+  const date = new Date(ms)
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function formatTxTime(timestamp: number | null): string {
+  const ms = normalizeTimestamp(timestamp)
+  if (!ms) return ''
+  const date = new Date(ms)
+  return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+}
 
   function getTxDirection(tx: any): 'in' | 'out' {
     // Check if transaction has any incoming transfers

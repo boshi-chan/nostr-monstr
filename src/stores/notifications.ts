@@ -1,5 +1,6 @@
 import { writable, derived } from 'svelte/store'
 import { logger } from '$lib/logger'
+import { ensureNotificationChannel, presentNativeNotification } from '$lib/native-notifications'
 
 /**
  * Notification types
@@ -82,6 +83,37 @@ notifications.subscribe(notifs => {
   saveNotifications(notifs)
 })
 
+// Prepare native channel on Android (no-op elsewhere)
+if (typeof window !== 'undefined') {
+  void ensureNotificationChannel()
+}
+
+function describeNotification(notification: Notification): { title: string; body: string } {
+  const name = notification.fromName || 'Someone'
+  switch (notification.type) {
+    case 'like':
+      return { title: 'New like', body: `${name} liked your post.` }
+    case 'reply':
+    case 'thread-reply':
+      return { title: 'New reply', body: `${name} replied: ${notification.eventContent ?? ''}` }
+    case 'quote':
+      return { title: 'Quoted by ' + name, body: notification.eventContent ?? 'Quoted your post.' }
+    case 'repost':
+      return { title: 'Repost', body: `${name} reposted your post.` }
+    case 'zap':
+      return {
+        title: 'Zap received',
+        body: `${name} zapped you${notification.amount ? ` for ${notification.amount} sats` : ''}.`,
+      }
+    case 'mention':
+      return { title: 'Mentioned by ' + name, body: notification.eventContent ?? '' }
+    case 'ember':
+      return { title: 'Ember received', body: `${name} sent Embers${notification.amount ? ` (${notification.amount})` : ''}.` }
+    default:
+      return { title: 'New notification', body: `${name} interacted with you.` }
+  }
+}
+
 /**
  * Unread notification count
  */
@@ -118,6 +150,10 @@ export function addNotification(notification: Notification): void {
     }
     const next = [notification, ...notifs]
     next.sort((a, b) => b.createdAt - a.createdAt)
+    if (typeof window !== 'undefined') {
+      const { title, body } = describeNotification(notification)
+      void presentNativeNotification(title, body)
+    }
     return next.slice(0, 100)
   })
 }

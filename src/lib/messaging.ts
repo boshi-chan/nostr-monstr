@@ -8,6 +8,7 @@
  */
 
 import { getNDK, getCurrentNDKUser } from '$lib/ndk'
+import { publishToConfiguredRelays } from './relay-publisher'
 import {
   activeConversation,
   conversationMessages,
@@ -509,7 +510,7 @@ export async function loadConversations() {
   messagesError.set(null)
 
   try {
-    logger.info("building filters…")
+    logger.info("building filtersï¿½")
     const filters = [
       { kinds: DM_KINDS, '#p': [meUser.pubkey], limit: 1000 },
       { kinds: DM_KINDS, authors: [meUser.pubkey], limit: 1000 },
@@ -725,10 +726,10 @@ export async function sendDirectMessage(
     })
 
     await evt.sign(ndk.signer!)
-    await evt.publish()
+    await publishToConfiguredRelays(evt)
 
   } else {
-    // we will re-enable giftwrap later – first we MUST see conversations group
+    // we will re-enable giftwrap later ï¿½ first we MUST see conversations group
     throw new Error("giftwrap disabled temporarily until grouping working")
   }
 

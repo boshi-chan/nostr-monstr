@@ -26,6 +26,7 @@ import { CALL_EVENT_KINDS } from '$types/voice-calls'
 import type { NostrEvent } from '$types/nostr'
 import { get } from 'svelte/store'
 import { NDKEvent } from '@nostr-dev-kit/ndk'
+import { publishToConfiguredRelays } from './relay-publisher'
 
 // WebRTC configuration
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
@@ -636,7 +637,7 @@ async function publishCallRequest(
   })
 
   await event.sign(ndk.signer)
-  await event.publish()
+  await publishToConfiguredRelays(event)
 }
 
 /**
@@ -668,7 +669,7 @@ async function publishCallAccepted(
   })
 
   await event.sign(ndk.signer)
-  await event.publish()
+  await publishToConfiguredRelays(event)
 }
 
 /**
@@ -702,7 +703,7 @@ async function publishICECandidate(
   })
 
   await event.sign(ndk.signer)
-  await event.publish()
+  await publishToConfiguredRelays(event)
 }
 
 /**
@@ -734,7 +735,7 @@ async function publishCallDeclined(
   })
 
   await event.sign(ndk.signer)
-  await event.publish()
+  await publishToConfiguredRelays(event)
 }
 
 /**
@@ -766,7 +767,7 @@ async function publishCallEnded(
   })
 
   await event.sign(ndk.signer)
-  await event.publish()
+  await publishToConfiguredRelays(event)
 }
 
 export { cleanupCall }

@@ -1,10 +1,12 @@
-/**
+﻿/**
  * Relay management for Nostr
  * Handles relay configuration, import from NIP-65, and publishing
  */
 
 import { getNDK, getCurrentNDKUser } from './ndk'
 import { NDKEvent } from '@nostr-dev-kit/ndk'
+import { logger } from '$lib/logger'
+import { publishToConfiguredRelays } from './relay-publisher'
 
 export interface RelayConfig {
   url: string
@@ -100,9 +102,9 @@ export async function publishRelays(relays: RelayConfig[]): Promise<void> {
     })
 
     await event.sign(ndk.signer)
-    await event.publish()
+    await publishToConfiguredRelays(event)
 
-    logger.info('✓ Relays published successfully')
+    logger.info('âœ“ Relays published successfully')
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err)
     logger.error('Failed to publish relays:', errorMsg)

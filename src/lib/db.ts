@@ -23,12 +23,16 @@ interface MonstrDB extends DBSchema {
     key: string
     value: { encryptedData: string; iv: string; salt: string }
   }
+  decryptedMessages: {
+    key: string  // event ID
+    value: { id: string; content: string; timestamp: number }
+  }
 }
 
 let db: IDBPDatabase<MonstrDB>
 
 export async function initDB(): Promise<IDBPDatabase<MonstrDB>> {
-  db = await openDB<MonstrDB>('monstr', 1, {
+  db = await openDB<MonstrDB>('monstr', 2, {
     upgrade(db) {
       // Events store
       if (!db.objectStoreNames.contains('events')) {
@@ -57,6 +61,11 @@ export async function initDB(): Promise<IDBPDatabase<MonstrDB>> {
       if (!db.objectStoreNames.contains('walletMetaEncrypted')) {
         db.createObjectStore('walletMetaEncrypted', { keyPath: 'key' })
       }
+
+      // Decrypted message cache for NIP-46 performance
+      if (!db.objectStoreNames.contains('decryptedMessages')) {
+        db.createObjectStore('decryptedMessages', { keyPath: 'id' })
+      }
     },
   })
 
@@ -84,8 +93,20 @@ export async function getEventsByAuthor(pubkey: string): Promise<NostrEvent[]> {
 }
 
 export async function saveSetting(key: string, value: any): Promise<void> {
-  const db = getDB()
-  await db.put('settings', { key, value })
+  try {
+    const database = getDB()
+    await database.put('settings', { key, value })
+  } catch (err) {
+    // If DB connection was closed, try to re-initialize
+    if (err instanceof Error && err.message.includes('closing')) {
+      console.warn('[DB] Connection was closing, re-initializing...')
+      await initDB()
+      const database = getDB()
+      await database.put('settings', { key, value })
+    } else {
+      throw err
+    }
+  }
 }
 
 export async function getSetting(key: string): Promise<any> {

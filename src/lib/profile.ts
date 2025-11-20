@@ -1,5 +1,6 @@
 import { NDKEvent } from '@nostr-dev-kit/ndk'
 import { getNDK, getCurrentNDKUser } from '$lib/ndk'
+import { publishToConfiguredRelays } from './relay-publisher'
 import { metadataCache } from '$stores/feed'
 import { getUserMetadata } from '$lib/metadata'
 import type { UserMetadata } from '$types/user'
@@ -157,7 +158,7 @@ async function publishMetadata(metadata: UserMetadata): Promise<void> {
   event.content = JSON.stringify(metadata)
 
   await event.sign()
-  await event.publish()
+  await publishToConfiguredRelays(event)
 
   metadataCache.update(cache => {
     const next = new Map(cache)
@@ -222,4 +223,3 @@ export async function updateProfileMetadata(updates: EditableProfileFields): Pro
 
   await publishMetadata(next)
 }
-

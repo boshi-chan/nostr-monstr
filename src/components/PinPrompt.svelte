@@ -18,7 +18,10 @@
     submitting = false
     if (request) {
       queueMicrotask(() => {
-        pinInput?.focus()
+        if (pinInput) {
+          pinInput.value = ''
+          pinInput.focus()
+        }
       })
     }
   }
@@ -79,6 +82,10 @@
         inputmode="numeric"
         pattern="[0-9]*"
         placeholder="4-32 digits"
+        autocomplete="new-password"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck="false"
         bind:value={pin}
         id="pin-prompt-input"
         bind:this={pinInput}

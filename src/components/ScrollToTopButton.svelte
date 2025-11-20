@@ -86,14 +86,15 @@
 <style>
   .scroll-top-btn {
     position: fixed;
-    right: 1rem;
-    bottom: calc(9rem + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    top: calc(env(safe-area-inset-top, 0px) + 8rem);
+    transform: translate(-50%, 0);
     z-index: 45;
-    height: 2.75rem;
-    width: 2.75rem;
+    height: 3rem;
+    width: 3rem;
     border-radius: 9999px;
     border: 1px solid rgba(255, 255, 255, 0.15);
-    background: rgba(13, 18, 24, 0.85);
+    background: rgba(13, 18, 24, 0.9);
     color: var(--color-primary, #f79b5e);
     display: flex;
     align-items: center;
@@ -103,15 +104,14 @@
   }
 
   .scroll-top-btn:hover {
-    transform: translateY(-2px) scale(1.03);
+    transform: translate(-50%, -2px) scale(1.03);
   }
 
   @media (min-width: 768px) {
     .scroll-top-btn {
-      bottom: 6rem;
-      right: 1.5rem;
-      height: 3rem;
-      width: 3rem;
+      top: calc(env(safe-area-inset-top, 0px) + 9rem);
+      height: 3.25rem;
+      width: 3.25rem;
     }
   }
 </style>

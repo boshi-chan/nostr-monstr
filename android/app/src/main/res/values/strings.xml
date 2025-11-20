@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Monstr</string>
+    <string name="title_activity_main">Monstr</string>
+    <string name="package_name">com.nostrmonstr.app</string>
+    <string name="custom_url_scheme">com.nostrmonstr.app</string>
+</resources>
+
+

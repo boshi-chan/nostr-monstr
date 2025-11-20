@@ -6,6 +6,7 @@
     metadataCache,
     showCompose,
     composeReplyTo,
+    composeQuoteOf,
     feedEvents,
     likeCounts,
     repostCounts,
@@ -32,15 +33,16 @@
   import RepostIcon from './icons/RepostIcon.svelte'
   import ZapIcon from './icons/ZapIcon.svelte'
   import EmberIcon from './icons/EmberIcon.svelte'
-  import QuotedNote from './QuotedNote.svelte'
-  import FollowButton from './FollowButton.svelte'
-  import { get as getStore } from 'svelte/store'
-  import MoreVerticalIcon from './icons/MoreVerticalIcon.svelte'
-  import { nip19 } from 'nostr-tools'
-  import { showEmberModal, emberTarget } from '$stores/wallet'
-  import { emberTotals, ensureEmberTotal } from '$stores/ember'
-  import { openZapModal } from '$stores/nwc'
-  import { queueEngagementHydration } from '$lib/engagement'
+import QuotedNote from './QuotedNote.svelte'
+import FollowButton from './FollowButton.svelte'
+import { get as getStore } from 'svelte/store'
+import MoreVerticalIcon from './icons/MoreVerticalIcon.svelte'
+import { nip19 } from 'nostr-tools'
+import { showEmberModal, emberTarget } from '$stores/wallet'
+import { emberTotals, ensureEmberTotal } from '$stores/ember'
+import { openZapModal } from '$stores/nwc'
+import { queueEngagementHydration } from '$lib/engagement'
+import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
 
   export let event: NostrEvent
   export let onSelect: ((event: NostrEvent) => void) | undefined = undefined
@@ -77,6 +79,7 @@
   let repostTargetEvent: NostrEvent | null = null
   let repostTargetLoading = false
   let repostFetchAttempted = false
+  let repostMenuOpen = false
 
   let isRepostWrapper = false
   $: isRepostWrapper = event.kind === 6
@@ -200,7 +203,7 @@
     }
   }
 
-  async function handleRepost() {
+  async function handleRepostAction() {
     if (repostActionLoading) return
     try {
       repostActionLoading = true
@@ -210,11 +213,25 @@
       logger.error('Repost failed:', err)
     } finally {
       repostActionLoading = false
+      repostMenuOpen = false
     }
+  }
+
+  function toggleRepostMenu(mouseEvent: MouseEvent): void {
+    mouseEvent.stopPropagation()
+    repostMenuOpen = !repostMenuOpen
+  }
+
+  function handleQuotePost(): void {
+    composeQuoteOf.set(actionableEvent)
+    composeReplyTo.set(null)
+    repostMenuOpen = false
+    showCompose.set(true)
   }
 
   async function handleReply() {
     composeReplyTo.set(actionableEvent)
+    composeQuoteOf.set(null)
     showCompose.set(true)
   }
 
@@ -263,8 +280,13 @@
     showEmberModal.set(true)
   }
 
-  async function navigateToEventId(eventId: string | null): Promise<void> {
+  async function navigateToEventId(eventId: string | null, prefetched?: NostrEvent): Promise<void> {
     if (!eventId) return
+
+    if (prefetched && onSelect) {
+      onSelect(prefetched)
+      return
+    }
 
     if (onSelect) {
       let target = getEventById(eventId)
@@ -274,19 +296,19 @@
       }
       if (target) {
         onSelect(target)
-        return
-      }
-
-      onNavigateToEventId?.(eventId)
-
-      try {
-        const fetched = await fetchEventById(eventId)
-        if (fetched) {
-          onSelect(fetched)
+      } else {
+        try {
+          const fetched = await fetchEventById(eventId)
+          if (fetched) {
+            onSelect(fetched)
+          }
+        } catch (err) {
+          logger.warn('Failed to resolve event', err)
         }
-      } catch (err) {
-        logger.warn('Failed to resolve event', err)
       }
+
+      // Always trigger route navigation so thread view can fetch on demand
+      onNavigateToEventId?.(eventId)
       return
     }
 
@@ -298,11 +320,7 @@
   }
 
   function handleQuotedSelect(targetEvent: NostrEvent): void {
-    if (onSelect) {
-      onSelect(targetEvent)
-      return
-    }
-    onNavigateToEventId?.(targetEvent.id)
+    void navigateToEventId(targetEvent.id, targetEvent)
   }
 
   async function handleReplyContextClick(): Promise<void> {
@@ -349,6 +367,21 @@
     }
   }
 
+  function extractEventIdsFromUris(uris: string[] | undefined | null): string[] {
+    if (!uris || uris.length === 0) return []
+    const ids: string[] = []
+    for (const uri of uris) {
+      if (!uri) continue
+      const parsedUri = parseNostrURI(uri)
+      if (!parsedUri) continue
+      const eventId = getEventIdFromURI(parsedUri)
+      if (eventId) {
+        ids.push(eventId)
+      }
+    }
+    return ids
+  }
+
   $: if (isReply && parsed.replyToId && !parentFetchAttempted) {
     parentFetchAttempted = true
     void resolveParentEvent(parsed.replyToId)
@@ -357,8 +390,14 @@
   $: parentMetadata = parentEvent ? $metadataCache.get(parentEvent.pubkey) : undefined
   $: parentDisplayName =
     parentEvent ? getDisplayName(parentEvent.pubkey, parentMetadata) || parentEvent.pubkey.slice(0, 8) : null
-  $: quotedEventId = parsed.repostId ?? parsed.quotes[0] ?? parsed.nestedEvent?.id ?? null
+  $: inlineQuotedEventIds = extractEventIdsFromUris(parsed?.nostrURIs)
+  $: quotedEventId = parsed.repostId ?? parsed.quotes[0] ?? parsed.nestedEvent?.id ?? inlineQuotedEventIds[0] ?? null
   $: quotedEventData = parsed.nestedEvent ?? null
+  $: suppressedQuoteIds = Array.from(
+    new Set(
+      [quotedEventId, parsed.repostId, ...(parsed.quotes || []), parsed.nestedEvent?.id, ...inlineQuotedEventIds].filter(Boolean)
+    )
+  ) as string[]
 
   function toggleMenu(event: MouseEvent): void {
     event.stopPropagation()
@@ -416,6 +455,7 @@
     if (menuOpen) {
       closeMenu()
     }
+    repostMenuOpen = false
   }
 
   function handleWindowKeydown(keyboardEvent: KeyboardEvent): void {
@@ -640,6 +680,7 @@
             text={parsed.text}
             onEventClick={onNavigateToEventId}
             onProfileClick={onProfileSelect}
+            suppressEventIds={suppressedQuoteIds}
           />
         {:else}
           {parsed.text}
@@ -698,19 +739,41 @@
           </button>
 
           <!-- Repost -->
-          <button
-            on:click|stopPropagation={handleRepost}
-            disabled={repostActionLoading}
-            class={`${baseActionClass} hover:text-emerald-400 hover:bg-emerald-400/5 ${
-              isReposted ? 'text-emerald-400/80' : 'text-text-muted'
-            }`}
-            title="Repost"
-          >
-            <RepostIcon size={18} color="currentColor" strokeWidth={1.75} />
-            {#if displayRepostCount > 0}
-              <span class="text-xs font-medium">{displayRepostCount}</span>
+          <div class="relative">
+            <button
+              on:click|stopPropagation={toggleRepostMenu}
+              disabled={repostActionLoading}
+              class={`${baseActionClass} hover:text-emerald-400 hover:bg-emerald-400/5 ${
+                isReposted ? 'text-emerald-400/80' : 'text-text-muted'
+              }`}
+              title="Repost options"
+            >
+              <RepostIcon size={18} color="currentColor" strokeWidth={1.75} />
+              {#if displayRepostCount > 0}
+                <span class="text-xs font-medium">{displayRepostCount}</span>
+              {/if}
+            </button>
+            {#if repostMenuOpen}
+              <div class="absolute right-0 bottom-full mb-2 z-30 w-40 rounded-xl border border-dark-border/80 bg-dark shadow-xl">
+                <button
+                  class="flex w-full items-center justify-between px-3 py-2 text-sm text-text-soft hover:bg-primary/10"
+                  on:click|stopPropagation={handleRepostAction}
+                  disabled={repostActionLoading}
+                >
+                  Repost
+                  {#if repostActionLoading}
+                    <span class="text-xs text-text-muted">...</span>
+                  {/if}
+                </button>
+                <button
+                  class="flex w-full items-center justify-between px-3 py-2 text-sm text-text-soft hover:bg-primary/10"
+                  on:click|stopPropagation={handleQuotePost}
+                >
+                  Quote post
+                </button>
+              </div>
             {/if}
-          </button>
+          </div>
 
           <!-- Zap -->
           <button

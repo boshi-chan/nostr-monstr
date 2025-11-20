@@ -17,6 +17,7 @@
   import ZapIcon from '../icons/ZapIcon.svelte'
   import MentionIcon from '../icons/MentionIcon.svelte'
   import EmberIcon from '../icons/EmberIcon.svelte'
+  import MessageSquareQuoteIcon from '../icons/MessageSquareQuoteIcon.svelte'
 
   type IconComponent = typeof LikeIcon
 
@@ -53,20 +54,20 @@
     },
     reply: {
       icon: CommentIcon,
-      accent: 'text-orange-400',
-      background: 'bg-orange-500/10',
+      accent: 'text-sky-400',
+      background: 'bg-sky-500/10',
       label: 'replied to you',
     },
     quote: {
-      icon: CommentIcon,
-      accent: 'text-orange-400',
-      background: 'bg-orange-500/10',
+      icon: MessageSquareQuoteIcon,
+      accent: 'text-sky-400',
+      background: 'bg-sky-500/10',
       label: 'quoted your post',
     },
     'thread-reply': {
       icon: CommentIcon,
-      accent: 'text-orange-400',
-      background: 'bg-orange-500/10',
+      accent: 'text-sky-400',
+      background: 'bg-sky-500/10',
       label: "replied in a thread you're in",
     },
     repost: {

@@ -1,15 +1,13 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
   import { conversations, conversationMetadata, activeConversation, unreadCounts, messagesLoading } from '$stores/messages'
   import { metadataCache } from '$stores/feed'
   import type { Conversation } from '$types/dm'
-  import { loadConversation, loadConversations } from '$lib/messaging-simple'
+  import { loadConversation } from '$lib/messaging-simple'
   import { openProfile } from '$stores/router'
   import SearchIcon from 'lucide-svelte/icons/search'
 
-  onMount(() => {
-    loadConversations().catch(err => logger.error('DM bootstrap failed:', err))
-  })
+  // Note: loadConversations is called from Messages.svelte, not here
+  // Per AI_Guidelines: components should not call subscriptions/loads directly
 
   let searchQuery = ''
   let filtered: Conversation[] = []

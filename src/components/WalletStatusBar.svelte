@@ -10,10 +10,12 @@
   import HandCoinsIcon from 'lucide-svelte/icons/hand-coins'
   import BirdIcon from 'lucide-svelte/icons/bird'
   import SearchIcon from 'lucide-svelte/icons/search'
+  import InfoIcon from 'lucide-svelte/icons/info'
 
   type ChipInfo = { label: string; classes: string }
 
   let lockBusy = false
+  let showAboutMenu = false
 
   $: isLocked = $walletState.hasWallet && $walletState.locked
   $: syncPercent =
@@ -138,32 +140,83 @@
     </div>
 
     <!-- Right pill -->
-    <div class="ml-auto flex flex-shrink-0 items-center gap-1 rounded-full border border-white/10 bg-dark/60 px-2 py-1">
-      <a
-        class="hidden items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-soft transition hover:text-emerald-200 sm:flex"
-        href={repoUrl}
-        target="_blank"
-        rel="noreferrer"
-      >
-        Monstr v1.0.0.0
-      </a>
-      <button
-        type="button"
-        class="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-amber-200 transition hover:border-amber-400 hover:text-amber-100"
-        aria-label="Donate"
-        on:click={() => showDonateModal.set(true)}
-      >
-        <HandCoinsIcon size={16} />
-      </button>
-      <button
-        type="button"
-        class="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-cyan-200 transition hover:border-cyan-400 hover:text-cyan-100"
-        aria-label="Canary"
-        on:click={() => showCanaryModal.set(true)}
-      >
-        <BirdIcon size={16} />
-      </button>
+    <div class="ml-auto flex flex-shrink-0 items-center">
+      <div class="flex items-center gap-1 rounded-full border border-white/10 bg-dark/60 px-2 py-1">
+        <button
+          type="button"
+          class="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-text-soft transition hover:text-emerald-200"
+          aria-haspopup="true"
+          aria-expanded={showAboutMenu}
+          on:click={() => (showAboutMenu = !showAboutMenu)}
+        >
+          <InfoIcon size={16} />
+          About
+        </button>
+      </div>
+
     </div>
   </div>
 </div>
 
+{#if showAboutMenu}
+  <div
+    class="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4"
+    on:click={() => (showAboutMenu = false)}
+  >
+    <div
+      class="w-full max-w-sm rounded-2xl border border-white/10 bg-dark/95 p-6 text-sm text-text-soft shadow-2xl"
+      on:click|stopPropagation
+    >
+      <div class="mb-4 flex items-center justify-between">
+        <div>
+          <p class="text-xs uppercase tracking-wide text-text-muted">About</p>
+          <p class="text-base font-semibold text-white">Monstr v1.0.0.1</p>
+        </div>
+        <button
+          type="button"
+          class="rounded-full border border-white/10 px-2 py-1 text-xs uppercase tracking-wide text-text-muted transition hover:text-white"
+          on:click={() => (showAboutMenu = false)}
+        >
+          Close
+        </button>
+      </div>
+
+      <div class="space-y-3">
+        <a
+          href={repoUrl}
+          target="_blank"
+          rel="noreferrer"
+          class="flex items-center justify-between rounded-xl border border-white/10 px-4 py-3 transition hover:border-emerald-400/60 hover:text-white"
+          on:click={() => (showAboutMenu = false)}
+        >
+          <span>GitHub</span>
+          <span class="text-xs text-text-muted">Open repo</span>
+        </a>
+
+        <button
+          type="button"
+          class="flex w-full items-center justify-between rounded-xl border border-white/10 px-4 py-3 text-left text-amber-200 transition hover:border-amber-400/60"
+          on:click={() => {
+            showAboutMenu = false
+            showDonateModal.set(true)
+          }}
+        >
+          <span>Donate</span>
+          <HandCoinsIcon size={18} />
+        </button>
+
+        <button
+          type="button"
+          class="flex w-full items-center justify-between rounded-xl border border-white/10 px-4 py-3 text-left text-cyan-200 transition hover:border-cyan-400/60"
+          on:click={() => {
+            showAboutMenu = false
+            showCanaryModal.set(true)
+          }}
+        >
+          <span>Canary</span>
+          <BirdIcon size={18} />
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}

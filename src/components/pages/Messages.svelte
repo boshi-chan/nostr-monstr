@@ -8,8 +8,9 @@
   import MessageInput from '$components/MessageInput.svelte'
   import ChevronLeftIcon from 'lucide-svelte/icons/chevron-left'
 
+  import { get } from 'svelte/store'
+
   let isMobile = false
-  let initialized = false
 
   function handleResize() {
     isMobile = window.innerWidth < 768
@@ -19,19 +20,17 @@
     activeConversation.set(null)
   }
 
-  $: {
-    const user = $currentUser
-    if (!user) {
-      initialized = false
-    } else if (!initialized) {
-      initialized = true
-      loadConversations().catch(err => logger.error('Failed to load conversations:', err))
-    }
-  }
-
   onMount(() => {
     window.addEventListener('resize', handleResize)
     handleResize()
+
+    // Load conversations once on mount if user is logged in
+    const user = get(currentUser)
+    if (user) {
+      console.log('[Messages] onMount: calling loadConversations for', user.pubkey)
+      loadConversations().catch(err => console.error('Failed to load conversations:', err))
+    }
+
     return () => window.removeEventListener('resize', handleResize)
   })
 </script>
@@ -42,7 +41,7 @@
       isMobile && $activeConversation ? 'hidden md:flex md:flex-col' : 'w-full md:w-[350px] md:flex md:flex-col'
     }`}
   >
-    {#if $messagesLoading && !initialized}
+    {#if $messagesLoading}
       <div class="flex h-full items-center justify-center">
         <div class="text-center">
           <div class="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>

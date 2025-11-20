@@ -16,6 +16,7 @@ import type { NDKEvent, NDKFilter, NDKSubscription, NDKSubscriptionOptions } fro
 import { EMBER_EVENT_KIND, EMBER_TAG, atomicToXmr, decodeEmberPayload } from '$lib/ember'
 import { normalizeEvent } from '$lib/event-validation'
 import { logger } from '$lib/logger'
+import { startNativeNotificationListener, stopNativeNotificationListener } from '$lib/native-notifications'
 
 let notificationSubscription: NDKSubscription | null = null
 const processedNotifications = new Set<string>()
@@ -195,6 +196,10 @@ export async function startNotificationListener(pubkey: string): Promise<void> {
   })
 
   logger.info('[NOTIF] Notification listener started successfully')
+
+  void startNativeNotificationListener(pubkey).catch(err => {
+    logger.warn('[NOTIF] Failed to start native notification listener:', err)
+  })
 }
 
 /**
@@ -542,5 +547,6 @@ export function stopNotificationListener(): void {
   processedNotifications.clear()
   notificationEventCache.clear()
   // Note: Don't clear notifications - they persist in localStorage
+  void stopNativeNotificationListener()
 }
 

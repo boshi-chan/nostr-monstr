@@ -5,15 +5,18 @@
   import FloatingComposeButton from './FloatingComposeButton.svelte'
   import SearchModal from './SearchModal.svelte'
   import WalletStatusBar from './WalletStatusBar.svelte'
-  import ZapModal from './ZapModal.svelte'
-  import CanaryModal from './CanaryModal.svelte'
-  import DonateModal from './DonateModal.svelte'
+import ZapModal from './ZapModal.svelte'
+import CanaryModal from './CanaryModal.svelte'
+import DonateModal from './DonateModal.svelte'
   import Home from './pages/Home.svelte'
   import Messages from './pages/Messages.svelte'
   import Profile from './pages/Profile.svelte'
-  import ScrollToTopButton from './ScrollToTopButton.svelte'
-  import { activeRoute } from '$stores/router'
-  import { showEmberModal } from '$stores/wallet'
+import ScrollToTopButton from './ScrollToTopButton.svelte'
+import DebugOverlay from './DebugOverlay.svelte'
+import DebugOverlayToggle from './DebugOverlayToggle.svelte'
+import { activeRoute } from '$stores/router'
+import { showEmberModal } from '$stores/wallet'
+import { debugOverlayEnabled } from '$stores/debugOverlay'
 
   let NotificationsPage: ComponentType | null = null
   let SettingsPage: ComponentType | null = null
@@ -52,7 +55,7 @@
   let mainEl: HTMLElement | null = null
 </script>
 
-<div class="flex h-screen w-screen flex-col bg-dark" style="height: 100dvh;">
+<div class="flex h-screen w-screen flex-col bg-dark" style="height: 100dvh; padding-top: env(safe-area-inset-top, 0px);">
   <WalletStatusBar />
   <div class="flex flex-1 flex-col overflow-hidden md:flex-row">
     <!-- Left sidebar for desktop -->
@@ -128,6 +131,8 @@
     <svelte:component this={EmberModalComp} />
   {/if}
   <SearchModal />
+  <DebugOverlay enabled={$debugOverlayEnabled} />
+  <DebugOverlayToggle />
 </div>
 
 <style>

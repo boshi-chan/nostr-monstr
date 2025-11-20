@@ -1,266 +1,245 @@
-<script lang="ts">
-  import { onMount, onDestroy } from 'svelte'
-  import {  loginWithExtension, hasNostrExtension, startNostrConnectLogin, finishNostrConnectLogin } from '$lib/auth'
+﻿<script lang="ts">
+  import { onMount } from 'svelte'
   import Button from '../Button.svelte'
-  import { toDataURL as qrToDataURL } from 'qrcode'
-  import type { NDKNip46Signer } from '@nostr-dev-kit/ndk'
+  import { loginWithExtension, hasNostrExtension, loginWithAmberNative } from '$lib/auth'
+  import { loginWithPrivateKey } from '$lib/ndk'
+  import { nip19 } from 'nostr-tools'
+  import { isCapacitorAndroid, getAmberInstallStatus } from '$lib/amber-signer'
 
-  // Optional callback when login is successful (used when shown in modal)
   export let onSuccess: (() => void) | undefined = undefined
+  export let onCancel: (() => void) | undefined = undefined
 
   let isLoading = false
   let error = ''
-  let connectUrl = ''
-  let showQR = false
   let hasExtension = false
-  let qrDataUrl: string | null = null
-  let qrError: string | null = null
-  let currentSigner: NDKNip46Signer | null = null
-  let connectionStatus = 'waiting' // waiting | connecting | connected | error
+  let hasAmberNative = false
+  let amberDiagnostics: string | null = null
+  let nativeAmberError: string | null = null
+  let forceAmberNative = false
+  let isCapAndroid = false
+  let nsecInput = ''
+  let nsecError: string | null = null
 
-  // Check for extensions on component mount
-  onMount(() => {
+  onMount(async () => {
     hasExtension = hasNostrExtension()
-  })
+    isCapAndroid = isCapacitorAndroid()
 
-  // Cleanup on destroy
-  onDestroy(() => {
-    if (currentSigner) {
-      currentSigner.stop()
-      currentSigner = null
+    if (isCapAndroid) {
+      try {
+        const status = await getAmberInstallStatus()
+        hasAmberNative = status.installed
+        amberDiagnostics = `packageFound=${status.packageFound ?? 'unknown'}, intentAvailable=${status.intentAvailable ?? 'unknown'}`
+        nativeAmberError = status.installed ? null : 'Amber app not detected. Install Amber to use native signing.'
+      } catch (err) {
+        console.error('[Login] Error checking Amber:', err)
+        nativeAmberError = err instanceof Error ? err.message : 'Failed to detect Amber native signer.'
+        hasAmberNative = false
+      }
     }
   })
 
-  async function handleExtensionLogin() {
+  async function handleExtensionLogin(): Promise<void> {
+    if (!hasExtension) {
+      error = 'No NIP-07 extension detected.'
+      return
+    }
     try {
       isLoading = true
       error = ''
       await loginWithExtension()
       onSuccess?.()
     } catch (err) {
-      error = String(err)
+      error = err instanceof Error ? err.message : 'Extension login failed'
     } finally {
       isLoading = false
     }
   }
 
-  async function handleMobileSignerLogin() {
+  async function handleAmberNativeLogin(): Promise<void> {
     try {
       isLoading = true
       error = ''
-      connectionStatus = 'waiting'
-
-      // Start the Nostr Connect flow
-      const result = await startNostrConnectLogin()
-      currentSigner = result.signer
-      connectUrl = result.uri
-
-      // Show QR code
-      showQR = true
-      isLoading = false
-
-      // Wait for connection in background
-      connectionStatus = 'connecting'
-      await finishNostrConnectLogin(result.signer)
-      connectionStatus = 'connected'
-
-      // Login successful - call callback if provided
+      await loginWithAmberNative({ force: forceAmberNative })
       onSuccess?.()
     } catch (err) {
-      connectionStatus = 'error'
-      error = String(err)
-      showQR = false
+      error = err instanceof Error ? err.message : 'Amber login failed'
+    } finally {
       isLoading = false
-      if (currentSigner) {
-        currentSigner.stop()
-        currentSigner = null
+    }
+  }
+
+  function forceAmberOverride(): void {
+    forceAmberNative = true
+    hasAmberNative = true
+    nativeAmberError = null
+    amberDiagnostics = 'forced override'
+  }
+
+  function decodePrivateKey(raw: string): string {
+    const trimmed = raw.trim()
+    if (!trimmed) {
+      throw new Error('Private key is required')
+    }
+    if (trimmed.toLowerCase().startsWith('nsec')) {
+      const decoded = nip19.decode(trimmed)
+      if (decoded.type !== 'nsec') {
+        throw new Error('Invalid nsec key')
       }
+      const data = decoded.data
+      if (typeof data === 'string') {
+        return data
+      }
+      if (data instanceof Uint8Array) {
+        return Array.from(data).map(b => b.toString(16).padStart(2, '0')).join('')
+      }
+      throw new Error('Unsupported nsec payload')
+    }
+    return trimmed
+  }
+
+  async function handlePrivateKeyLogin(): Promise<void> {
+    try {
+      isLoading = true
+      nsecError = null
+      const secret = decodePrivateKey(nsecInput)
+      if (!/^[0-9a-f]{64}$/i.test(secret)) {
+        throw new Error('Private key must be a 64-character hex string')
+      }
+      await loginWithPrivateKey(secret)
+      nsecInput = ''
+      onSuccess?.()
+    } catch (err) {
+      nsecError = err instanceof Error ? err.message : 'Failed to use private key'
+    } finally {
+      isLoading = false
     }
   }
 
-  function handleCancelMobileSigner() {
-    if (currentSigner) {
-      currentSigner.stop()
-      currentSigner = null
+  function handleCancel(): void {
+    if (onCancel) {
+      onCancel()
+      return
     }
-    showQR = false
-    connectUrl = ''
-    connectionStatus = 'waiting'
-    error = ''
-  }
-
-  function handleCopyUrl() {
-    if (connectUrl) {
-      navigator.clipboard.writeText(connectUrl)
-      alert('Connection URL copied to clipboard')
+    if (typeof window !== 'undefined' && window.history.length > 1) {
+      window.history.back()
     }
-  }
-
-  $: if (showQR && connectUrl) {
-    qrDataUrl = null
-    qrError = null
-    qrToDataURL(connectUrl, { margin: 1, scale: 5 })
-      .then(url => {
-        qrDataUrl = url
-      })
-      .catch(err => {
-        qrError = 'Failed to render QR code'
-        console.error('QR generation error', err)
-      })
-  } else if (!showQR) {
-    qrDataUrl = null
-    qrError = null
   }
 </script>
 
-<div class="min-h-screen bg-bg-primary flex items-center justify-center p-4">
-  <div class="w-full max-w-md">
-    <!-- Logo -->
-    <div class="text-center mb-8">
-      <img src="/logo.svg" alt="Monstr" class="h-16 w-16 mx-auto mb-4" />
-      <h1 class="text-3xl font-bold text-white">Monstr</h1>
-      <p class="text-text-tertiary mt-2">Nostr Client with Monero Embers</p>
+<div class="mx-auto w-full max-w-2xl py-6" style="padding-top: calc(env(safe-area-inset-top, 0px) + 1rem);">
+  <div class="rounded-3xl border border-dark-border/60 bg-dark-light/80 p-6 shadow-xl">
+    <div class="mb-6 flex items-start justify-between gap-4">
+      <div>
+        <p class="text-xs uppercase tracking-[0.3em] text-text-muted">Login</p>
+        <h2 class="text-2xl font-semibold text-white">Connect securely using your Nostr key manager</h2>
+      </div>
+      <button
+        type="button"
+        class="rounded-full border border-dark-border/60 px-3 py-1 text-xs uppercase tracking-wide text-text-soft hover:text-white"
+        on:click={handleCancel}
+      >
+        Cancel
+      </button>
     </div>
 
-    <!-- Login Options -->
-    <div class="bg-bg-secondary rounded-lg p-6 space-y-6">
-      <div>
-        <h2 class="text-xl font-semibold text-white mb-2">Login</h2>
-        <p class="text-sm text-text-tertiary">
-          Connect securely using your Nostr key manager
-        </p>
+    {#if error}
+      <div class="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+        {error}
       </div>
+    {/if}
 
-      {#if error}
-        <div class="p-3 bg-red-500/10 border border-red-500/20 rounded text-red-400 text-sm">
-          {error}
-        </div>
-      {/if}
-
-      {#if !showQR}
-        <!-- Login Options -->
-        <div class="space-y-4">
-          <!-- Browser Extension Option (if available) -->
-          {#if hasExtension}
-            <div class="p-4 bg-bg-tertiary rounded-lg border border-primary/30">
-              <h3 class="font-semibold text-white mb-2">Browser Extension</h3>
-              <p class="text-sm text-text-tertiary mb-4">
-                Detected extension ready to use
-              </p>
-              <Button
-                variant="primary"
-                size="lg"
-                loading={isLoading}
-                on:click={handleExtensionLogin}
-                className="w-full"
-              >
-                {isLoading ? 'Connecting...' : 'Sign with Extension'}
-              </Button>
-            </div>
-          {/if}
-
-          <!-- Mobile Signer Option -->
-          <div class="p-4 bg-bg-tertiary rounded-lg border border-dark-border/60">
-            <h3 class="font-semibold text-white mb-2">Mobile Signer</h3>
-            <p class="text-sm text-text-tertiary mb-4">
-              Connect with Amber or other mobile signers via QR code
-            </p>
-            <Button
-              variant="secondary"
-              size="lg"
-              loading={isLoading}
-              on:click={handleMobileSignerLogin}
-              className="w-full"
-            >
-              {isLoading ? 'Generating...' : 'Connect Mobile Signer'}
-            </Button>
+    <div class="space-y-5">
+      {#if isCapAndroid}
+        <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4">
+          <div class="mb-2 text-text-soft">
+            <h3 class="text-lg font-semibold">Amber (Native)</h3>
           </div>
+          <p class="text-sm text-text-muted mb-4">Sign directly with Amber – instant, no relay delays.</p>
 
-          <!-- Supported Methods -->
-          <div class="text-xs text-text-tertiary space-y-1 p-3 bg-bg-tertiary rounded">
-            <p class="font-medium text-text-secondary">Supported:</p>
-            <ul class="space-y-1">
-              <li>Browser extensions (Alby, nos2x, Flamingo, etc.)</li>
-              <li>Mobile signers (Amber, Keystache, etc.)</li>
-            </ul>
-          </div>
+          <Button
+            variant="primary"
+            size="lg"
+            loading={isLoading}
+            on:click={() => {
+              if (nativeAmberError) {
+                forceAmberOverride()
+              }
+              void handleAmberNativeLogin()
+            }}
+            className="w-full"
+            disabled={isLoading}
+          >
+            {nativeAmberError ? (isLoading ? 'Opening Amber…' : 'Open Amber') : (isLoading ? 'Connecting…' : 'Sign with Amber')}
+          </Button>
         </div>
       {:else}
-        <!-- QR Code Display -->
-        <div class="space-y-4">
-          <div class="p-4 bg-bg-tertiary rounded-lg">
-            <p class="text-sm text-text-secondary mb-3">
-              Scan this QR code with your mobile signer app (e.g., Amber):
+        <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4">
+          <div class="mb-2 flex items-center justify-between text-text-soft">
+            <h3 class="text-lg font-semibold">Browser Extension</h3>
+            <span class="text-[10px] uppercase tracking-widest text-text-muted">NIP-07</span>
+          </div>
+          <p class="text-sm text-text-muted mb-4">Use Alby, nos2x, Flamingo, or another NIP-07 extension to sign in.</p>
+
+          <Button
+            variant="primary"
+            size="lg"
+            loading={isLoading}
+            on:click={handleExtensionLogin}
+            className="w-full"
+            disabled={isLoading || !hasExtension}
+          >
+            {hasExtension ? (isLoading ? 'Connecting...' : 'Sign with Extension') : 'No Extension Detected'}
+          </Button>
+
+          {#if !hasExtension}
+            <p class="mt-2 text-xs text-red-300">
+              Install a NIP-07 browser extension (e.g., Alby) and refresh this page.
             </p>
-            <div class="bg-white p-4 rounded-lg mb-3 flex items-center justify-center min-h-64">
-              {#if qrDataUrl}
-                <img src={qrDataUrl} alt="Nostr Connect QR" class="w-full max-w-xs" />
-              {:else if qrError}
-                <p class="text-sm text-red-500">{qrError}</p>
-              {:else}
-                <p class="text-sm text-text-tertiary text-center">
-                  Generating QR code...
-                </p>
-              {/if}
-            </div>
-
-            <!-- Connection Status -->
-            {#if connectionStatus === 'connecting'}
-              <div class="p-3 bg-blue-500/10 border border-blue-500/20 rounded text-blue-400 text-sm text-center">
-                <div class="flex items-center justify-center gap-2">
-                  <div class="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
-                  <span>Waiting for approval from your mobile signer...</span>
-                </div>
-              </div>
-            {:else if connectionStatus === 'connected'}
-              <div class="p-3 bg-green-500/10 border border-green-500/20 rounded text-green-400 text-sm text-center">
-                ✓ Connected! Logging you in...
-              </div>
-            {/if}
-
-            <textarea
-              readonly
-              value={connectUrl}
-              class="w-full px-3 py-2 bg-bg-primary border border-bg-tertiary rounded text-white text-xs resize-none mt-3"
-              rows="3"
-            />
-          </div>
-
-          <div class="space-y-2">
-            <Button
-              variant="primary"
-              size="lg"
-              on:click={handleCopyUrl}
-              className="w-full"
-            >
-              Copy Connection URL
-            </Button>
-
-            <Button
-              variant="secondary"
-              size="lg"
-              on:click={handleCancelMobileSigner}
-              className="w-full"
-              disabled={connectionStatus === 'connecting'}
-            >
-              Cancel
-            </Button>
-          </div>
-
-          <div class="text-xs text-text-tertiary text-center space-y-1">
-            <p class="font-medium">Instructions:</p>
-            <ol class="list-decimal list-inside space-y-1 text-left max-w-sm mx-auto">
-              <li>Open your mobile signer app (Amber, Keystache, etc.)</li>
-              <li>Scan the QR code above or paste the connection URL</li>
-              <li>Approve the connection request in your app</li>
-            </ol>
-          </div>
+          {/if}
         </div>
       {/if}
-    </div>
 
-    <!-- Security Info -->
-    
+      <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4">
+        <div class="mb-2 flex items-center justify-between text-text-soft">
+          <h3 class="text-lg font-semibold">Private Key (nsec)</h3>
+          <span class="text-[10px] uppercase tracking-[0.3em] text-red-300">Not Recommended</span>
+        </div>
+        <p class="text-xs text-text-muted mb-2">
+          Paste your raw 64-char hex key or nsec. Only use this if you fully trust this device.
+        </p>
+        <textarea
+          rows="2"
+          class="w-full rounded-2xl border border-dark-border/60 bg-dark/70 px-3 py-2 text-sm text-text-soft focus:border-primary/60 focus:outline-none"
+          placeholder="nsec1..."
+          bind:value={nsecInput}
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+        ></textarea>
+        {#if nsecError}
+          <p class="mt-2 text-xs text-rose-300">{nsecError}</p>
+        {/if}
+        <Button
+          variant="secondary"
+          size="lg"
+          className="mt-3 w-full"
+          loading={isLoading}
+          on:click={handlePrivateKeyLogin}
+          disabled={isLoading || !nsecInput.trim()}
+        >
+          {isLoading ? 'Checking PIN…' : 'Login with nsec (not recommended)'}
+        </Button>
+      </div>
+
+      <div class="rounded-2xl border border-dark-border/40 bg-dark/40 p-3 text-xs text-text-muted">
+        {#if isCapAndroid}
+          Supported: Amber native signer.
+        {:else}
+          Supported: Browser extensions (Alby, nos2x, Flamingo, etc.).
+        {/if}
+      </div>
+    </div>
   </div>
 </div>
 

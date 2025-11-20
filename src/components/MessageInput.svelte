@@ -83,7 +83,7 @@
       on:compositionstart={() => (isComposing = true)}
       on:compositionend={() => (isComposing = false)}
       disabled={!$activeConversationData || $messageState.isSending}
-      placeholder="Type a message... (Shift+Enter for new line)"
+      placeholder="Type a message..."
       class="max-h-36 min-h-10 flex-1 resize-none rounded-2xl bg-dark-light/50 px-4 py-2.5 text-sm text-text-soft placeholder-text-muted outline-none transition-colors disabled:opacity-50 focus:bg-dark-light/70"
       rows="1"
     />

@@ -1,11 +1,12 @@
 <script lang="ts">
   import { currentUser } from '$stores/auth'
-  import { showCompose, composeReplyTo } from '$stores/feed'
+  import { showCompose, composeReplyTo, composeQuoteOf } from '$stores/feed'
   import { publishNote } from '$lib/feed-ndk'
   import { getDisplayName, getAvatarUrl } from '$lib/metadata'
   import { metadataCache } from '$stores/feed'
   import SendIcon from './icons/SendIcon.svelte'
   import { get } from 'svelte/store'
+  import QuotedNote from './QuotedNote.svelte'
 
   let content = ''
   let loading = false
@@ -14,12 +15,14 @@
   const MAX_CHARS = 5000
 
   $: replyTo = $composeReplyTo
+  $: quoteTarget = $composeQuoteOf
   $: metadata = $metadataCache.get($currentUser?.pubkey || '')
   $: displayName = getDisplayName($currentUser?.pubkey || '', metadata)
   $: avatarUrl = getAvatarUrl(metadata)
   $: charCount = content.length
   $: isOverLimit = charCount > MAX_CHARS
   $: isNearLimit = charCount > MAX_CHARS * 0.9
+  $: composeTitle = replyTo ? 'Reply to post' : quoteTarget ? 'Quote post' : 'Compose'
 
   async function handleSubmit() {
     if (!content.trim() || loading || isOverLimit) return
@@ -28,11 +31,12 @@
       loading = true
       error = ''
 
-      await publishNote(content, replyTo || undefined)
+      await publishNote(content, replyTo || undefined, quoteTarget || undefined)
 
       // Reset and close
       content = ''
       composeReplyTo.set(null)
+      composeQuoteOf.set(null)
       showCompose.set(false)
     } catch (err) {
       error = String(err)
@@ -45,6 +49,7 @@
   function handleCancel() {
     content = ''
     composeReplyTo.set(null)
+    composeQuoteOf.set(null)
     showCompose.set(false)
   }
 
@@ -67,7 +72,7 @@
 <!-- Modal overlay -->
 {#if $showCompose}
   <div
-    class="fixed inset-0 z-50 flex items-end bg-black/50 px-0 py-0 md:items-center md:justify-center md:px-4 md:py-4"
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-3 py-6 sm:px-4 sm:py-8"
     role="dialog"
     aria-modal="true"
   >
@@ -79,14 +84,14 @@
     />
     <!-- Modal content -->
     <div
-      class="relative w-full max-h-[90vh] md:max-h-[calc(100vh-2rem)] overflow-y-auto rounded-t-3xl border border-dark-border bg-dark-light md:w-full md:max-w-2xl md:rounded-3xl"
+      class="relative mx-auto w-full max-w-xl sm:max-w-2xl max-h-[calc(100vh-4rem)] overflow-y-auto rounded-3xl border border-dark-border bg-dark-light"
       on:click|stopPropagation
       role="presentation"
     >
       <!-- Header -->
       <div class="flex items-center justify-between border-b border-dark-border px-4 py-3 md:px-6 md:py-4">
         <h2 class="text-lg font-semibold text-text-soft">
-          {replyTo ? 'Reply to post' : 'Compose'}
+          {composeTitle}
         </h2>
         <button
           on:click={handleCancel}
@@ -103,6 +108,25 @@
           <p class="text-sm text-text-muted">
             Replying to <span class="font-semibold text-text-soft">{replyTo.content.slice(0, 50)}</span>...
           </p>
+        </div>
+      {/if}
+
+      <!-- Quote context -->
+      {#if quoteTarget}
+        <div class="border-b border-dark-border/50 bg-dark-lighter/40 px-4 py-3 md:px-6">
+          <div class="flex items-center justify-between">
+            <p class="text-sm text-text-muted">Quoting</p>
+            <button
+              type="button"
+              class="text-xs text-text-muted hover:text-text-soft"
+              on:click={() => composeQuoteOf.set(null)}
+            >
+              Remove
+            </button>
+          </div>
+          <div class="mt-3 pointer-events-none">
+            <QuotedNote eventId={quoteTarget.id} eventData={quoteTarget} />
+          </div>
         </div>
       {/if}
 

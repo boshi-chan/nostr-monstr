@@ -6,6 +6,7 @@
 import NDK, { type NDKUser, NDKNip07Signer, NDKPrivateKeySigner, NDKNip46Signer } from '@nostr-dev-kit/ndk'
 import { writable } from 'svelte/store'
 import { logger } from './logger'
+import { setBaseRelayUrls, setUserRelayUrls, markRelaysReady, resetRelayState } from './relay-manager'
 
 // Default relays - can be customized later
 const DEFAULT_RELAYS = [
@@ -13,7 +14,8 @@ const DEFAULT_RELAYS = [
   'wss://relay.nostr.band',
   'wss://nos.lol',
   'wss://nostr.mom',
-  'wss://nostr.oxtr.dev ', // Additional reliable public relay
+  'wss://nostr.oxtr.dev',
+  'wss://relay.nsec.app',  // NIP-46 optimized relay
 ]
 
 // Global NDK instance
@@ -34,6 +36,7 @@ export async function initNDK(relays: string[] = DEFAULT_RELAYS): Promise<NDK> {
   }
 
   try {
+    setBaseRelayUrls(relays)
     ndkConnecting.set(true)
     ndkError.set(null)
 
@@ -127,6 +130,13 @@ export async function loginWithPrivateKey(privateKey: string): Promise<NDKUser> 
   return user
 }
 
+// Reliable relays for NIP-46 communication between app and remote signer
+const NIP46_RELAYS = [
+  'wss://relay.damus.io',
+  'wss://relay.nsec.app',
+  'wss://nos.lol',
+]
+
 /**
  * Create Nostr Connect signer for NIP-46 (mobile signers like Amber)
  * This generates a connection URI that should be displayed as QR code
@@ -138,8 +148,9 @@ export async function createNostrConnectSigner(relay?: string): Promise<{
 }> {
   const ndk = getNDK()
 
-  // Use provided relay or pick a random one
-  const relayUrl = relay || DEFAULT_RELAYS[Math.floor(Math.random() * DEFAULT_RELAYS.length)]
+  // Use provided relay or primary NIP-46 relay
+  // These relays are known to work well for NIP-46 remote signing
+  const relayUrl = relay || NIP46_RELAYS[0]
 
   // Create signer with nostrconnect:// flow
   const signer = NDKNip46Signer.nostrconnect(ndk, relayUrl)
@@ -171,6 +182,10 @@ export async function completeNostrConnectLogin(signer: NDKNip46Signer): Promise
     throw new Error('Failed to get public key from remote signer')
   }
 
+  // Set activeUser so getCurrentNDKUser() works correctly
+  // This is needed for messaging and other features that rely on ndk.activeUser
+  ndk.activeUser = user
+
   logger.info('Nostr Connect login successful:', user.pubkey)
   return user
 }
@@ -180,7 +195,11 @@ export async function completeNostrConnectLogin(signer: NDKNip46Signer): Promise
  */
 export function getCurrentNDKUser(): NDKUser | null {
   const ndk = getNDK()
-  return ndk.activeUser || null
+  const user = ndk.activeUser || null
+  if (!user) {
+    logger.warn('getCurrentNDKUser: no activeUser set')
+  }
+  return user
 }
 
 /**
@@ -196,25 +215,26 @@ export function logoutNDK(): void {
  * This should be called after login to switch from default relays to user's custom relays
  */
 export async function loadUserRelaysAndConnect(): Promise<void> {
-  if (!ndkInstance) {
-    logger.warn('Cannot load user relays - NDK not initialized')
-    return
-  }
-
-  const user = getCurrentNDKUser()
-  if (!user?.pubkey) {
-    logger.info('No authenticated user - skipping relay reload')
-    return
-  }
-
-  // Wait a bit for NDK to establish initial connections
-  // This prevents fetching before any relays are connected
-  if (ndkInstance.pool.relays.size === 0) {
-    logger.info('Waiting for initial relay connections before loading user relays...')
-    await new Promise(resolve => setTimeout(resolve, 1000))
-  }
-
+  let userRelayUrls: string[] = []
   try {
+    if (!ndkInstance) {
+      logger.warn('Cannot load user relays - NDK not initialized')
+      return
+    }
+
+    const user = getCurrentNDKUser()
+    if (!user?.pubkey) {
+      logger.info('No authenticated user - skipping relay reload')
+      return
+    }
+
+    // Wait a bit for NDK to establish initial connections
+    // This prevents fetching before any relays are connected
+    if (ndkInstance.pool.relays.size === 0) {
+      logger.info('Waiting for initial relay connections before loading user relays...')
+      await new Promise(resolve => setTimeout(resolve, 1000))
+    }
+
     logger.info('Loading user relays from NIP-65...')
 
     // Fetch user's NIP-65 relay list with timeout
@@ -242,7 +262,7 @@ export async function loadUserRelaysAndConnect(): Promise<void> {
     }
 
     // Parse relay URLs from tags
-    const userRelayUrls: string[] = []
+    userRelayUrls = []
     for (const tag of event.tags) {
       if (tag[0] === 'r' && tag[1] && tag[1].startsWith('wss://')) {
         userRelayUrls.push(tag[1])
@@ -270,6 +290,9 @@ export async function loadUserRelaysAndConnect(): Promise<void> {
     logger.info('User relays loaded and connected')
   } catch (err) {
     logger.error('Failed to load user relays:', err)
+  } finally {
+    setUserRelayUrls(userRelayUrls)
+    markRelaysReady()
   }
 }
 
@@ -284,6 +307,7 @@ export function disconnectNDK(): void {
     }
     ndkInstance = null
     ndkConnected.set(false)
+    resetRelayState()
   }
 }
 

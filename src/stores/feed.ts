@@ -97,6 +97,7 @@ export const commentedThreads = writable<Set<string>>(new Set())
 // Compose modal state
 export const showCompose = writable(false)
 export const composeReplyTo = writable<NostrEvent | null>(null)
+export const composeQuoteOf = writable<NostrEvent | null>(null)
 
 // Derived: total feed count
 export const feedCount = derived(feedEvents, events => events.length)

@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { Capacitor } from '@capacitor/core'
   import { isAuthenticated, currentUser } from '$stores/auth'
   import { isInitialized, initError } from '$stores/app'
   import { initDB } from '$lib/db'
-  import { initNDK } from '$lib/ndk'
+  import { initNDK, getNDK, loadUserRelaysAndConnect } from '$lib/ndk'
   import { restoreSession } from '$lib/auth'
 
   import { feedSource, lastTimelineFeed } from '$stores/feedSource'
@@ -32,6 +33,8 @@
 
   import Layout from './components/Layout.svelte'
   import PinPrompt from './components/PinPrompt.svelte'
+  import { ensureNotificationChannel } from '$lib/native-notifications'
+  import { logger } from '$lib/logger'
 
   onMount(async () => {
     try {
@@ -42,6 +45,10 @@
       initWalletLifecycle()
 
       isInitialized.set(true)
+
+      if (Capacitor.getPlatform?.() === 'android') {
+        await ensureNotificationChannel()
+      }
 
       // After initialization, subscribe to appropriate feed based on auth status
       // If authenticated, the reactive statement will handle switching to following
@@ -81,6 +88,47 @@
     }
     wasAuthenticated = authedNow
   }
+
+  let hasAppInitialized = false
+  $: if ($isInitialized) {
+    hasAppInitialized = true
+  }
+
+  let resumeInProgress = false
+  async function refreshSessionFromForeground(): Promise<void> {
+    if (!hasAppInitialized || resumeInProgress) return
+    resumeInProgress = true
+    try {
+      const ndk = getNDK()
+      await ndk.connect()
+      await loadUserRelaysAndConnect()
+      lastFeedSource = null
+      lastAuthKey = null
+    } catch (err) {
+      logger.warn('Failed to refresh session after resume:', err)
+    } finally {
+      resumeInProgress = false
+    }
+  }
+
+  onMount(() => {
+    const handleVisibilityChange = (): void => {
+      if (document.visibilityState === 'visible') {
+        void refreshSessionFromForeground()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    const handleFocus = (): void => {
+      void refreshSessionFromForeground()
+    }
+    window.addEventListener('focus', handleFocus)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', handleFocus)
+    }
+  })
 
   // switching tabs changes subscription here
   // Following AI_Guidelines: Be explicit about reactive dependencies

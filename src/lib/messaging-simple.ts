@@ -16,12 +16,13 @@ import type { DirectMessage } from '$types/dm'
 import type { NostrEvent } from '$types/nostr'
 import {
   encryptForPubkey,
-  decryptFromPubkey,
   preferredSchemeFor,
   rememberScheme,
   type DmEncryptionScheme,
 } from '$lib/dm-crypto'
 import { normalizeEvent } from '$lib/event-validation'
+import { queueDecrypt, getCachedDecryptedMessage, cacheDecryptedMessage, nip46Ready, resetNip46Ready } from '$lib/signer-queue'
+import { publishToConfiguredRelays } from './relay-publisher'
 
 const NIP04_KIND = 4
 const NIP44_KIND = 44
@@ -33,9 +34,9 @@ const dmSubscriptions = new Set<NDKSubscription>()
 const processedDmEvents = new Set<string>()
 let subscriptionOwner: string | null = null
 let processedOwner: string | null = null
+let conversationsLoadedFor: string | null = null  // Guard against multiple loads
 const RELAY_TIMEOUT_MS = 5000
-const MAX_CONCURRENT_DECRYPTS = 6
-const INITIAL_DECRYPT_LIMIT = 80
+const INITIAL_DECRYPT_LIMIT = 50   // Can be higher now with proper queuing and cache
 
 type DecryptResult = { partner: string; message: DirectMessage }
 
@@ -56,32 +57,22 @@ async function decryptEventsWithLimit(events: NostrEvent[], mePubkey: string): P
     return []
   }
 
-  const results: Array<DecryptResult | null> = new Array(events.length).fill(null)
-  let nextIndex = 0
+  const results: DecryptResult[] = []
 
-  const worker = async () => {
-    while (true) {
-      const current = nextIndex++
-      if (current >= events.length) {
-        return
-      }
+  for (const event of events) {
+    try {
+      markEventProcessed(event.id)
+      const partner = getPartner(event, mePubkey)
+      if (!partner) continue
 
-      const event = events[current]
-      try {
-        markEventProcessed(event.id)
-        const partner = getPartner(event, mePubkey)
-        if (!partner) continue
-        const message = await decryptEvent(event, mePubkey, partner)
-        results[current] = { partner, message }
-      } catch (err) {
-        logger.warn('[DM] Decrypt worker failed:', err)
-      }
+      const message = await decryptEvent(event, mePubkey, partner)
+      results.push({ partner, message })
+    } catch (err) {
+      console.warn('[DM] Decrypt failed for event', event.id?.slice(0, 8), ':', err)
     }
   }
 
-  const concurrency = Math.min(MAX_CONCURRENT_DECRYPTS, events.length)
-  await Promise.all(Array.from({ length: concurrency }, () => worker()))
-  return results.filter((entry): entry is DecryptResult => Boolean(entry))
+  return results
 }
 
 function applyDecryptedResults(
@@ -148,8 +139,23 @@ export async function warmupMessagingPermissions(): Promise<void> {
 }
 
 export async function loadConversations(): Promise<void> {
+  console.log('[DM] loadConversations called')
   const user = getCurrentNDKUser()
-  if (!user?.pubkey) return
+  if (!user?.pubkey) {
+    console.warn('[DM] loadConversations: no user pubkey, returning early')
+    return
+  }
+
+  // Guard against multiple loads for the same user
+  if (conversationsLoadedFor === user.pubkey) {
+    console.log('[DM] loadConversations: already loaded for this user, skipping')
+    return
+  }
+  conversationsLoadedFor = user.pubkey
+  console.log('[DM] loadConversations: user pubkey found:', user.pubkey)
+
+  // Wait for NIP-46 signer to be ready before any decrypt operations
+  await nip46Ready()
 
   if (processedOwner !== user.pubkey) {
     processedDmEvents.clear()
@@ -164,16 +170,19 @@ export async function loadConversations(): Promise<void> {
   try {
     const ndk = getNDK()
     if (!ndk.signer) throw new Error('No signer available')
+    console.log('[DM] signer available, fetching events...')
 
     // Reduced from 500 to 200 per direction for faster initial load
     const receivedFilter: NDKFilter = { kinds: DM_KINDS, '#p': [user.pubkey], limit: 200 }
     const sentFilter: NDKFilter = { kinds: DM_KINDS, authors: [user.pubkey], limit: 200 }
 
     // Use timeouts so a single slow relay doesn't block the entire DM view
+    console.log('[DM] fetching received and sent DMs...')
     const [received, sent] = await Promise.all([
       fetchEventsWithTimeout(ndk, receivedFilter),
       fetchEventsWithTimeout(ndk, sentFilter),
     ])
+    console.log('[DM] fetched', received.size, 'received,', sent.size, 'sent events')
 
     const convMap = new Map<string, DirectMessage[]>()
 
@@ -191,7 +200,9 @@ export async function loadConversations(): Promise<void> {
     const initialEvents = sorted.slice(initialStart)
     const remainingEvents = sorted.slice(0, initialStart)
 
+    console.log('[DM] decrypting', initialEvents.length, 'initial events...')
     await processEventChunks(initialEvents, convMap, user.pubkey)
+    console.log('[DM] decrypt complete, conversations:', convMap.size)
 
     if (remainingEvents.length > 0) {
       void processEventChunks(remainingEvents, convMap, user.pubkey).catch(err => {
@@ -294,10 +305,10 @@ export async function sendDirectMessage(recipientPubkey: string, content: string
     event.content = ciphertext
     event.tags = [['p', recipientPubkey]]
     await event.sign(signer)
-    if (event.id) {
-      markEventProcessed(event.id)
-    }
-    await event.publish()
+      if (event.id) {
+        markEventProcessed(event.id)
+      }
+      await publishToConfiguredRelays(event)
 
     rememberScheme(recipientPubkey, scheme)
 
@@ -384,10 +395,40 @@ async function decryptEvent(
   const recipient = sender === mePubkey ? partnerPubkey : mePubkey
   const counterpart = sender === mePubkey ? partnerPubkey : sender
 
+  // Check cache first
+  console.log('[DM] checking cache for event:', event.id?.slice(0, 8))
+  const cached = await getCachedDecryptedMessage(event.id)
+  if (cached) {
+    console.log('[DM] cache hit for event:', event.id?.slice(0, 8))
+    return {
+      id: event.id,
+      senderPubkey: sender,
+      recipientPubkey: recipient,
+      content: cached,
+      createdAt: event.created_at || Math.floor(Date.now() / 1000),
+      isEncrypted: true,
+      encryptionType: scheme === 'nip44' ? 'nip44' : 'nip4',
+    }
+  }
+
   try {
-    let plaintext = await decryptFromPubkey(counterpart, event.content, scheme)
+    // Use queue for decryption (prevents rate limiting)
+    const ndk = getNDK()
+    const counterpartUser = ndk.getUser({ pubkey: counterpart })
+    console.log('[DM] decryptEvent calling queueDecrypt for event:', event.id?.slice(0, 8))
+    let plaintext = await queueDecrypt(counterpartUser, event.content, scheme)
+    console.log('[DM] decryptEvent got result:', plaintext ? 'success' : 'null')
+
+    if (!plaintext) {
+      throw new Error('Decrypt returned null')
+    }
+
     plaintext = plaintext.replace(/^\[\/\/\]: # \(nip\d+\)\s*/gm, '').trim()
     rememberScheme(partnerPubkey, scheme)
+
+    // Cache the decrypted message
+    await cacheDecryptedMessage(event.id, plaintext)
+
     return {
       id: event.id,
       senderPubkey: sender,
@@ -539,4 +580,6 @@ export function resetMessagingState(): void {
   processedDmEvents.clear()
   subscriptionOwner = null
   processedOwner = null
+  conversationsLoadedFor = null
+  resetNip46Ready()
 }

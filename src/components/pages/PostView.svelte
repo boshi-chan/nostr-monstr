@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import { goBack, openPost, openProfile, openPostById } from '$stores/router'
-  import type { NavTab } from '$stores/nav'
-  import Post from '../Post.svelte'
+import { goBack, openPost, openProfile, openPostById } from '$stores/router'
+import type { NavTab } from '$stores/nav'
+import Post from '../Post.svelte'
   import Skeleton from '../Skeleton.svelte'
   import type { NostrEvent } from '$types/nostr'
   import { getEventById, fetchEventById } from '$lib/feed-ndk'
@@ -14,26 +13,27 @@
 
   const REPLIES_BATCH_SIZE = 5
 
-  let clickedEvent: NostrEvent | null = initialEvent ?? null
-  let loading = !initialEvent
-  let error: string | null = null
+let clickedEvent: NostrEvent | null = initialEvent ?? null
+let loading = !initialEvent
+let error: string | null = null
 
-  let threadContext: ThreadContext | null = null
-  let threadStats: ReturnType<typeof getThreadStats> | null = null
-  let ancestorChain: NostrEvent[] = []
-  let directReplies: NostrEvent[] = []
-  let visibleReplies = REPLIES_BATCH_SIZE
+let threadContext: ThreadContext | null = null
+let threadStats: ReturnType<typeof getThreadStats> | null = null
+let ancestorChain: NostrEvent[] = []
+let directReplies: NostrEvent[] = []
+let visibleReplies = REPLIES_BATCH_SIZE
+let lastLoadedEventId: string | null = null
 
-  async function bootstrap(): Promise<void> {
-    loading = true
-    try {
-      let event: NostrEvent | null | undefined = clickedEvent
+async function bootstrap(targetId: string): Promise<void> {
+  loading = true
+  try {
+    let event: NostrEvent | null | undefined = clickedEvent
+    if (!event) {
+      event = getEventById(targetId) ?? null
       if (!event) {
-        event = getEventById(eventId) ?? null
-        if (!event) {
-          event = await fetchEventById(eventId)
-        }
+        event = await fetchEventById(targetId)
       }
+    }
 
       if (!event) {
         error = 'Post is no longer available.'
@@ -51,12 +51,25 @@
       hydrateThreadSlices(threadContext)
     } finally {
       loading = false
-    }
+  }
+}
+
+$: if (eventId && eventId !== lastLoadedEventId) {
+  const hadLoadedBefore = lastLoadedEventId !== null
+  lastLoadedEventId = eventId
+
+  if (hadLoadedBefore) {
+    clickedEvent = null
+    threadContext = null
+    threadStats = null
+    ancestorChain = []
+    directReplies = []
+    visibleReplies = REPLIES_BATCH_SIZE
   }
 
-  onMount(() => {
-    void bootstrap()
-  })
+  error = null
+  void bootstrap(eventId)
+}
 
   function handleProfileSelect(pubkey: string) {
     openProfile(pubkey, originTab)

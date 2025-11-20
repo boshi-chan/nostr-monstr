@@ -9,6 +9,7 @@ import HomeIcon from './icons/HomeIcon.svelte'
 import BookOpenIcon from './icons/BookOpenIcon.svelte'
 import BellIcon from './icons/BellIcon.svelte'
 import MailIcon from 'lucide-svelte/icons/mail'
+import LogInIcon from 'lucide-svelte/icons/log-in'
 import { unreadCount } from '$stores/notifications'
 import { showSearch } from '$stores/search'
 import { unreadCounts } from '$stores/messages'
@@ -142,10 +143,10 @@ import { unreadCounts } from '$stores/messages'
   {:else}
     <button
       on:click={openLoginModal}
-      class="md:hidden h-12 px-4 flex items-center justify-center rounded-xl bg-primary text-dark font-semibold text-sm hover:bg-primary/90 transition-colors duration-200"
+      class="md:hidden h-12 px-4 flex items-center justify-center rounded-xl bg-primary text-dark hover:bg-primary/90 transition-colors duration-200"
       title="Login"
     >
-      Login
+      <LogInIcon size={22} strokeWidth={2.2} />
     </button>
   {/if}
 
@@ -193,10 +194,10 @@ import { unreadCounts } from '$stores/messages'
     {:else}
       <button
         on:click={openLoginModal}
-        class="w-full h-12 flex items-center justify-center rounded-xl bg-primary text-dark font-semibold text-sm hover:bg-primary/90 transition-colors duration-200"
+        class="w-full h-12 flex items-center justify-center rounded-xl bg-primary text-dark hover:bg-primary/90 transition-colors duration-200"
         title="Login"
       >
-        Login
+        <LogInIcon size={22} strokeWidth={2.2} />
       </button>
     {/if}
   </div>
@@ -265,7 +266,7 @@ import { unreadCounts } from '$stores/messages'
             <line x1="6" y1="6" x2="18" y2="18"></line>
           </svg>
         </button>
-        <svelte:component this={LoginModule.default} onSuccess={closeLoginModal} />
+        <svelte:component this={LoginModule.default} onSuccess={closeLoginModal} onCancel={closeLoginModal} />
       </div>
     </div>
   {/await}
