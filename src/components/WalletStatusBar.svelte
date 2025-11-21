@@ -86,7 +86,10 @@
   const appVersion = packageInfo.version ?? '0.0.0'
 </script>
 
-<div class="w-full border-b border-dark-border/60 bg-dark/90 px-3 py-1 backdrop-blur-2xl">
+<div
+  class="w-full border-b border-dark-border/60 bg-dark/90 px-3 py-1 backdrop-blur-2xl"
+  style="padding-top: env(safe-area-inset-top, 0px);"
+>
   <div class="flex flex-nowrap items-center gap-2 text-[11px] text-text-soft">
     <!-- Wallet pill -->
     <div class="flex flex-shrink-0 items-center gap-2 rounded-full border border-dark-border/60 bg-dark/60 px-2 py-1 shadow-sm shadow-black/20">

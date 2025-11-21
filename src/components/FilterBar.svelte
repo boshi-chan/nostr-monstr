@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { feedFilters, toggleReplies, toggleReposts, toggleMedia, toggleBots } from '$stores/feedFilters'
+  import { feedFilters, toggleReplies, toggleReposts, toggleMedia, toggleBots, toggleLongReads } from '$stores/feedFilters'
   import CommentIcon from './icons/CommentIcon.svelte'
   import RepostIcon from './icons/RepostIcon.svelte'
   import ImageIcon from './icons/ImageIcon.svelte'
   import BotIcon from './icons/BotIcon.svelte'
+  import BookOpenIcon from './icons/BookOpenIcon.svelte'
 
   // Following AI_Guidelines: Component only reads from store and calls helper functions
   $: filters = $feedFilters
@@ -25,6 +26,24 @@
     <span class="hidden md:inline">Replies</span>
     {#if !filters.showReplies}
       <span class="opacity-50">✕</span>
+    {/if}
+  </button>
+
+  <!-- Long reads filter -->
+  <button
+    type="button"
+    on:click={toggleLongReads}
+    class={`flex flex-1 items-center justify-center gap-1.5 px-2 md:px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 whitespace-nowrap ${
+      filters.showLongReads
+        ? 'bg-dark-lighter/60 text-text-soft border border-dark-border/60'
+        : 'text-text-muted hover:text-text-soft hover:bg-dark-lighter/30 border border-transparent'
+    }`}
+    aria-label={filters.showLongReads ? 'Hide long reads' : 'Show long reads'}
+  >
+    <BookOpenIcon size={14} />
+    <span class="hidden md:inline">Long reads</span>
+    {#if !filters.showLongReads}
+      <span class="opacity-50 text-[0.7rem]">Hidden</span>
     {/if}
   </button>
 

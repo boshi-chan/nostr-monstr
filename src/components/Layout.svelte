@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { ComponentType } from 'svelte'
+  import { onMount, type ComponentType } from 'svelte'
   import Navbar from './Navbar.svelte'
   import Compose from './Compose.svelte'
   import FloatingComposeButton from './FloatingComposeButton.svelte'
@@ -17,18 +17,22 @@ import DebugOverlayToggle from './DebugOverlayToggle.svelte'
 import { activeRoute } from '$stores/router'
 import { showEmberModal } from '$stores/wallet'
 import { debugOverlayEnabled } from '$stores/debugOverlay'
+import { setupDeepLinkListener } from '$lib/deep-link'
+import '$lib/native-notification-bridge'
 
   let NotificationsPage: ComponentType | null = null
   let SettingsPage: ComponentType | null = null
   let PostViewPage: ComponentType | null = null
   let EmberModalComp: ComponentType | null = null
-  let LongReadsPage: ComponentType | null = null
 
   $: shouldLoadNotifications = $activeRoute.type === 'page' && $activeRoute.tab === 'notifications'
   $: shouldLoadSettings = $activeRoute.type === 'page' && $activeRoute.tab === 'settings'
   $: shouldLoadPostView = $activeRoute.type === 'post'
-  $: shouldLoadLongReads = $activeRoute.type === 'page' && $activeRoute.tab === 'long-reads'
   $: shouldLoadEmberModal = $showEmberModal
+
+  onMount(() => {
+    setupDeepLinkListener()
+  })
 
   $: if (shouldLoadNotifications && !NotificationsPage) {
     import('./pages/Notifications.svelte').then(mod => (NotificationsPage = mod.default))
@@ -42,10 +46,6 @@ import { debugOverlayEnabled } from '$stores/debugOverlay'
     import('./pages/PostView.svelte').then(mod => (PostViewPage = mod.default))
   }
 
-  $: if (shouldLoadLongReads && !LongReadsPage) {
-    import('./pages/LongReads.svelte').then(mod => (LongReadsPage = mod.default))
-  }
-
   $: if (shouldLoadEmberModal && !EmberModalComp) {
     import('./EmberModal.svelte').then(mod => (EmberModalComp = mod.default))
   }
@@ -55,7 +55,9 @@ import { debugOverlayEnabled } from '$stores/debugOverlay'
   let mainEl: HTMLElement | null = null
 </script>
 
-<div class="flex h-screen w-screen flex-col bg-dark" style="height: 100dvh; padding-top: env(safe-area-inset-top, 0px);">
+<div
+  class="flex h-screen w-screen flex-col bg-dark"
+  style="height: 100dvh; padding-bottom: env(safe-area-inset-bottom, 0px);">
   <WalletStatusBar />
   <div class="flex flex-1 flex-col overflow-hidden md:flex-row">
     <!-- Left sidebar for desktop -->
@@ -71,12 +73,6 @@ import { debugOverlayEnabled } from '$stores/debugOverlay'
       {#if $activeRoute.type === 'page'}
         {#if $activeRoute.tab === 'home'}
           <Home />
-        {:else if $activeRoute.tab === 'long-reads'}
-          {#if LongReadsPage}
-            <svelte:component this={LongReadsPage} />
-          {:else}
-            <div class="p-4 text-text-muted">Loading long reads…</div>
-          {/if}
         {:else if $activeRoute.tab === 'messages'}
           <Messages />
         {:else if $activeRoute.tab === 'notifications'}

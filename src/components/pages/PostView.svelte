@@ -6,7 +6,7 @@ import Post from '../Post.svelte'
   import type { NostrEvent } from '$types/nostr'
   import { getEventById, fetchEventById } from '$lib/feed-ndk'
   import { buildCompleteThread, getThreadStats, findEventNode, type ThreadContext } from '$lib/thread'
-  import { queueEngagementHydration } from '$lib/engagement'
+import { queueEngagementHydration } from '$lib/engagement'
 
   export let eventId: string
   export let originTab: NavTab
@@ -15,7 +15,8 @@ import Post from '../Post.svelte'
   const REPLIES_BATCH_SIZE = 5
 
 let clickedEvent: NostrEvent | null = initialEvent ?? null
-let loading = !initialEvent
+let loadingMain = !initialEvent
+let loadingReplies = true
 let error: string | null = null
 
 let threadContext: ThreadContext | null = null
@@ -26,7 +27,8 @@ let visibleReplies = REPLIES_BATCH_SIZE
 let lastLoadedEventId: string | null = null
 
 async function bootstrap(targetId: string): Promise<void> {
-  loading = true
+  loadingMain = !clickedEvent
+  loadingReplies = true
   try {
     let event: NostrEvent | null | undefined = clickedEvent
     if (!event) {
@@ -42,6 +44,9 @@ async function bootstrap(targetId: string): Promise<void> {
       }
 
       clickedEvent = event
+      loadingMain = false
+      queueEngagementHydration([event.id])
+
       threadContext = await buildCompleteThread(event)
       hydrateThreadSlices(threadContext)
     } catch (err) {
@@ -49,7 +54,7 @@ async function bootstrap(targetId: string): Promise<void> {
       error = 'Unable to load this thread right now.'
       hydrateThreadSlices(threadContext)
     } finally {
-      loading = false
+      loadingReplies = false
   }
 }
 
@@ -84,12 +89,12 @@ $: if (eventId && eventId !== lastLoadedEventId) {
 
   function hydrateThreadSlices(context: ThreadContext | null): void {
     if (!context) {
-      ancestorChain = []
-      directReplies = []
-      threadStats = null
-      visibleReplies = REPLIES_BATCH_SIZE
-      return
-    }
+    ancestorChain = []
+    directReplies = []
+    threadStats = null
+    visibleReplies = REPLIES_BATCH_SIZE
+    return
+  }
     threadStats = context.threadTree ? getThreadStats(context.threadTree) : null
     ancestorChain = (context.pathToMain ?? []).slice(0, -1)
     const node = findEventNode(context.threadTree, context.mainEvent.id)
@@ -141,7 +146,7 @@ $: if (eventId && eventId !== lastLoadedEventId) {
       <div class="rounded-2xl border border-rose-500/50 bg-rose-500/10 p-6 text-center text-sm text-rose-200/90">
         {error}
       </div>
-    {:else if loading && !clickedEvent}
+    {:else if loadingMain && !clickedEvent}
       <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-5">
         <Skeleton count={5} height="h-4" />
       </div>
@@ -207,15 +212,13 @@ $: if (eventId && eventId !== lastLoadedEventId) {
               {/if}
             </div>
           </div>
-        {:else if !loading && threadContext}
-          <div class="rounded-2xl border border-dark-border/60 bg-dark/40 p-4 text-center text-xs text-text-muted/80">
-            No replies yet.
-          </div>
-        {/if}
-
-        {#if loading && !threadContext}
+        {:else if loadingReplies}
           <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-5">
             <Skeleton count={4} height="h-4" />
+          </div>
+        {:else if !loadingReplies && threadContext}
+          <div class="rounded-2xl border border-dark-border/60 bg-dark/40 p-4 text-center text-xs text-text-muted/80">
+            No replies yet.
           </div>
         {/if}
       </div>
@@ -232,5 +235,3 @@ $: if (eventId && eventId !== lastLoadedEventId) {
     scrollbar-width: thin;
   }
 </style>
-
-

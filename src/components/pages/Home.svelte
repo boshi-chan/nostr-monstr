@@ -13,6 +13,7 @@
 
   import type { NostrEvent } from '$types/nostr'
   import Post from '../Post.svelte'
+  import LongReadPreview from '../LongReadPreview.svelte'
   import Skeleton from '../Skeleton.svelte'
   import FilterBar from '../FilterBar.svelte'
   import UsersIcon from '../icons/UsersIcon.svelte'
@@ -145,12 +146,20 @@
         </div>
       {:else}
         {#each $feedEvents as event (event.id)}
-          <Post
-            {event}
-            onSelect={handleEventSelect}
-            onProfileSelect={handleProfileSelect}
-            replyCount={0}
-          />
+          {#if event.kind === 30023}
+            <LongReadPreview
+              {event}
+              onSelect={handleEventSelect}
+              onProfileSelect={handleProfileSelect}
+            />
+          {:else}
+            <Post
+              {event}
+              onSelect={handleEventSelect}
+              onProfileSelect={handleProfileSelect}
+              replyCount={0}
+            />
+          {/if}
         {/each}
 
         <!-- Infinite scroll trigger -->

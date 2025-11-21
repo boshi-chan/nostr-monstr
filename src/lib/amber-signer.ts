@@ -13,6 +13,7 @@ interface AmberSignerPlugin {
   isAmberInstalled(): Promise<AmberStatus>
   getAmberStatus?: () => Promise<AmberStatus>
   getCachedPubkey?: () => Promise<{ pubkey?: string | null }>
+  pingAmber?: () => Promise<{ ready?: boolean; installed?: boolean }>
   getPublicKey(): Promise<{ pubkey: string }>
   signEvent(options: { event: string }): Promise<{ signature: string; event?: string }>
   nip04Encrypt(options: { plaintext: string; pubkey: string }): Promise<{ ciphertext: string }>
@@ -27,6 +28,7 @@ export type AmberStatus = {
   intentAvailable?: boolean
   versionName?: string
   versionCode?: number
+  ready?: boolean
 }
 
 // Register the native plugin
@@ -274,7 +276,10 @@ export async function loginWithAmber(options?: { force?: boolean }): Promise<{ p
 
   console.log('[AmberSigner] Starting native Amber login')
 
-  const signer = new AmberNativeSigner()
+  // Reuse cached pubkey if Amber is reachable
+  const cached = await getCachedAmberPubkey()
+  const amberReady = await pingAmber()
+  const signer = new AmberNativeSigner(cached && amberReady ? cached : undefined)
   const user = await signer.user()
 
   // Set as NDK signer

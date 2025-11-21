@@ -23,12 +23,14 @@ import {
 import { normalizeEvent } from '$lib/event-validation'
 import { queueDecrypt, getCachedDecryptedMessage, cacheDecryptedMessage, nip46Ready, resetNip46Ready } from '$lib/signer-queue'
 import { publishToConfiguredRelays } from './relay-publisher'
+import { logDebug } from '$stores/debug'
 
 const NIP04_KIND = 4
 const NIP44_KIND = 44
 const DM_KINDS = [NIP04_KIND, NIP44_KIND]
 const FAILED_PLACEHOLDER = '[Failed to decrypt]'
 const MAX_TRACKED_DM_EVENTS = 2000
+const DM_DEBUG = true
 
 const dmSubscriptions = new Set<NDKSubscription>()
 const processedDmEvents = new Set<string>()
@@ -305,10 +307,13 @@ export async function sendDirectMessage(recipientPubkey: string, content: string
     event.content = ciphertext
     event.tags = [['p', recipientPubkey]]
     await event.sign(signer)
-      if (event.id) {
-        markEventProcessed(event.id)
-      }
-      await publishToConfiguredRelays(event)
+    if (event.id) {
+      markEventProcessed(event.id)
+    }
+    const published = await publishToConfiguredRelays(event)
+    if (DM_DEBUG) {
+      logDebug('[DM] sent', [{ to: recipientPubkey, kind, relays: published, id: event.id }])
+    }
 
     rememberScheme(recipientPubkey, scheme)
 
@@ -328,8 +333,37 @@ export async function sendDirectMessage(recipientPubkey: string, content: string
       const current = get(conversationMessages)
       conversationMessages.set([...current, message])
     }
+
+    // Kick subscriptions and opportunistic fetch to surface the DM immediately
+    subscribeToDmEvents(user.pubkey)
+    try {
+      const since = (event.created_at ?? Math.floor(Date.now() / 1000)) - 120
+      const filters: NDKFilter[] = [
+        { kinds: DM_KINDS, '#p': [user.pubkey], authors: [recipientPubkey], since, limit: 20 },
+        { kinds: DM_KINDS, '#p': [recipientPubkey], authors: [user.pubkey], since, limit: 20 },
+      ]
+      const results = await Promise.all(filters.map(f => fetchEventsWithTimeout(ndk, f, 3000)))
+      const mergedEvents: NostrEvent[] = []
+      for (const set of results) {
+        for (const ev of set) {
+          const raw = normalizeEvent(ev)
+          if (raw) mergedEvents.push(raw)
+        }
+      }
+      const decrypted = await decryptEventsWithLimit(mergedEvents, user.pubkey)
+      const convMap = new Map(get(conversations))
+      applyDecryptedResults(convMap, decrypted)
+    } catch (err) {
+      logger.warn('[DM] Post-send fetch failed (non-fatal):', err)
+      if (DM_DEBUG) {
+        logDebug('[DM] post-send fetch failed', [String(err)])
+      }
+    }
   } catch (err) {
     logger.error('[DM] Failed to send message:', err)
+    if (DM_DEBUG) {
+      logDebug('[DM] send failed', [String(err)])
+    }
     throw err
   }
 }
@@ -543,6 +577,9 @@ async function handleLiveDmEvent(event: NDKEvent, mePubkey: string): Promise<voi
     markEventProcessed(raw.id)
     appendMessageToConversation(partner, message)
     void fetchUserMetadata(partner)
+    if (DM_DEBUG) {
+      logDebug('[DM] live', [{ from: raw.pubkey, to: mePubkey, id: raw.id?.slice(0, 8), kind: raw.kind }])
+    }
 
     if (get(activeConversation) === partner) {
       conversationMessages.update(existing => [...existing, message])

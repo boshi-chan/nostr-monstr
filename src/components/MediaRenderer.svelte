@@ -12,11 +12,7 @@
   export let event: NostrEvent
 
   // Following AI_Guidelines: Component reads from stores
-  // Map feedSource to mediaFilters key, using 'global' for long-reads feeds
   $: filterKey = ((): 'following' | 'circles' | 'global' | 'profile' => {
-    if ($feedSource === 'long-reads' || $feedSource === 'long-reads-following' || $feedSource === 'long-reads-circles') {
-      return 'global'
-    }
     if ($feedSource === 'following' || $feedSource === 'circles' || $feedSource === 'global' || $feedSource === 'profile') {
       return $feedSource
     }

@@ -2,7 +2,7 @@ import { Capacitor, registerPlugin } from '@capacitor/core'
 
 interface NativeNotificationsPlugin {
   ensureChannel(options?: { channelId?: string; channelName?: string }): Promise<{ channelId: string }>
-  presentNotification(options: { title: string; body: string; id?: number; channelId?: string; channelName?: string }): Promise<{ id?: number }>
+  presentNotification(options: { title: string; body: string; id?: number; channelId?: string; channelName?: string; url?: string }): Promise<{ id?: number }>
   requestPermission?(options?: Record<string, never>): Promise<{ granted: boolean }>
   startBackgroundListener?(options: { pubkey: string }): Promise<{ scheduled?: boolean }>
   stopBackgroundListener?(): Promise<{ stopped?: boolean }>
@@ -35,10 +35,10 @@ export async function requestNativeNotificationPermission(): Promise<boolean> {
   }
 }
 
-export async function presentNativeNotification(title: string, body: string, id?: number): Promise<void> {
+export async function presentNativeNotification(title: string, body: string, id?: number, url?: string): Promise<void> {
   if (!plugin || !isAndroidNative()) return
   try {
-    await plugin.presentNotification({ title, body, id })
+    await plugin.presentNotification({ title, body, id, url })
   } catch (err) {
     console.warn('[NativeNotifications] presentNotification failed:', err)
   }

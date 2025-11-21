@@ -12,7 +12,7 @@
   let route: Route = { type: 'page', tab: 'home' }
   $: route = $activeRoute
 
-  // Only show on feed pages (home and long-reads) when authenticated
+  // Only show on feed/profile pages when authenticated
   let shouldShow = false
   $: shouldShow = $isAuthenticated && computeShouldShow(route, currentTab)
 
@@ -25,12 +25,12 @@
       return true
     }
     if (route.type === 'post') {
-      return route.originTab === 'home' || route.originTab === 'long-reads' || route.originTab === 'profile'
+      return route.originTab === 'home' || route.originTab === 'profile'
     }
     if (route.type === 'page') {
-      return route.tab === 'home' || route.tab === 'long-reads' || route.tab === 'profile'
+      return route.tab === 'home' || route.tab === 'profile'
     }
-    return tab === 'home' || tab === 'long-reads'
+    return tab === 'home'
   }
 </script>
 

@@ -1190,7 +1190,11 @@ export async function publishNote(content: string, replyTo?: NostrEvent, quote?:
 /**
  * Publish a reaction (like/emoji)
  */
-export async function publishReaction(eventId: string, emoji: string = '+'): Promise<void> {
+export async function publishReaction(
+  eventId: string,
+  emoji: string = '+',
+  options?: { incrementCounts?: boolean }
+): Promise<void> {
   const ndk = getNDK()
   const user = getCurrentNDKUser()
 
@@ -1207,8 +1211,10 @@ export async function publishReaction(eventId: string, emoji: string = '+'): Pro
     await ndkEvent.sign()
     await publishToConfiguredRelays(ndkEvent)
 
-  incrementLikeCount(eventId, 1)
-  incrementReactionCount(eventId, emoji)
+  if (options?.incrementCounts !== false) {
+    incrementLikeCount(eventId, 1)
+    incrementReactionCount(eventId, emoji)
+  }
 }
 
 /**

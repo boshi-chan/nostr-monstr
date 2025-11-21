@@ -2,6 +2,7 @@ import type { NDKEvent } from '@nostr-dev-kit/ndk'
 import { getNDK } from './ndk'
 import { awaitRelaysReady, getPublishRelayUrls } from './relay-manager'
 import { logger } from './logger'
+import { logDebug } from '$stores/debug'
 
 /**
  * Publish an already-signed event to the configured relay set.
@@ -20,6 +21,9 @@ export async function publishToConfiguredRelays(event: NDKEvent): Promise<string
     throw new Error('No relay connections available for publishing')
   }
 
+  logger.info('[Publish] Target relays:', targets)
+  logDebug('[Publish] targets', [targets])
+
   const results = await Promise.allSettled(
     targets.map(async url => {
       try {
@@ -29,6 +33,7 @@ export async function publishToConfiguredRelays(event: NDKEvent): Promise<string
         return url
       } catch (err) {
         logger.warn(`[Publish] Relay ${url} failed:`, err)
+        logDebug('[Publish] relay failed', [url, String(err)])
         throw err instanceof Error ? err : new Error(String(err))
       }
     })
@@ -40,6 +45,8 @@ export async function publishToConfiguredRelays(event: NDKEvent): Promise<string
       successes.push(result.value)
     }
   }
+
+  logDebug('[Publish] success', [successes])
 
   if (successes.length === 0) {
     throw new Error('Failed to publish event to any relay')

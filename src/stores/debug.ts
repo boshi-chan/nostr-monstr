@@ -1,7 +1,7 @@
 import { writable } from 'svelte/store'
 
 export type DebugLogEntry = {
-  level: 'warn' | 'error'
+  level: 'info' | 'warn' | 'error'
   message: string
   details: unknown[]
   timestamp: number
@@ -34,3 +34,7 @@ function createDebugLogStore() {
 }
 
 export const debugLogStore = createDebugLogStore()
+
+export function logDebug(message: string, details: unknown[] = []): void {
+  debugLogStore.push({ level: 'info', message, details, timestamp: Date.now() })
+}

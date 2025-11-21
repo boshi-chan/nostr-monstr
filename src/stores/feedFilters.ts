@@ -8,6 +8,7 @@ export type FeedFilters = {
   showReposts: boolean
   showMedia: boolean
   showBots: boolean
+  showLongReads: boolean
   // Profile view mode
   profileMode: FilterMode
 }
@@ -17,6 +18,7 @@ const DEFAULT_FILTERS: FeedFilters = {
   showReposts: true,
   showMedia: true,
   showBots: false,
+  showLongReads: true,
   profileMode: 'all',
 }
 
@@ -65,6 +67,10 @@ export function toggleMedia() {
 
 export function toggleBots() {
   feedFilters.update(f => ({ ...f, showBots: !f.showBots }))
+}
+
+export function toggleLongReads() {
+  feedFilters.update(f => ({ ...f, showLongReads: !f.showLongReads }))
 }
 
 // Helper function for profile view mode

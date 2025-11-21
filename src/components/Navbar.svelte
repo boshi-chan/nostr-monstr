@@ -6,7 +6,6 @@
 import { navigateToPage } from '$stores/router'
 import type { NavTab } from '$stores/nav'
 import HomeIcon from './icons/HomeIcon.svelte'
-import BookOpenIcon from './icons/BookOpenIcon.svelte'
 import BellIcon from './icons/BellIcon.svelte'
 import MailIcon from 'lucide-svelte/icons/mail'
 import LogInIcon from 'lucide-svelte/icons/log-in'
@@ -27,7 +26,6 @@ import { unreadCounts } from '$stores/messages'
 
   const tabs: { id: NavTab; label: string; icon: any }[] = [
     { id: 'home', label: 'Home', icon: HomeIcon },
-    { id: 'long-reads', label: 'Long Reads', icon: BookOpenIcon },
     { id: 'messages', label: 'Messages', icon: MailIcon },
     { id: 'notifications', label: 'Notifications', icon: BellIcon },
   ]
@@ -43,8 +41,6 @@ import { unreadCounts } from '$stores/messages'
     if (tab === 'home') {
       const targetFeed = $lastTimelineFeed ?? 'following'
       feedSource.set(targetFeed)
-    } else if (tab === 'long-reads') {
-      feedSource.set('long-reads')
     }
   }
 
@@ -90,7 +86,10 @@ import { unreadCounts } from '$stores/messages'
   }
 </script>
 
-<nav class="mobile-nav relative flex min-h-[3.5rem] w-full items-center gap-3 border-t border-dark-border bg-dark-light px-3 py-1 text-text-muted md:h-full md:w-20 md:flex-col md:items-center md:justify-start md:gap-4 md:border-t-0 md:border-r md:bg-transparent md:px-4 md:py-4" style="padding-bottom: max(0.5rem, env(safe-area-inset-bottom))">
+<nav
+  class="mobile-nav relative flex min-h-[3.5rem] w-full items-center gap-3 border-t border-dark-border bg-dark-light px-3 py-1 text-text-muted md:h-full md:w-20 md:flex-col md:items-center md:justify-start md:gap-4 md:border-t-0 md:border-r md:bg-transparent md:px-4 md:py-4"
+  style="padding-bottom: max(0.5rem, env(safe-area-inset-bottom));"
+>
   <!-- Desktop: Logo Only -->
   <div class="hidden md:flex items-center justify-center h-12">
     <img src="/logo.svg" alt="Monstr" class="h-10 w-10" />

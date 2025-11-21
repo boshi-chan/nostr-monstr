@@ -4,7 +4,7 @@ import type { UserMetadata } from '$types/user'
 import { feedFilters } from './feedFilters'
 import { isReply, isRepostEvent, hasMedia, isBot } from '$lib/content'
 
-export type FeedTab = 'following' | 'circles' | 'global' | 'long-reads'
+export type FeedTab = 'following' | 'circles' | 'global'
 
 // Unfiltered feed events (single timeline for the currently active feed)
 export const unfilteredFeedEvents = writable<NostrEvent[]>([])
@@ -16,6 +16,8 @@ export const feedEvents = derived(
   ([unfilteredEvents, filters]) => {
     // Cache event classifications to avoid repeated expensive checks
     return unfilteredEvents.filter(event => {
+      if (!filters.showLongReads && event.kind === 30023) return false
+
       // Early exit for bot filter (applies to all types)
       if (!filters.showBots && isBot(event)) {
         return false

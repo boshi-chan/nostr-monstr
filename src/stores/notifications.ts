@@ -151,7 +151,7 @@ export function markAsRead(notificationId: string): void {
 export function addNotification(notification: Notification): void {
   notifications.update(notifs => {
     // Prevent duplicates
-    if (notifs.some(n => n.id === notification.id)) {
+    if (notifs.some(n => n.id === notification.id && n.fromPubkey === notification.fromPubkey)) {
       return notifs
     }
     const next = [notification, ...notifs]

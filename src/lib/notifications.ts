@@ -17,10 +17,14 @@ import { EMBER_EVENT_KIND, EMBER_TAG, atomicToXmr, decodeEmberPayload } from '$l
 import { normalizeEvent } from '$lib/event-validation'
 import { logger } from '$lib/logger'
 import { startNativeNotificationListener, stopNativeNotificationListener } from '$lib/native-notifications'
+import { hasSeenNotification, markNotificationSeen, purgeOldSeen } from '$lib/notification-seen'
+import { normalizeEvent } from '$lib/event-validation'
+import { logDebug } from '$stores/debug'
 
 let notificationSubscription: NDKSubscription | null = null
 const processedNotifications = new Set<string>()
 const notificationEventCache = new Map<string, NostrEvent>()
+purgeOldSeen()
 
 async function getNotificationMetadata(pubkey: string) {
   let metadata = getUserMetadata(pubkey)
@@ -143,6 +147,7 @@ function findFirstEventReference(event: NostrEvent): string | null {
 
 function addNotificationSorted(notification: Notification): void {
   addNotification(notification)
+  markNotificationSeen(`${notification.id}:${notification.fromPubkey}`)
 }
 
 /**
@@ -195,12 +200,37 @@ export async function startNotificationListener(pubkey: string): Promise<void> {
     logger.warn('Notification listener error:', err)
   })
 
+  // Secondary subscription to catch reactions that lack a 'p' tag (some clients only tag the event)
+  if (userEventList.length > 0) {
+    const reactionFilter: NDKFilter = {
+      kinds: [7],
+      '#e': userEventList.slice(0, 500),
+      since: filter.since,
+    }
+    const reactionSub = ndk.subscribe(
+      reactionFilter,
+      { closeOnEose: false } as NDKSubscriptionOptions,
+      undefined,
+      false
+    )
+    reactionSub.on('event', (event: NostrEvent | NDKEvent) => {
+      const raw = normalizeEvent(event)
+      if (!raw) return
+      void processNotificationEvent(raw, pubkey)
+    })
+    ;(reactionSub as any).on?.('error', (err: unknown) => {
+      logger.warn('Notification reaction listener error:', err)
+    })
+  }
+
   logger.info('[NOTIF] Notification listener started successfully')
 
   void startNativeNotificationListener(pubkey).catch(err => {
     logger.warn('[NOTIF] Failed to start native notification listener:', err)
   })
 }
+
+const NOTIF_DEBUG = true
 
 /**
  * Process an event that might be a notification
@@ -210,9 +240,19 @@ async function processNotificationEvent(event: NostrEvent, userPubkey: string): 
 
   const notificationId = `${event.id}:${event.pubkey}`
   if (processedNotifications.has(notificationId)) return
+  if (hasSeenNotification(notificationId)) return
   processedNotifications.add(notificationId)
 
-  logger.info('[NOTIF] Processing notification event:', { kind: event.kind, id: event.id.substring(0, 8) })
+  if (NOTIF_DEBUG) {
+    const payload = {
+      kind: event.kind,
+      id: event.id.substring(0, 8),
+      pubkey: event.pubkey.slice(0, 8),
+      tags: event.tags,
+    }
+    logger.info('[NOTIF][dbg] Processing notification event:', payload)
+    logDebug('[NOTIF] event', [payload])
+  }
 
   try {
     switch (event.kind) {
@@ -242,18 +282,30 @@ async function processNotificationEvent(event: NostrEvent, userPubkey: string): 
 
 async function handleReactionNotification(event: NostrEvent, userPubkey: string): Promise<boolean> {
   const targetEventId = findFirstEventReference(event)
-  if (!targetEventId) return false
-
-  const userEvents = get(userEventIds)
-  if (!userEvents.has(targetEventId)) {
-    const target = await getTargetEvent(targetEventId)
-    if (!target || target.pubkey !== userPubkey) return false
-    ensureUserEventId(targetEventId)
+  const userTagged = event.tags.some(tag => tag[0] === 'p' && tag[1] === userPubkey)
+  if (!targetEventId && !userTagged) {
+    if (NOTIF_DEBUG) logDebug('[NOTIF] drop reaction - no target/tag', [{ id: event.id }])
+    return false
   }
 
-  const targetEvent = await getTargetEvent(targetEventId)
-  if (!targetEvent || targetEvent.pubkey !== userPubkey) return false
+  if (targetEventId) {
+    const userEvents = get(userEventIds)
+    if (!userEvents.has(targetEventId)) {
+      const target = await getTargetEvent(targetEventId)
+      if (!target) {
+        // If the reactor tagged us directly, accept even without the target event
+        if (!userTagged) return false
+      } else {
+        if (target.pubkey !== userPubkey) {
+          if (!userTagged) return false
+        } else {
+          ensureUserEventId(targetEventId)
+        }
+      }
+    }
+  }
 
+  const targetEvent = targetEventId ? await getTargetEvent(targetEventId) : null
   const metadata = await getNotificationMetadata(event.pubkey)
 
   addNotificationSorted({
@@ -262,29 +314,39 @@ async function handleReactionNotification(event: NostrEvent, userPubkey: string)
     fromPubkey: event.pubkey,
     fromName: metadata?.name || metadata?.display_name || 'User',
     fromAvatar: metadata?.picture,
-    eventId: targetEventId,
-    eventContent: targetEvent.content.substring(0, 180),
+    eventId: targetEventId ?? event.id,
+    eventContent: targetEvent?.content.substring(0, 180) ?? '',
     reactionEmoji: event.content?.trim() || '+',
     createdAt: event.created_at,
     read: false,
   })
+  markNotificationSeen(`${event.id}:${event.pubkey}`)
 
   return true
 }
 
 async function handleRepostNotification(event: NostrEvent, userPubkey: string): Promise<boolean> {
   const targetEventId = findFirstEventReference(event)
-  if (!targetEventId) return false
+  const userTagged = event.tags.some(tag => tag[0] === 'p' && tag[1] === userPubkey)
+  if (!targetEventId && !userTagged) return false
 
-  const userEvents = get(userEventIds)
-  if (!userEvents.has(targetEventId)) {
-    const target = await getTargetEvent(targetEventId)
-    if (!target || target.pubkey !== userPubkey) return false
-    ensureUserEventId(targetEventId)
+  if (targetEventId) {
+    const userEvents = get(userEventIds)
+    if (!userEvents.has(targetEventId)) {
+      const target = await getTargetEvent(targetEventId)
+      if (!target) {
+        if (!userTagged) return false
+      } else {
+        if (target.pubkey !== userPubkey) {
+          if (!userTagged) return false
+        } else {
+          ensureUserEventId(targetEventId)
+        }
+      }
+    }
   }
 
-  const targetEvent = await getTargetEvent(targetEventId)
-  if (!targetEvent || targetEvent.pubkey !== userPubkey) return false
+  const targetEvent = targetEventId ? await getTargetEvent(targetEventId) : null
 
   const metadata = await getNotificationMetadata(event.pubkey)
 
@@ -294,8 +356,8 @@ async function handleRepostNotification(event: NostrEvent, userPubkey: string): 
     fromPubkey: event.pubkey,
     fromName: metadata?.name || metadata?.display_name || 'User',
     fromAvatar: metadata?.picture,
-    eventId: targetEventId,
-    eventContent: targetEvent.content.substring(0, 180),
+    eventId: targetEventId ?? event.id,
+    eventContent: targetEvent?.content.substring(0, 180) ?? '',
     createdAt: event.created_at,
     read: false,
   })
@@ -549,5 +611,21 @@ export function stopNotificationListener(): void {
   notificationEventCache.clear()
   // Note: Don't clear notifications - they persist in localStorage
   void stopNativeNotificationListener()
+}
+
+/**
+ * Entry point for native-layer notifications: pass raw nostr event JSON and the user's pubkey.
+ * Native code (e.g., Capacitor plugin) can call window.__monstrHandleNativeNotification(raw, pubkey).
+ */
+export async function handleNativeNotificationEvent(raw: any, userPubkey: string): Promise<void> {
+  if (!raw || !userPubkey) return
+  const event = normalizeEvent(raw as any)
+  if (!event) return
+  await processNotificationEvent(event, userPubkey)
+}
+
+// Expose global hook for native bridges to invoke
+if (typeof window !== 'undefined') {
+  ;(window as any).__monstrHandleNativeNotification = handleNativeNotificationEvent
 }
 

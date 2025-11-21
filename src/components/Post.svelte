@@ -195,14 +195,43 @@ import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
     ? getDisplayName(event.pubkey, reposterMetadata) || event.pubkey.slice(0, 8)
     : null
 
+  function adjustLikeOptimistic(delta: number, emoji = '+'): void {
+    if (!actionableEvent.id) return
+    likeCounts.update(map => {
+      const next = new Map(map)
+      next.set(actionableEvent.id, Math.max(0, (next.get(actionableEvent.id) ?? 0) + delta))
+      return next
+    })
+    reactionBreakdowns.update(map => {
+      const next = new Map(map)
+      const bucket = new Map(next.get(actionableEvent.id) ?? new Map<string, number>())
+      bucket.set(emoji, Math.max(0, (bucket.get(emoji) ?? 0) + delta))
+      next.set(actionableEvent.id, bucket)
+      return next
+    })
+  }
+
   async function handleLike() {
     if (likeLoading) return
+    if (!actionableEvent?.id) return
+    const alreadyLiked = isLiked
     try {
       likeLoading = true
-      await publishReaction(actionableEvent.id, '+')
-      likedEvents.update(set => new Set(set).add(actionableEvent.id))
+      if (!alreadyLiked) {
+        likedEvents.update(set => new Set(set).add(actionableEvent.id))
+        adjustLikeOptimistic(1, '+')
+      }
+      await publishReaction(actionableEvent.id, '+', { incrementCounts: false })
     } catch (err) {
       logger.error('Like failed:', err)
+      if (!alreadyLiked) {
+        likedEvents.update(set => {
+          const next = new Set(set)
+          next.delete(actionableEvent.id)
+          return next
+        })
+        adjustLikeOptimistic(-1, '+')
+      }
     } finally {
       likeLoading = false
     }

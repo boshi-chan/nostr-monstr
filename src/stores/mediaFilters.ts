@@ -102,7 +102,6 @@ export function getMediaFilterForFeed(feedSource: FeedSource): MediaFilterSettin
       context = 'circles'
       break
     case 'global':
-    case 'long-reads':
       context = 'global'
       break
     default:

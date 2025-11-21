@@ -175,20 +175,6 @@
         return
       }
 
-      if (targetFeed === 'long-reads') {
-        await subscribeToLongReadsFeed()
-        return
-      }
-
-      if (targetFeed === 'long-reads-following') {
-        await subscribeToLongReadsFollowingFeed()
-        return
-      }
-
-      if (targetFeed === 'long-reads-circles') {
-        await subscribeToLongReadsCirclesFeed()
-        return
-      }
     })().catch(err => {
       logger.error('Subscription error:', err)
       feedError.set(String(err))

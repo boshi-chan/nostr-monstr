@@ -70,17 +70,21 @@
     padding: 8px 12px;
   }
 
-  .log-entry {
-    margin-bottom: 8px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  }
+.log-entry {
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
 
-  .log-entry.warn {
-    color: #ffd479;
-  }
+.log-entry.info {
+  color: #b3e5fc;
+}
 
-  .log-entry.error {
+.log-entry.warn {
+  color: #ffd479;
+}
+
+.log-entry.error {
     color: #ff7a7a;
   }
 
