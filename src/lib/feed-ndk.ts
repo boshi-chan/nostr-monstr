@@ -33,6 +33,7 @@ import {
   queueEngagementHydration,
   incrementLikeCount,
   incrementRepostCount,
+  incrementReactionCount,
 } from '$lib/engagement'
 import { persistInteractionsSnapshot } from '$lib/interaction-cache'
 import { normalizeEvent } from '$lib/event-validation'
@@ -107,7 +108,11 @@ function collectEngagementTargets(event: NostrEvent): string[] {
     }
   }
 
-  return Array.from(targets)
+  const result = Array.from(targets)
+  if (result.length === 0) {
+    logger.warn('collectEngagementTargets returned empty array for event:', event.id)
+  }
+  return result
 }
 
 /**
@@ -198,10 +203,12 @@ function flushPendingEvents(): void {
   }
 
   if (eventsToMerge.length > 0) {
+    logger.info(`Adding ${eventsToMerge.length} events to feed`)
     const engagementIds: string[] = []
     for (const event of eventsToMerge) {
       engagementIds.push(...collectEngagementTargets(event))
     }
+    logger.info(`Collected ${engagementIds.length} engagement target IDs from ${eventsToMerge.length} events`)
     queueEngagementHydration(engagementIds)
 
     unfilteredFeedEvents.update(existing => {
@@ -1201,6 +1208,7 @@ export async function publishReaction(eventId: string, emoji: string = '+'): Pro
     await publishToConfiguredRelays(ndkEvent)
 
   incrementLikeCount(eventId, 1)
+  incrementReactionCount(eventId, emoji)
 }
 
 /**

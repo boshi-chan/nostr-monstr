@@ -7,8 +7,8 @@ import type { NostrEvent } from '$types/nostr'
 import { parseContent } from './content'
 import { getNDK } from './ndk'
 import { getEventById, fetchEventById } from './feed-ndk'
-import type { NDKSubscriptionOptions } from '@nostr-dev-kit/ndk'
 import { normalizeEvent } from '$lib/event-validation'
+import { logger } from './logger'
 
 export interface ThreadNode {
   event: NostrEvent
@@ -132,21 +132,40 @@ async function fetchDirectReplies(eventId: string): Promise<NostrEvent[]> {
   try {
     const ndk = getNDK()
 
-    // Add timeout to prevent hanging
-    const fetchPromise = ndk.fetchEvents(
-      { kinds: [1, 6], '#e': [eventId], limit: 500 },
-      { closeOnEose: true } as NDKSubscriptionOptions
-    )
+    // Use subscription instead of fetchEvents - returns as soon as first relay responds
+    const result = await new Promise<Set<any>>((resolve) => {
+      const events = new Set()
+      let eoseCount = 0
 
-    const timeoutPromise = new Promise<Set<any>>((_, reject) =>
-      setTimeout(() => reject(new Error('Fetch replies timeout')), 5000)
-    )
+      const sub = ndk.subscribe(
+        { kinds: [1, 6, 7, 9735], '#e': [eventId] }, // Include reactions and zaps
+        { closeOnEose: true }
+      )
 
-    const result = (await Promise.race([fetchPromise, timeoutPromise])) as Set<any>
+      sub.on('event', (event: any) => {
+        events.add(event)
+      })
+
+      sub.on('eose', () => {
+        eoseCount++
+        // Resolve after first relay completes
+        if (eoseCount >= 1) {
+          sub.stop()
+          resolve(events)
+        }
+      })
+
+      // Timeout after 3 seconds
+      setTimeout(() => {
+        sub.stop()
+        resolve(events)
+      }, 3000)
+    })
 
     const replies = Array.from(result)
       .map(item => normalizeEvent(item as NostrEvent))
       .filter((event): event is NostrEvent => Boolean(event))
+      .filter(event => event.kind === 1 || event.kind === 6) // Only kind 1 (notes) and 6 (reposts), not reactions or zaps
 
     // Cache the result
     repliesCache.set(eventId, { replies, fetchedAt: Date.now() })
@@ -227,20 +246,14 @@ export async function buildCompleteThread(event: NostrEvent): Promise<ThreadCont
     )
 
     const threadPromise = (async () => {
-      logger.info('⏳ Building thread for', event.id.slice(0, 8))
-
       // Parallel fetch: ancestors and replies
       const [ancestors, rootPost] = await Promise.all([
         fetchAllAncestors(event),
         findRootPost(event),
       ])
 
-      logger.info('✓ Found root post and ancestors')
-
       // Fetch all replies (including nested)
       const allReplies = await fetchAllReplies(rootPost)
-
-      logger.info(`✓ Fetched ${allReplies.length} replies`)
 
       // Combine all events
       const allEvents = [rootPost, ...ancestors, event, ...allReplies]

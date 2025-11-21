@@ -6,6 +6,7 @@ import Post from '../Post.svelte'
   import type { NostrEvent } from '$types/nostr'
   import { getEventById, fetchEventById } from '$lib/feed-ndk'
   import { buildCompleteThread, getThreadStats, findEventNode, type ThreadContext } from '$lib/thread'
+  import { queueEngagementHydration } from '$lib/engagement'
 
   export let eventId: string
   export let originTab: NavTab
@@ -41,12 +42,10 @@ async function bootstrap(targetId: string): Promise<void> {
       }
 
       clickedEvent = event
-      logger.info('Building complete thread for event:', event.id.slice(0, 8))
       threadContext = await buildCompleteThread(event)
-      logger.info(`Thread loaded: ${threadContext.totalPostsInThread} posts`)
       hydrateThreadSlices(threadContext)
     } catch (err) {
-      logger.error('Failed to load thread view', err)
+      console.error('Failed to load thread view', err)
       error = 'Unable to load this thread right now.'
       hydrateThreadSlices(threadContext)
     } finally {
@@ -99,6 +98,14 @@ $: if (eventId && eventId !== lastLoadedEventId) {
         .map(reply => reply.event)
         .sort((a, b) => a.created_at - b.created_at) ?? []
     visibleReplies = directReplies.length ? Math.min(REPLIES_BATCH_SIZE, directReplies.length) : 0
+
+    // Queue engagement hydration for all thread events
+    const allThreadEventIds = [
+      context.mainEvent.id,
+      ...ancestorChain.map(e => e.id),
+      ...directReplies.map(e => e.id)
+    ]
+    queueEngagementHydration(allThreadEventIds)
   }
 
   function showMoreReplies(): void {

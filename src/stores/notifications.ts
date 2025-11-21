@@ -7,6 +7,7 @@ import { ensureNotificationChannel, presentNativeNotification } from '$lib/nativ
  */
 export type NotificationType =
   | 'like'
+  | 'reaction'
   | 'reply'
   | 'quote'
   | 'thread-reply'
@@ -26,6 +27,7 @@ export interface Notification {
   eventContent?: string
   amount?: number // zaps/embers
   txHash?: string
+  reactionEmoji?: string
   createdAt: number
   read: boolean
 }
@@ -91,6 +93,10 @@ if (typeof window !== 'undefined') {
 function describeNotification(notification: Notification): { title: string; body: string } {
   const name = notification.fromName || 'Someone'
   switch (notification.type) {
+    case 'reaction': {
+      const emoji = notification.reactionEmoji || '👍'
+      return { title: 'New reaction', body: `${name} reacted ${emoji} to your post.` }
+    }
     case 'like':
       return { title: 'New like', body: `${name} liked your post.` }
     case 'reply':

@@ -1,4 +1,6 @@
-<script lang="ts">
+﻿<script lang="ts">
+  import packageInfo from '../../package.json'
+  import { logger } from '$lib/logger'
   import { walletState } from '$stores/wallet'
   import { showSearch } from '$stores/search'
   import { lockWallet, unlockWallet } from '$lib/wallet/lazy'
@@ -24,22 +26,27 @@
       : null
   $: hasSyncedOnce = Boolean($walletState.lastSyncedAt)
   $: statusChip = (() => {
-    if (!$walletState.hasWallet || !$walletState.isReady || $walletState.locked) {
-      const label = !$walletState.hasWallet ? 'No wallet' : $walletState.locked ? 'Locked' : 'Unsynced'
+    if (!$walletState.hasWallet) {
       return {
-        label,
+        label: 'No wallet',
+        classes: 'border border-rose-500/50 bg-rose-500/10 text-rose-100',
+      }
+    }
+    if ($walletState.locked || !$walletState.isReady) {
+      return {
+        label: $walletState.locked ? 'Locked' : 'Unsynced',
         classes: 'border border-rose-500/50 bg-rose-500/10 text-rose-100',
       }
     }
     if (!$walletState.isSyncing && !hasSyncedOnce) {
       return {
-        label: 'Unsynced — try refreshing or another node',
+        label: 'Unsynced - try refreshing or another node',
         classes: 'border border-rose-500/50 bg-rose-500/10 text-rose-100',
       }
     }
     if ($walletState.isSyncing) {
       return {
-        label: syncPercent !== null ? `Syncing ${syncPercent}%` : 'Syncing…',
+        label: syncPercent !== null ? `Syncing ${syncPercent}%` : 'Syncing...',
         classes: 'border border-amber-400/40 bg-amber-500/10 text-amber-100',
       }
     }
@@ -74,7 +81,9 @@
       lockBusy = false
     }
   }
+
   const repoUrl = 'https://github.com/boshi-chan/nostr-monstr'
+  const appVersion = packageInfo.version ?? '0.0.0'
 </script>
 
 <div class="w-full border-b border-dark-border/60 bg-dark/90 px-3 py-1 backdrop-blur-2xl">
@@ -109,21 +118,7 @@
         <WalletIcon size={15} />
       </button>
       <div class="flex min-w-0 flex-col text-[10px] font-semibold">
-        <span class={`whitespace-nowrap ${statusChip.classes}`}>
-          {#if !$walletState.hasWallet}
-            No wallet
-          {:else if $walletState.locked}
-            Locked
-          {:else if (!$walletState.isSyncing && !hasSyncedOnce && $walletState.isReady)}
-            Unsynced — try refreshing or another node
-          {:else if ($walletState.isSyncing || syncPercent !== null) && $walletState.isReady}
-            {syncPercent !== null ? `Syncing ${syncPercent}%` : 'Syncing…'}
-          {:else if ($walletState.isReady)}
-            Synced
-          {:else}
-            Unsynced
-          {/if}
-        </span>
+        <span class={`whitespace-nowrap ${statusChip.classes}`}>{statusChip.label}</span>
       </div>
     </div>
 
@@ -170,7 +165,7 @@
       <div class="mb-4 flex items-center justify-between">
         <div>
           <p class="text-xs uppercase tracking-wide text-text-muted">About</p>
-          <p class="text-base font-semibold text-white">Monstr v1.0.0.1</p>
+          <p class="text-base font-semibold text-white">Monstr v{appVersion}</p>
         </div>
         <button
           type="button"

@@ -1,8 +1,7 @@
 ﻿<script lang="ts">
   import { onMount } from 'svelte'
   import Button from '../Button.svelte'
-  import { loginWithExtension, hasNostrExtension, loginWithAmberNative } from '$lib/auth'
-  import { loginWithPrivateKey } from '$lib/ndk'
+  import { loginWithExtension, hasNostrExtension, loginWithAmberNative, loginWithPrivateKeyAuth } from '$lib/auth'
   import { nip19 } from 'nostr-tools'
   import { isCapacitorAndroid, getAmberInstallStatus } from '$lib/amber-signer'
 
@@ -105,7 +104,7 @@
       if (!/^[0-9a-f]{64}$/i.test(secret)) {
         throw new Error('Private key must be a 64-character hex string')
       }
-      await loginWithPrivateKey(secret)
+      await loginWithPrivateKeyAuth(secret)
       nsecInput = ''
       onSuccess?.()
     } catch (err) {

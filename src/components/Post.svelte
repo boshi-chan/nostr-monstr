@@ -13,6 +13,7 @@
     zapTotals,
     replyCounts,
     commentedThreads,
+    reactionBreakdowns,
   } from '$stores/feed'
   import {
     publishReaction,
@@ -41,7 +42,6 @@ import { nip19 } from 'nostr-tools'
 import { showEmberModal, emberTarget } from '$stores/wallet'
 import { emberTotals, ensureEmberTotal } from '$stores/ember'
 import { openZapModal } from '$stores/nwc'
-import { queueEngagementHydration } from '$lib/engagement'
 import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
 
   export let event: NostrEvent
@@ -64,6 +64,8 @@ import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
   let aggregateRepostCount = 0
   let aggregateZapTotal = 0
   let aggregateReplyCount = 0
+  let reactionBreakdown: Map<string, number> | undefined
+  let reactionTooltip = ''
   let displayLikeCount = 0
   let displayRepostCount = 0
   let displayZapAmount = 0
@@ -121,6 +123,15 @@ import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
   $: aggregateRepostCount = $repostCounts.get(actionableEvent.id) ?? 0
   $: aggregateZapTotal = $zapTotals.get(actionableEvent.id) ?? 0
   $: aggregateReplyCount = $replyCounts.get(actionableEvent.id) ?? 0
+  $: reactionBreakdown = $reactionBreakdowns.get(actionableEvent.id)
+  $: reactionTooltip = (() => {
+    if (!reactionBreakdown || reactionBreakdown.size === 0) return ''
+    const parts: string[] = []
+    for (const [emoji, count] of reactionBreakdown.entries()) {
+      parts.push(`${emoji} × ${count}`)
+    }
+    return parts.join(', ')
+  })()
   $: displayLikeCount = Math.max(aggregateLikeCount, isLiked ? 1 : 0)
   $: displayRepostCount = Math.max(aggregateRepostCount, isReposted ? 1 : 0)
   $: displayZapAmount = Math.max(aggregateZapTotal, zapAmount)
@@ -168,7 +179,6 @@ import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
   let menuOpen = false
   let reposterMetadata: UserMetadata | undefined = undefined
   let reposterDisplay: string | null = null
-  let lastHydratedActionableId: string | null = null
 
   $: if (lastEventId !== event.id) {
     lastEventId = event.id
@@ -184,11 +194,6 @@ import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
   $: reposterDisplay = isRepostWrapper
     ? getDisplayName(event.pubkey, reposterMetadata) || event.pubkey.slice(0, 8)
     : null
-
-  $: if (actionableEvent?.id && lastHydratedActionableId !== actionableEvent.id) {
-    lastHydratedActionableId = actionableEvent.id
-    queueEngagementHydration([actionableEvent.id])
-  }
 
   async function handleLike() {
     if (likeLoading) return
@@ -716,7 +721,7 @@ import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
             class={`${baseActionClass} hover:text-rose-400 hover:bg-rose-400/5 ${
               isLiked ? 'text-rose-400/80' : 'text-text-muted'
             }`}
-            title="Like"
+            title={reactionTooltip || 'Like'}
           >
             <LikeIcon size={18} color="currentColor" strokeWidth={1.75} filled={isLiked} />
             {#if displayLikeCount > 0}

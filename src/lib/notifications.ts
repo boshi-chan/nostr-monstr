@@ -258,12 +258,13 @@ async function handleReactionNotification(event: NostrEvent, userPubkey: string)
 
   addNotificationSorted({
     id: event.id,
-    type: 'like',
+    type: 'reaction',
     fromPubkey: event.pubkey,
     fromName: metadata?.name || metadata?.display_name || 'User',
     fromAvatar: metadata?.picture,
     eventId: targetEventId,
     eventContent: targetEvent.content.substring(0, 180),
+    reactionEmoji: event.content?.trim() || '+',
     createdAt: event.created_at,
     read: false,
   })

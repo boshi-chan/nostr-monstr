@@ -31,6 +31,7 @@ import { warmupMessagingPermissions, resetMessagingState } from '$lib/messaging-
 import { stopAllSubscriptions, clearFeed } from './feed-ndk'
 import { stopNotificationListener } from '$lib/notifications'
 import { loginWithAmber, isCapacitorAndroid, getCachedAmberPubkey, AmberNativeSigner, pingAmber } from '$lib/amber-signer'
+import { loginWithPrivateKey } from './ndk'
 
 /**
  * Convert NDK user to our User type
@@ -204,6 +205,37 @@ export async function loginWithExtension(): Promise<User> {
 }
 
 /**
+ * Login directly with a raw private key or nsec (not recommended for production)
+ */
+export async function loginWithPrivateKeyAuth(secret: string): Promise<User> {
+  try {
+    const ndkUser = await loginWithPrivateKey(secret)
+    const ndk = getNDK()
+    ndk.activeUser = ndkUser
+
+    // Fetch profile metadata
+    await ndkUser.fetchProfile()
+
+    const user = ndkUserToUser(ndkUser)
+
+    // Save to store and persistence
+    await saveSetting('currentUser', user)
+    await saveSetting('authMethod', 'private-key')
+    await saveSetting('lastLogin', new Date().toISOString())
+
+    currentUser.set(user)
+    void warmupMessagingPermissions()
+
+    // Load user's custom relays from NIP-65 and connect to them
+    void loadUserRelaysAndConnect()
+
+    return user
+  } catch (err) {
+    throw new Error(`Private key login failed: ${err}`)
+  }
+}
+
+/**
  * Restore session from storage
  */
 export async function restoreSession(): Promise<User | null> {
@@ -297,6 +329,20 @@ export async function restoreSession(): Promise<User | null> {
       } catch (err) {
         logger.warn('Failed to restore native Amber session:', err)
       }
+    }
+
+    // If they used direct private-key auth, restore as read-only signerless session
+    if (authMethod === 'private-key') {
+      try {
+        const ndk = getNDK()
+        ndk.activeUser = ndk.getUser({ pubkey: savedUser.pubkey })
+      } catch (err) {
+        logger.warn('Failed to set activeUser for private-key restore:', err)
+      }
+      currentUser.set(savedUser)
+      void warmupMessagingPermissions()
+      void loadUserRelaysAndConnect()
+      return savedUser
     }
 
     // Fallback: Load user without signer (read-only mode)

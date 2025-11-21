@@ -93,6 +93,7 @@ export const repostCounts = writable<Map<string, number>>(new Map())
 export const zapTotals = writable<Map<string, number>>(new Map()) // total sats per event
 export const replyCounts = writable<Map<string, number>>(new Map())
 export const commentedThreads = writable<Set<string>>(new Set())
+export const reactionBreakdowns = writable<Map<string, Map<string, number>>>(new Map())
 
 // Compose modal state
 export const showCompose = writable(false)

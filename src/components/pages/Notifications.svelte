@@ -52,6 +52,12 @@
       background: 'bg-rose-500/10',
       label: 'liked your post',
     },
+    reaction: {
+      icon: LikeIcon,
+      accent: 'text-rose-400',
+      background: 'bg-rose-500/10',
+      label: 'reacted to your post',
+    },
     reply: {
       icon: CommentIcon,
       accent: 'text-sky-400',

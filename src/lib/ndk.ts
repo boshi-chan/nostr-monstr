@@ -45,22 +45,70 @@ export async function initNDK(relays: string[] = DEFAULT_RELAYS): Promise<NDK> {
       enableOutboxModel: false,
       autoConnectUserRelays: false,
     })
-    
-    // Track connection state BEFORE connecting
-    ndkInstance.pool.on('relay:connect', () => {
-      logger.info('✓ NDK relay connected')
-      ndkConnected.set(true)
-      ndkConnecting.set(false)
+
+    // Create promise to wait for first relay connection
+    let resolveFirstConnection: () => void
+    const firstConnectionPromise = new Promise<void>((resolve) => {
+      resolveFirstConnection = resolve
     })
 
-    ndkInstance.pool.on('relay:disconnect', () => {
-      logger.info('✗ NDK relay disconnected')
+    let hasConnected = false
+
+    // Track connection state BEFORE connecting
+    ndkInstance.pool.on('relay:connect', (relay: any) => {
+      logger.info(`✓ NDK relay connected: ${relay.url}`)
+      ndkConnected.set(true)
+      ndkConnecting.set(false)
+
+      // Resolve on first connection
+      if (!hasConnected) {
+        hasConnected = true
+        resolveFirstConnection()
+      }
+    })
+
+    ndkInstance.pool.on('relay:disconnect', (relay: any) => {
+      logger.warn(`✗ NDK relay disconnected: ${relay.url}`)
     })
 
     // Connect to relays
     logger.info('Connecting to NDK relays...', relays)
+
+    // Explicitly add and connect to each relay
+    for (const url of relays) {
+      const relay = ndkInstance.pool.getRelay(url, true, true)
+
+      relay.connect().catch(err => {
+        logger.error(`Failed to connect to ${url}:`, err)
+      })
+    }
+
+    // Also call ndk.connect() for any additional setup
     await ndkInstance.connect()
-    logger.info('NDK connect() completed')
+
+    // Wait up to 15 seconds for at least one relay to connect
+    const timeoutMs = 15000
+    const timeout = new Promise<void>((resolve) =>
+      setTimeout(() => {
+        logger.warn(`Relay connection timeout after ${timeoutMs}ms - proceeding anyway`)
+        resolve()
+      }, timeoutMs)
+    )
+
+    await Promise.race([firstConnectionPromise, timeout])
+
+    // Check which relays actually connected
+    const allRelays = Array.from(ndkInstance.pool.relays.values())
+
+    // Status 5 = connected in NDK
+    const connectedRelays = allRelays.filter(relay => relay.status === 5)
+    const connectedUrls = connectedRelays.map(r => r.url)
+
+    logger.info(`NDK initialized with ${connectedRelays.length}/${relays.length} relays connected:`, connectedUrls)
+
+    if (connectedRelays.length === 0) {
+      logger.warn('No relays connected! Engagement queries will fail.')
+    }
 
     return ndkInstance
   } catch (err) {
@@ -80,6 +128,40 @@ export function getNDK(): NDK {
     throw new Error('NDK not initialized. Call initNDK() first.')
   }
   return ndkInstance
+}
+
+/**
+ * Wait for at least one relay to be connected
+ * Useful before making critical queries that need active connections
+ * @param timeoutMs Maximum time to wait in milliseconds (default: 5000)
+ * @returns true if at least one relay is connected, false if timeout
+ */
+export async function ensureRelayConnection(timeoutMs = 5000): Promise<boolean> {
+  const ndk = getNDK()
+
+  // Check if already connected (status 5 = connected in NDK)
+  const connectedRelays = Array.from(ndk.pool.relays.values())
+    .filter(relay => relay.status === 5)
+
+  if (connectedRelays.length > 0) {
+    return true
+  }
+
+  // Wait for connection
+  return new Promise<boolean>((resolve) => {
+    const timeout = setTimeout(() => {
+      logger.warn(`ensureRelayConnection timed out after ${timeoutMs}ms`)
+      resolve(false)
+    }, timeoutMs)
+
+    const handleConnect = () => {
+      clearTimeout(timeout)
+      ndk.pool.off('relay:connect', handleConnect)
+      resolve(true)
+    }
+
+    ndk.pool.on('relay:connect', handleConnect)
+  })
 }
 
 /**
@@ -228,11 +310,13 @@ export async function loadUserRelaysAndConnect(): Promise<void> {
       return
     }
 
-    // Wait a bit for NDK to establish initial connections
-    // This prevents fetching before any relays are connected
-    if (ndkInstance.pool.relays.size === 0) {
-      logger.info('Waiting for initial relay connections before loading user relays...')
-      await new Promise(resolve => setTimeout(resolve, 1000))
+    // Wait for at least one relay to be connected before trying to fetch
+    logger.info('Ensuring relay connection before loading user relays...')
+    const hasConnection = await ensureRelayConnection(5000)
+
+    if (!hasConnection) {
+      logger.warn('No relays connected - cannot fetch NIP-65 relay list. Keeping defaults.')
+      return
     }
 
     logger.info('Loading user relays from NIP-65...')
@@ -246,12 +330,12 @@ export async function loadUserRelaysAndConnect(): Promise<void> {
       { closeOnEose: true }
     )
 
-    // Add 5 second timeout to prevent hanging
+    // Add 10 second timeout (increased from 5s)
     const timeoutPromise = new Promise<null>((resolve) =>
       setTimeout(() => {
-        logger.warn('NIP-65 fetch timed out after 5s, continuing with default relays')
+        logger.warn('NIP-65 fetch timed out after 10s, continuing with default relays')
         resolve(null)
-      }, 5000)
+      }, 10000)
     )
 
     const event = await Promise.race([fetchPromise, timeoutPromise])
