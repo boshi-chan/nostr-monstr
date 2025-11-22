@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { get } from 'svelte/store'
   import { Capacitor } from '@capacitor/core'
   import { isAuthenticated, currentUser } from '$stores/auth'
   import { isInitialized, initError } from '$stores/app'
@@ -8,7 +9,8 @@
   import { restoreSession } from '$lib/auth'
 
   import { feedSource, lastTimelineFeed } from '$stores/feedSource'
-  import { feedError, feedLoading, following, circles } from '$stores/feed'
+  import type { FeedSource } from '$stores/feedSource'
+  import { feedError, feedLoading, following, circles, hasActiveSubscriptions } from '$stores/feed'
   import {
     stopAllSubscriptions,
     clearFeed,
@@ -35,6 +37,11 @@
   import PinPrompt from './components/PinPrompt.svelte'
   import { ensureNotificationChannel } from '$lib/native-notifications'
   import { logger } from '$lib/logger'
+  import { loadConversations } from '$lib/messaging-simple'
+
+  let sessionReady = false
+
+  import { initNotificationClickHandler } from '$lib/notification-click-handler'
 
   onMount(async () => {
     try {
@@ -43,6 +50,7 @@
       await restoreSession()
       await hydrateWalletState()
       initWalletLifecycle()
+      initNotificationClickHandler()
 
       isInitialized.set(true)
 
@@ -56,10 +64,12 @@
       if (!$isAuthenticated) {
         feedSource.set('global')
       }
+      sessionReady = true
     } catch (err) {
       logger.error('App initialization error:', err)
       initError.set(String(err))
       isInitialized.set(true)
+      sessionReady = true
     }
   })
 
@@ -76,6 +86,15 @@
   let interactionCacheHydratedFor: string | null = null
   let lastAuthKey: string | null = null
   let wasAuthenticated = false
+  let currentFeed: FeedSource = 'global'
+  $: currentFeed = $feedSource
+  let authedPubkey: string | null = null
+  $: authedPubkey = $currentUser?.pubkey ?? null
+  let hasSubs = false
+  $: hasSubs = $hasActiveSubscriptions
+  let authedNow = false
+  $: authedNow = $isAuthenticated && Boolean(authedPubkey)
+  let appStateUnsub: (() => void) | null = null
 
   // When a user logs in, restore their last timeline feed instead of staying on global
   $: {
@@ -95,15 +114,68 @@
   }
 
   let resumeInProgress = false
+  let lastVisibilityCheck = 0
+  const VISIBILITY_DEBOUNCE_MS = 2000 // Only check every 2 seconds max
+
   async function refreshSessionFromForeground(): Promise<void> {
     if (!hasAppInitialized || resumeInProgress) return
+    
+    // Debounce: don't reconnect too frequently
+    const now = Date.now()
+    if (now - lastVisibilityCheck < VISIBILITY_DEBOUNCE_MS) {
+      return
+    }
+    lastVisibilityCheck = now
+
     resumeInProgress = true
     try {
+      // If we lost auth (e.g., cold start), attempt session restore first
+      const wasAuthed = get(isAuthenticated)
+      if (!wasAuthed) {
+        await restoreSession()
+        sessionReady = true
+      }
+
       const ndk = getNDK()
+
       await ndk.connect()
       await loadUserRelaysAndConnect()
-      lastFeedSource = null
-      lastAuthKey = null
+
+      const relayValues = Array.from(ndk.pool.relays.values())
+      const hasOpenRelay = relayValues.some((relay: any) => relay?.status === 1)
+      const shouldRestartSubs = !hasSubs || !hasOpenRelay
+
+      if (shouldRestartSubs) {
+        logger.info('Resubscribing feeds after resume')
+        stopAllSubscriptions()
+        const targetFeed = currentFeed
+
+        if (targetFeed === 'global') {
+          await subscribeToGlobalFeed()
+        } else if (authedNow && authedPubkey) {
+          feedError.set(null)
+          if (targetFeed === 'following') {
+            await subscribeToFollowingFeed()
+          } else if (targetFeed === 'circles') {
+            await subscribeToCirclesFeed()
+          } else if (targetFeed === 'long-reads') {
+            await subscribeToLongReadsFeed()
+          } else if (targetFeed === 'long-reads-following') {
+            await subscribeToLongReadsFollowingFeed()
+          } else if (targetFeed === 'long-reads-circles') {
+            await subscribeToLongReadsCirclesFeed()
+          }
+        } else {
+          feedError.set('Log in to view this feed')
+          feedLoading.set(false)
+          feedSource.set('global')
+        }
+      }
+
+      // Refresh DMs after resume when authenticated
+      if (authedNow && authedPubkey) {
+        void loadConversations().catch(err => logger.warn('DM reload on resume failed', err))
+      }
     } catch (err) {
       logger.warn('Failed to refresh session after resume:', err)
     } finally {
@@ -112,27 +184,78 @@
   }
 
   onMount(() => {
+    let visibilityTimeout: ReturnType<typeof setTimeout> | null = null
+    
     const handleVisibilityChange = (): void => {
       if (document.visibilityState === 'visible') {
-        void refreshSessionFromForeground()
+        // Debounce visibility changes to prevent rapid reconnections
+        if (visibilityTimeout) {
+          clearTimeout(visibilityTimeout)
+        }
+        visibilityTimeout = setTimeout(() => {
+          void refreshSessionFromForeground()
+        }, 500) // Wait 500ms after becoming visible
       }
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
+    let focusTimeout: ReturnType<typeof setTimeout> | null = null
     const handleFocus = (): void => {
-      void refreshSessionFromForeground()
+      // Debounce focus events
+      if (focusTimeout) {
+        clearTimeout(focusTimeout)
+      }
+      focusTimeout = setTimeout(() => {
+        void refreshSessionFromForeground()
+      }, 500)
     }
     window.addEventListener('focus', handleFocus)
 
     return () => {
+      if (visibilityTimeout) clearTimeout(visibilityTimeout)
+      if (focusTimeout) clearTimeout(focusTimeout)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('focus', handleFocus)
     }
   })
 
+  onMount(() => {
+    if (Capacitor.getPlatform?.() !== 'android') return
+
+    try {
+      const appPlugin =
+        // Capacitor v3+ plugin registry
+        (Capacitor as any)?.Plugins?.App ??
+        // Capacitor v4+ global
+        (globalThis as any)?.Capacitor?.App
+
+      if (appPlugin?.addListener) {
+        const listener = appPlugin.addListener('appStateChange', (state: { isActive?: boolean }) => {
+          if (state?.isActive) {
+            setTimeout(() => {
+              void refreshSessionFromForeground()
+            }, 200)
+          }
+        })
+        appStateUnsub = () => {
+          void listener?.remove?.()
+        }
+      } else {
+        logger.warn('Capacitor App plugin not available; skipping appStateChange listener')
+      }
+    } catch (err) {
+      logger.warn('Capacitor App listener setup failed; skipping', err)
+    }
+
+    return () => {
+      appStateUnsub?.()
+      appStateUnsub = null
+    }
+  })
+
   // switching tabs changes subscription here
   // Following AI_Guidelines: Be explicit about reactive dependencies
-  $: if ($isInitialized) {
+  $: if ($isInitialized && sessionReady) {
     const targetFeed = $feedSource
     const authed = $isAuthenticated
     const pubkey = $currentUser?.pubkey ?? null
@@ -157,6 +280,12 @@
       }
 
       if (!authed || !pubkey) {
+        // If unauthenticated, fall back to global instead of erroring on a gated feed
+        if (targetFeed !== 'global') {
+          feedSource.set('global')
+          await subscribeToGlobalFeed()
+          return
+        }
         feedError.set('Log in to view this feed')
         feedLoading.set(false)
         return

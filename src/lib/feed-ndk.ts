@@ -957,7 +957,7 @@ export async function fetchEventById(id: string): Promise<NostrEvent | null> {
     )
 
     const timeoutPromise = new Promise<null>((_, reject) =>
-      setTimeout(() => reject(new Error('Fetch event timeout')), 8000)
+      setTimeout(() => reject(new Error('Fetch event timeout')), 15000)
     )
 
     const event = await Promise.race([fetchPromise, timeoutPromise])
@@ -977,7 +977,7 @@ export async function fetchEventById(id: string): Promise<NostrEvent | null> {
 
     return raw
   } catch (err) {
-    logger.error(`Failed to fetch event ${id.slice(0, 8)}:`, err)
+    logger.warn(`Fetch event ${id.slice(0, 8)} timed out or failed:`, err)
     return null
   }
 }

@@ -79,10 +79,25 @@ export function openProfile(pubkey: string, originTab: NavTab): void {
 }
 
 export function goBack(): void {
+  const current = get(activeRoute)
+  const activeTabValue = get(activeTab)
+  const fallbackTab: NavTab = (() => {
+    if (current.type === 'profile') {
+      return current.originTab === 'profile' ? 'home' : current.originTab
+    }
+    if (current.type === 'page') {
+      return current.tab === 'profile' ? 'home' : current.tab
+    }
+    if (current.type === 'post') {
+      return current.originTab === 'profile' ? 'home' : current.originTab
+    }
+    return activeTabValue
+  })()
+
   routeHistory.update(history => {
     if (history.length === 0) {
-      const fallbackTab = get(activeTab)
       activeRoute.set({ type: 'page', tab: fallbackTab })
+      activeTab.set(fallbackTab)
       return []
     }
 

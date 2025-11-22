@@ -48,8 +48,9 @@ public class NotificationsPlugin extends Plugin {
         int notificationId = call.getInt("id", (int) System.currentTimeMillis());
         String channelId = call.getString("channelId", DEFAULT_CHANNEL_ID);
         String channelName = call.getString("channelName", DEFAULT_CHANNEL_NAME);
+        String url = call.getString("url", null);
 
-        NotificationHelper.presentNotification(getContext(), channelId, channelName, notificationId, title, body);
+        NotificationHelper.presentNotification(getContext(), channelId, channelName, notificationId, title, body, url);
         JSObject result = new JSObject();
         result.put("id", notificationId);
         call.resolve(result);

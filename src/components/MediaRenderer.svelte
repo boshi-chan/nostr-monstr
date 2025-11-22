@@ -173,12 +173,12 @@
         href={embed}
         target="_blank"
         rel="noopener noreferrer"
-        class="inline-flex w-full items-center gap-2 break-all rounded-xl border border-dark-border/60 px-3 py-2 text-primary/90 transition-colors hover:border-primary/60 hover:text-primary"
+        class="inline-flex w-full items-center gap-2 rounded-xl border border-dark-border/60 px-3 py-2 text-primary/90 transition-colors hover:border-primary/60 hover:text-primary"
       >
         <span class="text-[10px] uppercase tracking-[0.35em] text-text-muted/80">
           {extractDomain(embed)}
         </span>
-        <span class="flex-1">{embed}</span>
+        <span class="flex-1 min-w-0 truncate">{embed}</span>
       </a>
     {/each}
   </div>

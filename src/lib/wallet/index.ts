@@ -514,6 +514,22 @@ function estimateRestoreHeightFallback(createdAt: number): number {
   return cappedHeight
 }
 
+function getNodeCandidates(): MoneroNode[] {
+  const result: MoneroNode[] = []
+  const seen = new Set<string>()
+  const add = (node: MoneroNode | null | undefined) => {
+    if (!node) return
+    const key = `${node.id}|${node.uri}`
+    if (seen.has(key)) return
+    seen.add(key)
+    result.push(node)
+  }
+  add(activeNode)
+  add(customNode)
+  DEFAULT_NODES.forEach(add)
+  return result
+}
+
 /**
  * Calculate restore height with lookback period
  */
@@ -626,33 +642,61 @@ async function refreshWalletInternal(): Promise<void> {
       setWalletState({ isSyncing: true, syncProgress: 0 })
       const moneroLib = await loadMonero()
       const wallet = await ensureWalletInstance()
-      await wallet.setDaemonConnection({
-        uri: activeNode.uri,
-        proxyToWorker: true,
-        ...(activeNode.username ? { username: activeNode.username } : {}),
-        ...(activeNode.password ? { password: activeNode.password } : {}),
-      } as any)
-      let listener: any = null
-      if (moneroLib.MoneroWalletListener) {
-        listener = new moneroLib.MoneroWalletListener()
-        listener.onSyncProgress = async (
-          _height: number,
-          _startHeight: number,
-          _endHeight: number,
-          percentDone: number
-        ) => {
-          const percent =
-            typeof percentDone === 'number' && Number.isFinite(percentDone)
-              ? Math.max(0, Math.min(100, Math.round(percentDone * 100)))
-              : null
-          setWalletState({ syncProgress: percent })
+      const nodes = getNodeCandidates()
+      let connected = false
+      let lastError: any = null
+
+      for (const node of nodes) {
+        try {
+          await wallet.setDaemonConnection({
+            uri: node.uri,
+            proxyToWorker: true,
+            ...(node.username ? { username: node.username } : {}),
+            ...(node.password ? { password: node.password } : {}),
+          } as any)
+
+          let listener: any = null
+          if (moneroLib.MoneroWalletListener) {
+            listener = new moneroLib.MoneroWalletListener()
+            listener.onSyncProgress = async (
+              _height: number,
+              _startHeight: number,
+              _endHeight: number,
+              percentDone: number
+            ) => {
+              const percent =
+                typeof percentDone === 'number' && Number.isFinite(percentDone)
+                  ? Math.max(0, Math.min(100, Math.round(percentDone * 100)))
+                  : null
+              setWalletState({ syncProgress: percent })
+            }
+          }
+
+          if (listener) {
+            await wallet.sync(listener)
+          } else {
+            await wallet.sync()
+          }
+
+          if (node.id !== activeNode.id) {
+            activeNode = node
+            await saveSetting(WALLET_NODE_KEY, node.id)
+            if (cachedMeta) {
+              await persistMeta({ ...cachedMeta, nodeId: node.id })
+            }
+            setWalletState({ selectedNode: node.id })
+          }
+
+          connected = true
+          break
+        } catch (err) {
+          lastError = err
+          continue
         }
       }
 
-      if (listener) {
-        await wallet.sync(listener)
-      } else {
-        await wallet.sync()
+      if (!connected) {
+        throw lastError ?? new Error('Unable to connect to any configured node')
       }
 
       const balanceAtomic = await wallet.getBalance()

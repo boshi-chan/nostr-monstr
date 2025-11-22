@@ -31,12 +31,71 @@
   let hasLoadedOnce = false
   let loadMoreTrigger: HTMLDivElement | null = null
   let observer: IntersectionObserver | null = null
+  let feedContainer: HTMLDivElement | null = null
+  let savedScrollPosition = 0
+  let savedFirstVisiblePostId: string | null = null
 
   $: activeFeed = $feedSource
 
   // Track if we've loaded at least once to avoid showing "no posts" during initial load
   $: if ($feedEvents.length > 0) {
     hasLoadedOnce = true
+  }
+
+  // Preserve scroll position when feed updates (but not when feed source changes)
+  $: if ($feedEvents.length > 0 && feedContainer) {
+    // Restore scroll position after a brief delay to allow DOM to update
+    requestAnimationFrame(() => {
+      if (savedScrollPosition > 0) {
+        // Try to restore by scroll position first
+        const container = feedContainer?.parentElement?.parentElement
+        if (container) {
+          container.scrollTop = savedScrollPosition
+        } else if (window.scrollY === 0) {
+          // Fallback to window scroll if container not found
+          window.scrollTo(0, savedScrollPosition)
+        }
+        
+        // Also try to restore by finding the saved post
+        if (savedFirstVisiblePostId) {
+          const postElement = document.querySelector(`[data-event-id="${savedFirstVisiblePostId}"]`)
+          if (postElement) {
+            postElement.scrollIntoView({ behavior: 'auto', block: 'start' })
+          }
+        }
+        
+        // Reset saved position after restoring
+        savedScrollPosition = 0
+        savedFirstVisiblePostId = null
+      }
+    })
+  }
+
+  // Save scroll position before feed changes
+  function saveScrollPosition() {
+    if (!feedContainer) return
+    
+    const container = feedContainer.parentElement?.parentElement
+    if (container) {
+      savedScrollPosition = container.scrollTop
+    } else {
+      savedScrollPosition = window.scrollY
+    }
+    
+    // Also save the first visible post ID for more accurate restoration
+    const visiblePosts = document.querySelectorAll('[data-event-id]')
+    for (const post of visiblePosts) {
+      const rect = post.getBoundingClientRect()
+      if (rect.top >= 0 && rect.top < window.innerHeight) {
+        savedFirstVisiblePostId = post.getAttribute('data-event-id')
+        break
+      }
+    }
+  }
+
+  // Watch for feed source changes and save position
+  $: if (activeFeed !== $feedSource && hasLoadedOnce) {
+    saveScrollPosition()
   }
 
   // Set up IntersectionObserver for infinite scroll
@@ -145,22 +204,28 @@
           </p>
         </div>
       {:else}
-        {#each $feedEvents as event (event.id)}
-          {#if event.kind === 30023}
-            <LongReadPreview
-              {event}
-              onSelect={handleEventSelect}
-              onProfileSelect={handleProfileSelect}
-            />
-          {:else}
-            <Post
-              {event}
-              onSelect={handleEventSelect}
-              onProfileSelect={handleProfileSelect}
-              replyCount={0}
-            />
-          {/if}
-        {/each}
+        <div bind:this={feedContainer} class="flex flex-col gap-3">
+          {#each $feedEvents as event (event.id)}
+            {#if event.kind === 30023}
+              <div data-event-id={event.id}>
+                <LongReadPreview
+                  {event}
+                  onSelect={handleEventSelect}
+                  onProfileSelect={handleProfileSelect}
+                />
+              </div>
+            {:else}
+              <div data-event-id={event.id}>
+                <Post
+                  {event}
+                  onSelect={handleEventSelect}
+                  onProfileSelect={handleProfileSelect}
+                  replyCount={0}
+                />
+              </div>
+            {/if}
+          {/each}
+        </div>
 
         <!-- Infinite scroll trigger -->
         <div bind:this={loadMoreTrigger} class="h-1"></div>

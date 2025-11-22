@@ -26,6 +26,33 @@ const processedNotifications = new Set<string>()
 const notificationEventCache = new Map<string, NostrEvent>()
 purgeOldSeen()
 
+const LAST_CHECK_KEY = 'monstr_notifications_last_check'
+
+function getLastCheckTime(): number {
+  if (typeof window === 'undefined') return 0
+  try {
+    const stored = window.localStorage.getItem(LAST_CHECK_KEY)
+    if (!stored) return 0
+    const timestamp = parseInt(stored, 10)
+    // Sanity check: don't go back more than 7 days
+    const sevenDaysAgo = Math.floor(Date.now() / 1000) - (86400 * 7)
+    return Math.max(timestamp, sevenDaysAgo)
+  } catch (err) {
+    logger.warn('[NOTIF] Failed to load last check time:', err)
+    return 0
+  }
+}
+
+function updateLastCheckTime(): void {
+  if (typeof window === 'undefined') return
+  try {
+    const now = Math.floor(Date.now() / 1000)
+    window.localStorage.setItem(LAST_CHECK_KEY, now.toString())
+  } catch (err) {
+    logger.warn('[NOTIF] Failed to save last check time:', err)
+  }
+}
+
 async function getNotificationMetadata(pubkey: string) {
   let metadata = getUserMetadata(pubkey)
   if (!metadata) {
@@ -166,11 +193,22 @@ export async function startNotificationListener(pubkey: string): Promise<void> {
   const ndk = getNDK()
   const userEventList = Array.from(get(userEventIds))
 
+  // Fetch notifications since last check (or last 7 days if first run)
+  // This avoids ghost notifications while ensuring we don't miss anything
+  const lastCheck = getLastCheckTime()
+  const sinceTimestamp = lastCheck || (Math.floor(Date.now() / 1000) - 86400 * 7)
+
+  logger.info('[NOTIF] Last check was:', lastCheck ? new Date(lastCheck * 1000).toISOString() : 'never')
+  logger.info('[NOTIF] Fetching notifications since:', new Date(sinceTimestamp * 1000).toISOString())
+
   const filter: NDKFilter = {
     kinds: [1, 6, 7, 9734, 9735, EMBER_EVENT_KIND],
     '#p': [pubkey],
-    since: Math.floor(Date.now() / 1000) - 86400 * 7,
+    since: sinceTimestamp,
   }
+
+  // Update the last check time now that we're starting the subscription
+  updateLastCheckTime()
 
   if (userEventList.length > 0) {
     filter['#e'] = userEventList.slice(0, 500)
@@ -179,8 +217,9 @@ export async function startNotificationListener(pubkey: string): Promise<void> {
   logger.info('[NOTIF] Subscribing with filter:', {
     kinds: filter.kinds,
     pTag: pubkey.substring(0, 8),
-    sinceDate: new Date((filter.since || 0) * 1000).toISOString(),
-    eTagCount: userEventList.length
+    sinceDate: new Date(sinceTimestamp * 1000).toISOString(),
+    eTagCount: userEventList.length,
+    isFirstRun: !lastCheck
   })
 
   notificationSubscription = ndk.subscribe(

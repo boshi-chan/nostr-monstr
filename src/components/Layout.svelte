@@ -23,11 +23,13 @@ import '$lib/native-notification-bridge'
   let NotificationsPage: ComponentType | null = null
   let SettingsPage: ComponentType | null = null
   let PostViewPage: ComponentType | null = null
+  let LiveStreamsPage: ComponentType | null = null
   let EmberModalComp: ComponentType | null = null
 
   $: shouldLoadNotifications = $activeRoute.type === 'page' && $activeRoute.tab === 'notifications'
   $: shouldLoadSettings = $activeRoute.type === 'page' && $activeRoute.tab === 'settings'
   $: shouldLoadPostView = $activeRoute.type === 'post'
+  $: shouldLoadLiveStreams = $activeRoute.type === 'page' && $activeRoute.tab === 'livestreams'
   $: shouldLoadEmberModal = $showEmberModal
 
   onMount(() => {
@@ -46,6 +48,10 @@ import '$lib/native-notification-bridge'
     import('./pages/PostView.svelte').then(mod => (PostViewPage = mod.default))
   }
 
+  $: if (shouldLoadLiveStreams && !LiveStreamsPage) {
+    import('./pages/LiveStreams.svelte').then(mod => (LiveStreamsPage = mod.default))
+  }
+
   $: if (shouldLoadEmberModal && !EmberModalComp) {
     import('./EmberModal.svelte').then(mod => (EmberModalComp = mod.default))
   }
@@ -53,6 +59,11 @@ import '$lib/native-notification-bridge'
   $: isMessagesTab = $activeRoute.type === 'page' && $activeRoute.tab === 'messages'
 
   let mainEl: HTMLElement | null = null
+
+  // Reset scroll position to top when route changes
+  $: if ($activeRoute && mainEl) {
+    mainEl.scrollTop = 0
+  }
 </script>
 
 <div
@@ -75,6 +86,12 @@ import '$lib/native-notification-bridge'
           <Home />
         {:else if $activeRoute.tab === 'messages'}
           <Messages />
+        {:else if $activeRoute.tab === 'livestreams'}
+          {#if LiveStreamsPage}
+            <svelte:component this={LiveStreamsPage} />
+          {:else}
+            <div class="p-4 text-text-muted">Loading live streams…</div>
+          {/if}
         {:else if $activeRoute.tab === 'notifications'}
           {#if NotificationsPage}
             <svelte:component this={NotificationsPage} />

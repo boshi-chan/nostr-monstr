@@ -32,6 +32,14 @@ import { stopAllSubscriptions, clearFeed } from './feed-ndk'
 import { stopNotificationListener } from '$lib/notifications'
 import { loginWithAmber, isCapacitorAndroid, getCachedAmberPubkey, AmberNativeSigner, pingAmber } from '$lib/amber-signer'
 import { loginWithPrivateKey } from './ndk'
+import {
+  isSecureStorageAvailable,
+  storePrivateKeySecurely,
+  retrievePrivateKeySecurely,
+  hasStoredPrivateKey,
+  deleteStoredPrivateKey,
+  canUseBiometricAuth
+} from '$lib/secure-credential'
 
 /**
  * Convert NDK user to our User type
@@ -119,28 +127,29 @@ export async function loginWithAmberNative(options?: { force?: boolean }): Promi
   try {
     const ndk = getNDK()
 
+    // Only skip Amber interaction if explicitly not forced and we have a cached pubkey
+    // This is used during session restoration to avoid unnecessary Amber prompts
     if (!force) {
       const cachedPubkey = await getCachedAmberPubkey()
       if (cachedPubkey) {
-        const ready = await pingAmber()
-        if (ready) {
-          const cachedSigner = new AmberNativeSigner(cachedPubkey)
-          ndk.signer = cachedSigner
-          const ndkUser = await cachedSigner.user()
-          ndk.activeUser = ndkUser
-          await ndkUser.fetchProfile()
-          const user = ndkUserToUser(ndkUser)
+        // Trust the cached pubkey without pinging Amber
+        // Amber will be invoked only when actual signing is needed
+        const cachedSigner = new AmberNativeSigner(cachedPubkey)
+        ndk.signer = cachedSigner
+        const ndkUser = await cachedSigner.user()
+        ndk.activeUser = ndkUser
+        await ndkUser.fetchProfile()
+        const user = ndkUserToUser(ndkUser)
 
-          await saveSetting('currentUser', user)
-          await saveSetting('authMethod', 'amber')
-          await saveSetting('lastLogin', new Date().toISOString())
+        await saveSetting('currentUser', user)
+        await saveSetting('authMethod', 'amber')
+        await saveSetting('lastLogin', new Date().toISOString())
 
-          currentUser.set(user)
-          void loadUserRelaysAndConnect()
+        currentUser.set(user)
+        void loadUserRelaysAndConnect()
 
-          logger.info('Native Amber login reused cached signer')
-          return user
-        }
+        logger.info('Native Amber login reused cached signer (no Amber interaction)')
+        return user
       }
     }
 
@@ -205,9 +214,10 @@ export async function loginWithExtension(): Promise<User> {
 }
 
 /**
- * Login directly with a raw private key or nsec (not recommended for production)
+ * Login directly with a raw private key or nsec
+ * On Android with biometric support, the key will be stored securely
  */
-export async function loginWithPrivateKeyAuth(secret: string): Promise<User> {
+export async function loginWithPrivateKeyAuth(secret: string, options?: { storeSecurely?: boolean }): Promise<User> {
   try {
     const ndkUser = await loginWithPrivateKey(secret)
     const ndk = getNDK()
@@ -218,9 +228,35 @@ export async function loginWithPrivateKeyAuth(secret: string): Promise<User> {
 
     const user = ndkUserToUser(ndkUser)
 
+    // Check if we should store the key securely (Android with biometric)
+    const shouldStoreSecurely = options?.storeSecurely ?? true
+    let storedSecurely = false
+
+    if (shouldStoreSecurely && isSecureStorageAvailable()) {
+      try {
+        logger.info('Checking if biometric auth is available...')
+        const canUseBiometric = await canUseBiometricAuth()
+        logger.info('Can use biometric:', canUseBiometric)
+
+        if (canUseBiometric) {
+          logger.info('Storing private key securely...')
+          await storePrivateKeySecurely(secret)
+          storedSecurely = true
+          logger.info('Private key stored securely with biometric protection')
+        } else {
+          logger.warn('Biometric auth not available, private key will not be stored')
+        }
+      } catch (err) {
+        logger.error('Failed to store private key securely:', err)
+        logger.warn('Continuing without secure storage')
+      }
+    } else {
+      logger.info('Secure storage not available or disabled')
+    }
+
     // Save to store and persistence
     await saveSetting('currentUser', user)
-    await saveSetting('authMethod', 'private-key')
+    await saveSetting('authMethod', storedSecurely ? 'private-key-secure' : 'private-key')
     await saveSetting('lastLogin', new Date().toISOString())
 
     currentUser.set(user)
@@ -300,42 +336,74 @@ export async function restoreSession(): Promise<User | null> {
     // If they used native Amber, restore signer
     if (authMethod === 'amber' && isCapacitorAndroid()) {
       try {
-        const { AmberNativeSigner, getCachedAmberPubkey, loginWithAmber, pingAmber } = await import('./amber-signer')
+        const { AmberNativeSigner, getCachedAmberPubkey } = await import('./amber-signer')
         const cached = await getCachedAmberPubkey()
         const ndk = getNDK()
 
-        if (cached) {
-          const ready = await pingAmber()
-          if (ready) {
-            const signer = new AmberNativeSigner(cached)
-            ndk.signer = signer
-            const ndkUser = await signer.user()
-            ndk.activeUser = ndkUser
-            currentUser.set(savedUser)
-            void loadUserRelaysAndConnect()
-            logger.info('Native Amber session restored from cache')
-            return savedUser
-          }
+        if (cached && cached === savedUser.pubkey) {
+          // Trust the cached pubkey and restore the signer without requiring Amber interaction
+          // Amber will be called only when actual signing operations are needed
+          const signer = new AmberNativeSigner(cached)
+          ndk.signer = signer
+          const ndkUser = await signer.user()
+          ndk.activeUser = ndkUser
+          currentUser.set(savedUser)
+          void loadUserRelaysAndConnect()
+          logger.info('Native Amber session restored from cache (no Amber interaction needed)')
+          return savedUser
+        } else {
+          // Cache mismatch or missing - user needs to log in again
+          logger.warn('Amber cached pubkey mismatch or missing - session cannot be restored')
         }
-
-        const { signer } = await loginWithAmber()
-        ndk.signer = signer
-        const ndkUser = await signer.user()
-        ndk.activeUser = ndkUser
-        currentUser.set(savedUser)
-        void loadUserRelaysAndConnect()
-        logger.info('Native Amber session restored successfully')
-        return savedUser
       } catch (err) {
         logger.warn('Failed to restore native Amber session:', err)
       }
     }
 
-    // If they used direct private-key auth, restore as read-only signerless session
-    if (authMethod === 'private-key') {
+    // If they used securely stored private-key auth (Android with biometric)
+    if (authMethod === 'private-key-secure' && isSecureStorageAvailable()) {
+      try {
+        logger.info('Checking for securely stored private key...')
+        const hasKey = await hasStoredPrivateKey()
+        logger.info('Has stored key:', hasKey)
+
+        if (hasKey) {
+          // Attempt to retrieve the key with biometric auth
+          try {
+            logger.info('Attempting to retrieve private key with biometric auth...')
+            const privateKey = await retrievePrivateKeySecurely()
+            logger.info('Private key retrieved successfully, logging in...')
+
+            const ndkUser = await loginWithPrivateKey(privateKey)
+            const ndk = getNDK()
+            ndk.activeUser = ndkUser
+
+            currentUser.set(savedUser)
+            void warmupMessagingPermissions()
+            void loadUserRelaysAndConnect()
+            logger.info('Private key session restored with biometric authentication')
+            return savedUser
+          } catch (err) {
+            // Biometric auth failed or cancelled - continue to read-only mode
+            logger.error('Failed to authenticate with biometric:', err)
+            logger.warn('Using read-only mode')
+          }
+        } else {
+          logger.warn('No securely stored key found despite auth method being private-key-secure')
+        }
+      } catch (err) {
+        logger.error('Failed to restore secure private-key session:', err)
+      }
+    }
+
+    // If they used direct private-key auth without secure storage
+    // We cannot restore the signer (don't store unencrypted private keys)
+    if (authMethod === 'private-key' || authMethod === 'private-key-secure') {
       try {
         const ndk = getNDK()
+        // Set activeUser for read-only mode (can view feed but not post)
         ndk.activeUser = ndk.getUser({ pubkey: savedUser.pubkey })
+        logger.info('Private key session restored in read-only mode (cannot sign without authentication)')
       } catch (err) {
         logger.warn('Failed to set activeUser for private-key restore:', err)
       }
@@ -398,8 +466,19 @@ export async function logout(): Promise<void> {
   // Clear storage
   logger.info('Clearing storage')
   await saveSetting('currentUser', null)
+  const authMethod = await getSetting('authMethod')
   await saveSetting('authMethod', null)
   await saveSetting('nostrConnectSigner', null)
+
+  // Clear securely stored private key if present
+  if (authMethod === 'private-key-secure' && isSecureStorageAvailable()) {
+    try {
+      await deleteStoredPrivateKey()
+      logger.info('Securely stored private key deleted')
+    } catch (err) {
+      logger.warn('Failed to delete securely stored private key:', err)
+    }
+  }
 
   // Clear store - this triggers reactive updates
   logger.info('Setting currentUser to null (should trigger isAuthenticated = false)')

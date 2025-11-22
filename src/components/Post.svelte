@@ -37,6 +37,7 @@
 import QuotedNote from './QuotedNote.svelte'
 import FollowButton from './FollowButton.svelte'
 import { get as getStore } from 'svelte/store'
+import { fade, slide } from 'svelte/transition'
 import MoreVerticalIcon from './icons/MoreVerticalIcon.svelte'
 import { nip19 } from 'nostr-tools'
 import { showEmberModal, emberTarget } from '$stores/wallet'
@@ -211,6 +212,15 @@ import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
     })
   }
 
+  function adjustRepostOptimistic(delta: number): void {
+    if (!actionableEvent.id) return
+    repostCounts.update(map => {
+      const next = new Map(map)
+      next.set(actionableEvent.id, Math.max(0, (next.get(actionableEvent.id) ?? 0) + delta))
+      return next
+    })
+  }
+
   async function handleLike() {
     if (likeLoading) return
     if (!actionableEvent?.id) return
@@ -238,23 +248,64 @@ import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
   }
 
   async function handleRepostAction() {
-    if (repostActionLoading) return
+    if (repostActionLoading || !actionableEvent?.id) return
+    const targetId = actionableEvent.id
+    let optimisticAdded = false
     try {
       repostActionLoading = true
+      repostMenuOpen = false
+
+      repostedEvents.update(set => {
+        const next = new Set(set)
+        if (!next.has(targetId)) {
+          next.add(targetId)
+          optimisticAdded = true
+        }
+        return next
+      })
+      if (optimisticAdded) {
+        adjustRepostOptimistic(1)
+      }
+
       await publishRepost(actionableEvent)
-      repostedEvents.update(set => new Set(set).add(actionableEvent.id))
     } catch (err) {
       logger.error('Repost failed:', err)
+      if (optimisticAdded) {
+        repostedEvents.update(set => {
+          const next = new Set(set)
+          next.delete(targetId)
+          return next
+        })
+        adjustRepostOptimistic(-1)
+      }
     } finally {
       repostActionLoading = false
-      repostMenuOpen = false
     }
   }
+
+  let repostMenuButton: HTMLButtonElement | null = null
+  let repostMenuElement: HTMLDivElement | null = null
 
   function toggleRepostMenu(mouseEvent: MouseEvent): void {
     mouseEvent.stopPropagation()
     repostMenuOpen = !repostMenuOpen
+    if (repostMenuOpen) {
+      // Focus the menu after it opens
+      setTimeout(() => {
+        repostMenuElement?.querySelector('button')?.focus()
+      }, 0)
+    }
   }
+
+  function closeRepostMenu(): void {
+    repostMenuOpen = false
+  }
+
+  function handleBackdropClick(): void {
+    closeRepostMenu()
+    repostMenuButton?.focus()
+  }
+
 
   function handleQuotePost(): void {
     composeQuoteOf.set(actionableEvent)
@@ -495,6 +546,10 @@ import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
   function handleWindowKeydown(keyboardEvent: KeyboardEvent): void {
     if (keyboardEvent.key === 'Escape') {
       closeMenu()
+      if (repostMenuOpen) {
+        closeRepostMenu()
+        repostMenuButton?.focus()
+      }
     }
   }
 
@@ -775,6 +830,7 @@ import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
           <!-- Repost -->
           <div class="relative">
             <button
+              bind:this={repostMenuButton}
               on:click|stopPropagation={toggleRepostMenu}
               disabled={repostActionLoading}
               class={`${baseActionClass} hover:text-emerald-400 hover:bg-emerald-400/5 ${
@@ -788,20 +844,33 @@ import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
               {/if}
             </button>
             {#if repostMenuOpen}
-              <div class="absolute right-0 bottom-full mb-2 z-30 w-40 rounded-xl border border-dark-border/80 bg-dark shadow-xl">
+              <!-- Dropdown menu positioned relative to button -->
+              <div
+                bind:this={repostMenuElement}
+                class="absolute right-0 bottom-full mb-2 z-50 w-40 rounded-xl border border-dark-border/80 bg-dark shadow-xl"
+                role="menu"
+                aria-label="Repost options"
+                on:click|stopPropagation
+                transition:slide={{ axis: 'y', duration: 200 }}
+              >
                 <button
-                  class="flex w-full items-center justify-between px-3 py-2 text-sm text-text-soft hover:bg-primary/10"
+                  type="button"
+                  class="flex w-full items-center justify-between px-3 py-2 text-sm text-text-soft transition-colors hover:bg-primary/10 focus:bg-primary/10 focus:outline-none rounded-t-xl"
                   on:click|stopPropagation={handleRepostAction}
                   disabled={repostActionLoading}
+                  role="menuitem"
                 >
                   Repost
                   {#if repostActionLoading}
                     <span class="text-xs text-text-muted">...</span>
                   {/if}
                 </button>
+                <div class="h-px bg-dark-border/60"></div>
                 <button
-                  class="flex w-full items-center justify-between px-3 py-2 text-sm text-text-soft hover:bg-primary/10"
+                  type="button"
+                  class="flex w-full items-center justify-between px-3 py-2 text-sm text-text-soft transition-colors hover:bg-primary/10 focus:bg-primary/10 focus:outline-none rounded-b-xl"
                   on:click|stopPropagation={handleQuotePost}
+                  role="menuitem"
                 >
                   Quote post
                 </button>
@@ -841,6 +910,19 @@ import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
     {/if}
   </div>
 </div>
+
+<!-- Backdrop to block pointer events and prevent cursor detection of underlying elements -->
+{#if repostMenuOpen}
+  <div
+    class="repost-backdrop fixed inset-0 z-40 touch-none"
+    role="presentation"
+    aria-hidden="true"
+    on:click|stopPropagation={handleBackdropClick}
+    on:pointerdown|stopPropagation={handleBackdropClick}
+    on:touchstart|passive|stopPropagation={handleBackdropClick}
+    transition:fade={{ duration: 150 }}
+  />
+{/if}
 
 <style>
   /* Markdown styling for long-form posts */
@@ -946,6 +1028,17 @@ import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
     margin-bottom: 1rem;
     max-width: 100%;
     height: auto;
+  }
+
+  /* Backdrop to block all pointer events and cursor detection */
+  :global(.repost-backdrop) {
+    pointer-events: auto;
+    cursor: pointer;
+    background: transparent;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: none;
   }
 </style>
 

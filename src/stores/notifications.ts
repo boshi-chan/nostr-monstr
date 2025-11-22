@@ -2,6 +2,17 @@ import { writable, derived } from 'svelte/store'
 import { logger } from '$lib/logger'
 import { ensureNotificationChannel, presentNativeNotification } from '$lib/native-notifications'
 
+// Simple hash function to convert string to number for notification ID
+function hashCode(str: string): number {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i)
+    hash = ((hash << 5) - hash) + char
+    hash = hash & hash // Convert to 32bit integer
+  }
+  return Math.abs(hash)
+}
+
 /**
  * Notification types
  */
@@ -158,7 +169,10 @@ export function addNotification(notification: Notification): void {
     next.sort((a, b) => b.createdAt - a.createdAt)
     if (typeof window !== 'undefined') {
       const { title, body } = describeNotification(notification)
-      void presentNativeNotification(title, body)
+      // Pass the event ID as a URL so clicking the notification opens the post
+      const eventUrl = notification.replyEventId || notification.eventId
+      const url = eventUrl ? `nostr:event:${eventUrl}` : undefined
+      void presentNativeNotification(title, body, hashCode(notification.id), url)
     }
     return next.slice(0, 100)
   })

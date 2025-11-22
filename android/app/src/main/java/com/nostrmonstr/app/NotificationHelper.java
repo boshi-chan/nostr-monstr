@@ -29,10 +29,19 @@ public class NotificationHelper {
         manager.createNotificationChannel(channel);
     }
 
-    public static void presentNotification(Context context, String channelId, String channelName, int id, String title, String body) {
+    public static void presentNotification(Context context, String channelId, String channelName, int id, String title, String body, String url) {
         ensureChannel(context, channelId, channelName);
         Intent intent = new Intent(context, MainActivity.class);
         intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+
+        // Add the deep link URL as intent data so the app can navigate to the post
+        if (url != null && !url.isEmpty()) {
+            intent.putExtra("NOTIFICATION_URL", url);
+            intent.putExtra("FROM_NOTIFICATION", true);
+            // Also set as action to ensure each notification creates a unique intent
+            intent.setAction("OPEN_POST_" + id);
+        }
+
         PendingIntent pendingIntent = PendingIntent.getActivity(
             context,
             id,

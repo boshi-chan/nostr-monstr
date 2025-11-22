@@ -9,6 +9,8 @@
   import FollowButton from '../FollowButton.svelte'
   import Skeleton from '../Skeleton.svelte'
   import ProfileFilterBar from '../ProfileFilterBar.svelte'
+  import { logger } from '$lib/logger'
+  import { NDKRelaySet } from '@nostr-dev-kit/ndk'
   import type { NostrEvent } from '$types/nostr'
   import type { User } from '$types/user'
   import type { UserMetadata } from '$types/user'
@@ -37,10 +39,7 @@ import MailIcon from 'lucide-svelte/icons/mail'
   let bioLines: string[] = []
   let isOwnProfile = false
 
-  let loadingStats = false
   let loadingPosts = false
-  let followingCount = 0
-  let followersCount = 0
   let posts: NostrEvent[] = []
   let error: string | null = null
   let lastLoadedPubkey: string | null = null
@@ -122,13 +121,9 @@ $: filteredPosts = posts.filter(event => {
   function resetState(setLoading: boolean): void {
     posts = []
     error = null
-    followingCount = 0
-    followersCount = 0
     if (setLoading) {
-      loadingStats = true
       loadingPosts = true
     } else {
-      loadingStats = false
       loadingPosts = false
     }
   }
@@ -141,18 +136,7 @@ $: filteredPosts = posts.filter(event => {
   }
 
   async function loadStats(pubkey: string): Promise<void> {
-    try {
-      const [following, followers] = await Promise.all([
-        fetchFollowing(pubkey),
-        fetchFollowers(pubkey),
-      ])
-      followingCount = following.size
-      followersCount = followers.size
-    } catch (err) {
-      logger.warn('Failed to load profile stats', err)
-    } finally {
-      loadingStats = false
-    }
+    // stats removed
   }
 
   async function loadPosts(pubkey: string): Promise<void> {
@@ -178,60 +162,6 @@ $: filteredPosts = posts.filter(event => {
     } finally {
       loadingPosts = false
     }
-  }
-
-  function fetchFollowing(pubkey: string): Promise<Set<string>> {
-    return new Promise(resolve => {
-      const following = new Set<string>()
-      const subscription = ndk.subscribe(
-        { authors: [pubkey], kinds: [3], limit: 1 },
-        { closeOnEose: true },
-        undefined,
-        false
-      )
-
-      const finish = () => {
-        subscription.stop()
-        resolve(following)
-      }
-
-      subscription.on('event', (event: any) => {
-        for (const tag of event.tags) {
-          if (tag[0] === 'p' && tag[1]) {
-            following.add(tag[1])
-          }
-        }
-      })
-
-      subscription.on('eose', finish)
-      ;(subscription as any).on?.('error', finish)
-    })
-  }
-
-  function fetchFollowers(pubkey: string): Promise<Set<string>> {
-    return new Promise(resolve => {
-      const followers = new Set<string>()
-      const subscription = ndk.subscribe(
-        { kinds: [3], '#p': [pubkey], limit: 500 },
-        { closeOnEose: true },
-        undefined,
-        false
-      )
-
-      const finish = () => {
-        subscription.stop()
-        resolve(followers)
-      }
-
-      subscription.on('event', (event: any) => {
-        if (event.pubkey !== pubkey) {
-          followers.add(event.pubkey)
-        }
-      })
-
-      subscription.on('eose', finish)
-      ;(subscription as any).on?.('error', finish)
-    })
   }
 
   function getOriginTab(): NavTab {
@@ -307,13 +237,18 @@ $: filteredPosts = posts.filter(event => {
 
               <div class="pb-2">
                 <div class="flex flex-wrap items-center gap-3">
-                  <h1 class="text-xl font-semibold text-white md:text-3xl">{displayName}</h1>
+                  <h1
+                    class="text-xl font-semibold text-white md:text-3xl"
+                    style="text-shadow: 0 2px 6px rgba(0,0,0,0.6)"
+                  >
+                    {displayName}
+                  </h1>
                 </div>
                 <p class="mt-2 text-sm text-text-muted/80">{nip05 || targetPubkey.slice(0, 12)}</p>
               </div>
             </div>
 
-            <div class="flex w-full flex-col gap-3 md:w-auto md:items-end md:text-right">
+              <div class="flex w-full flex-col gap-3 md:w-auto md:items-end md:text-right">
               {#if !isOwnProfile && resolvedPubkey}
                 <div class="flex flex-wrap gap-2 justify-start md:justify-end">
                   <button
@@ -328,28 +263,6 @@ $: filteredPosts = posts.filter(event => {
                   <FollowButton pubkey={resolvedPubkey} size="md" />
                 </div>
               {/if}
-              <div class="w-full rounded-2xl border border-dark-border/70 bg-dark px-3 py-3 shadow-md md:px-6 md:py-4">
-                <div class="flex items-center gap-3 md:gap-6">
-                  <div class="flex-1 min-w-[90px] text-center md:text-left">
-                    <p class="text-[10px] md:text-xs uppercase tracking-[0.2em] md:tracking-[0.3em] text-text-muted">Following</p>
-                    <p class="mt-1 text-base md:text-lg font-semibold text-white">
-                      {loadingStats ? '...' : followingCount}
-                    </p>
-                  </div>
-                  <div class="flex-1 min-w-[90px] text-center md:text-left">
-                    <p class="text-[10px] md:text-xs uppercase tracking-[0.2em] md:tracking-[0.3em] text-text-muted">Followers</p>
-                    <p class="mt-1 text-base md:text-lg font-semibold text-white">
-                      {loadingStats ? '...' : followersCount}
-                    </p>
-                  </div>
-                  <div class="flex-1 min-w-[90px] text-center md:text-left">
-                    <p class="text-[10px] md:text-xs uppercase tracking-[0.2em] md:tracking-[0.3em] text-text-muted">Posts</p>
-                    <p class="mt-1 text-base md:text-lg font-semibold text-white">
-                      {loadingPosts ? '...' : posts.length}
-                    </p>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
 

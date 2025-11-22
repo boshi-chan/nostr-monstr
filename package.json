@@ -36,6 +36,7 @@
     "@nostr-dev-kit/ndk-svelte-components": "^2.3.11",
     "@types/dompurify": "^3.0.5",
     "dompurify": "^3.3.0",
+    "hls.js": "^1.6.15",
     "idb": "^8.0.0",
     "marked": "^17.0.0",
     "memfs": "^4.50.0",

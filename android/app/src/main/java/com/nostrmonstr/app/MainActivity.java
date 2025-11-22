@@ -30,11 +30,37 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        // Register Amber plugin before super.onCreate
+        // Register plugins before super.onCreate
         registerPlugin(AmberSignerPlugin.class);
         registerPlugin(WalletStoragePlugin.class);
         registerPlugin(NotificationsPlugin.class);
+        registerPlugin(SecureCredentialPlugin.class);
         super.onCreate(savedInstanceState);
+
+        // Handle notification click intent
+        handleNotificationIntent(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        // Handle notification click when app is already running
+        handleNotificationIntent(intent);
+    }
+
+    private void handleNotificationIntent(Intent intent) {
+        if (intent == null) return;
+
+        boolean fromNotification = intent.getBooleanExtra("FROM_NOTIFICATION", false);
+        if (!fromNotification) return;
+
+        String url = intent.getStringExtra("NOTIFICATION_URL");
+        if (url != null && !url.isEmpty()) {
+            // Send the URL to JavaScript via the bridge
+            getBridge().triggerWindowJSEvent("notificationClick", "{\"url\":\"" + url + "\"}");
+            Log.d(TAG, "Notification click handled: " + url);
+        }
     }
 
     @Override

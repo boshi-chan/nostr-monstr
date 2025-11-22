@@ -1,12 +1,13 @@
 <script lang="ts">
   import { activeTab } from '$stores/nav'
   import { currentUser, isAuthenticated } from '$stores/auth'
-  import { feedSource, lastTimelineFeed } from '$stores/feedSource'
+  import { feedSource, lastTimelineFeed, lastLivestreamFeed } from '$stores/feedSource'
   import { logout } from '$lib/auth'
 import { navigateToPage } from '$stores/router'
 import type { NavTab } from '$stores/nav'
 import HomeIcon from './icons/HomeIcon.svelte'
 import BellIcon from './icons/BellIcon.svelte'
+import TvMinimalPlayIcon from './icons/TvMinimalPlayIcon.svelte'
 import MailIcon from 'lucide-svelte/icons/mail'
 import LogInIcon from 'lucide-svelte/icons/log-in'
 import { unreadCount } from '$stores/notifications'
@@ -26,6 +27,7 @@ import { unreadCounts } from '$stores/messages'
 
   const tabs: { id: NavTab; label: string; icon: any }[] = [
     { id: 'home', label: 'Home', icon: HomeIcon },
+    { id: 'livestreams', label: 'Live', icon: TvMinimalPlayIcon },
     { id: 'messages', label: 'Messages', icon: MailIcon },
     { id: 'notifications', label: 'Notifications', icon: BellIcon },
   ]

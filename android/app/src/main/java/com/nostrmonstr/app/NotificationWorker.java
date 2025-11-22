@@ -123,7 +123,8 @@ public class NotificationWorker extends Worker {
             NotificationHelper.DEFAULT_CHANNEL_NAME,
             (int) (System.currentTimeMillis() & 0x7fffffff),
             title,
-            body
+            body,
+            null  // Background worker doesn't have event context, so no deep link
         );
     }
 
