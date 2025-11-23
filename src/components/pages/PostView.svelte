@@ -5,7 +5,7 @@ import Post from '../Post.svelte'
   import Skeleton from '../Skeleton.svelte'
   import type { NostrEvent } from '$types/nostr'
   import { getEventById, fetchEventById } from '$lib/feed-ndk'
-  import { buildCompleteThread, getThreadStats, findEventNode, type ThreadContext } from '$lib/thread'
+  import { buildCompleteThread, getThreadStats, findEventNode, flattenThread, type ThreadContext } from '$lib/thread'
 import { queueEngagementHydration } from '$lib/engagement'
 
   export let eventId: string
@@ -25,6 +25,7 @@ let ancestorChain: NostrEvent[] = []
 let directReplies: NostrEvent[] = []
 let visibleReplies = REPLIES_BATCH_SIZE
 let lastLoadedEventId: string | null = null
+let rootPost: NostrEvent | null = null
 
 async function bootstrap(targetId: string): Promise<void> {
   loadingMain = !clickedEvent
@@ -45,7 +46,7 @@ async function bootstrap(targetId: string): Promise<void> {
 
       clickedEvent = event
       loadingMain = false
-      queueEngagementHydration([event.id])
+      queueEngagementHydration([event.id], true)
 
       threadContext = await buildCompleteThread(event)
       hydrateThreadSlices(threadContext)
@@ -69,6 +70,7 @@ $: if (eventId && eventId !== lastLoadedEventId) {
     ancestorChain = []
     directReplies = []
     visibleReplies = REPLIES_BATCH_SIZE
+    rootPost = null
   }
 
   error = null
@@ -93,24 +95,44 @@ $: if (eventId && eventId !== lastLoadedEventId) {
     directReplies = []
     threadStats = null
     visibleReplies = REPLIES_BATCH_SIZE
+    rootPost = null
     return
   }
     threadStats = context.threadTree ? getThreadStats(context.threadTree) : null
+    rootPost = context.rootPost
     ancestorChain = (context.pathToMain ?? []).slice(0, -1)
-    const node = findEventNode(context.threadTree, context.mainEvent.id)
-    directReplies =
-      node?.replies
-        .map(reply => reply.event)
-        .sort((a, b) => a.created_at - b.created_at) ?? []
+    
+    // Get all events in the thread tree
+    const allThreadNodes = flattenThread(context.threadTree)
+    const mainEventId = context.mainEvent.id
+    const ancestorIds = new Set(ancestorChain.map(e => e.id))
+    
+    // Filter to get all replies in the thread (exclude main event and ancestors)
+    // This shows ALL replies in the thread, not just direct replies to the clicked event
+    directReplies = allThreadNodes
+      .map(node => node.event)
+      .filter(event => event.id !== mainEventId && !ancestorIds.has(event.id))
+      .sort((a, b) => a.created_at - b.created_at)
+    
     visibleReplies = directReplies.length ? Math.min(REPLIES_BATCH_SIZE, directReplies.length) : 0
 
     // Queue engagement hydration for all thread events
+    // Use immediate mode for bulk loads to show metrics faster
     const allThreadEventIds = [
       context.mainEvent.id,
       ...ancestorChain.map(e => e.id),
       ...directReplies.map(e => e.id)
     ]
-    queueEngagementHydration(allThreadEventIds)
+    if (rootPost) {
+      allThreadEventIds.push(rootPost.id)
+    }
+    queueEngagementHydration(allThreadEventIds, true)
+  }
+  
+  function handleViewRootPost(): void {
+    if (rootPost) {
+      openPost(rootPost, originTab)
+    }
   }
 
   function showMoreReplies(): void {
@@ -188,8 +210,17 @@ $: if (eventId && eventId !== lastLoadedEventId) {
           <div class="rounded-2xl border border-dark-border/60 bg-dark/50 p-3">
             <div class="flex items-center justify-between">
               <p class="text-[11px] uppercase tracking-[0.35em] text-text-muted/70">
-                Replies ({directReplies.length})
+                All Replies ({directReplies.length})
               </p>
+              {#if rootPost && rootPost.id !== clickedEvent.id}
+                <button
+                  type="button"
+                  class="text-xs text-primary hover:underline focus:outline-none focus:ring-2 focus:ring-primary/40 rounded px-2 py-1"
+                  on:click={handleViewRootPost}
+                >
+                  View root post
+                </button>
+              {/if}
             </div>
             <div class="mt-3 space-y-3">
               {#each directReplies.slice(0, visibleReplies) as reply (reply.id)}

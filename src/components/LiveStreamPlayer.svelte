@@ -7,6 +7,10 @@
   import { formatDate } from '$lib/utils'
   import { nip19 } from 'nostr-tools'
   import FollowButton from './FollowButton.svelte'
+  import { openZapModal } from '$stores/nwc'
+  import { showEmberModal, emberTarget } from '$stores/wallet'
+  import ZapIcon from './icons/ZapIcon.svelte'
+  import EmberIcon from './icons/EmberIcon.svelte'
 
   export let event: NDKEvent
   export let onClose: () => void
@@ -167,6 +171,43 @@
     if (e.key === 'Escape') {
       onClose()
     }
+  }
+
+  function resolveMoneroAddress(metadata: any): string | null {
+    if (!metadata) return null
+    const candidates = ['monero_address', 'moneroAddress', 'xmr_address', 'ember_address']
+    for (const key of candidates) {
+      const value = metadata[key]
+      if (typeof value === 'string' && value.length > 80) {
+        return value
+      }
+    }
+    if (metadata.about) {
+      const moneroRegex = /\b([48][0-9AB][1-9A-HJ-NP-Za-km-z]{93})\b/g
+      const match = metadata.about.match(moneroRegex)
+      if (match && match[0]) {
+        return match[0]
+      }
+    }
+    return null
+  }
+
+  function handleZap(): void {
+    const recipientName = getDisplayName(streamerPubkey, userMetadata)
+    openZapModal({
+      eventId: event.id,
+      recipientPubkey: streamerPubkey,
+      recipientName,
+    })
+  }
+
+  function handleEmber(): void {
+    emberTarget.set({
+      recipientPubkey: streamerPubkey,
+      noteId: event.id,
+      address: resolveMoneroAddress(userMetadata),
+    })
+    showEmberModal.set(true)
   }
 
   async function setupPlayer(): Promise<void> {
@@ -386,9 +427,21 @@
           <h3 class="text-sm font-semibold text-white">Live Chat</h3>
           <p class="text-xs text-text-muted">{chatMessages.length} {chatMessages.length === 1 ? 'message' : 'messages'}</p>
         </div>
-        <div class="hidden md:flex gap-2">
-          <button class="rounded-lg bg-amber-500/20 px-3 py-1 text-sm font-semibold text-amber-400 hover:bg-amber-500/30 transition-colors">Zap</button>
-          <button class="rounded-lg bg-orange-500/20 px-3 py-1 text-sm font-semibold text-orange-400 hover:bg-orange-500/30 transition-colors">Ember</button>
+        <div class="flex gap-2">
+          <button
+            class="inline-flex items-center gap-1 rounded-lg bg-amber-500/20 px-3 py-1 text-sm font-semibold text-amber-400 transition-colors hover:bg-amber-500/30"
+            on:click={handleZap}
+          >
+            <ZapIcon size={16} color="currentColor" strokeWidth={1.75} />
+            <span>Zap</span>
+          </button>
+          <button
+            class="inline-flex items-center gap-1 rounded-lg bg-orange-500/20 px-3 py-1 text-sm font-semibold text-orange-400 transition-colors hover:bg-orange-500/30"
+            on:click={handleEmber}
+          >
+            <EmberIcon size={16} color="currentColor" strokeWidth={1.75} />
+            <span>Ember</span>
+          </button>
         </div>
       </div>
 

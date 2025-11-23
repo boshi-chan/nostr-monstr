@@ -13,22 +13,33 @@ import { logger } from '$lib/logger'
 const MAX_BATCH = 10 // Reduced from 40 to avoid overwhelming relays
 const ENGAGEMENT_FETCH_CHUNK = 1 // Query 1 event at a time - best relay compatibility
 const FETCH_TTL = 60_000 // 1 minute cache per event
-const LOOKBACK_DAYS = 7 // Only look back 7 days for engagement (reduced from 30)
+const LOOKBACK_DAYS = 30 // Look back 30 days so profile/thread views show metrics on older posts
 const pendingEventIds = new Set<string>()
 const lastFetchedAt = new Map<string, number>()
 let debounceHandle: ReturnType<typeof setTimeout> | null = null
 let inFlight = false
+let bulkLoadMode = false // Track if we're in a bulk load scenario
 
 function now(): number {
   return Date.now()
 }
 
-function scheduleFlush(): void {
-  if (debounceHandle) return
-  debounceHandle = setTimeout(() => {
+function scheduleFlush(immediate = false): void {
+  if (debounceHandle) {
+    clearTimeout(debounceHandle)
     debounceHandle = null
+  }
+  
+  // For bulk loads or immediate requests, flush right away
+  // Otherwise use a short debounce for scroll-based loading
+  if (immediate || bulkLoadMode) {
     void flushQueue()
-  }, 120)
+  } else {
+    debounceHandle = setTimeout(() => {
+      debounceHandle = null
+      void flushQueue()
+    }, 120)
+  }
 }
 
 async function flushQueue(): Promise<void> {
@@ -68,10 +79,23 @@ async function flushQueue(): Promise<void> {
   }
 }
 
-export function queueEngagementHydration(ids: Iterable<string | null | undefined>): void {
+export function queueEngagementHydration(
+  ids: Iterable<string | null | undefined>,
+  immediate = false
+): void {
   const stamp = now()
-  for (const id of ids) {
-    if (!id) continue
+  const idArray = Array.from(ids).filter((id): id is string => !!id)
+  
+  // Detect bulk loads (10+ events) and enable bulk mode
+  if (idArray.length >= 10) {
+    bulkLoadMode = true
+    // Reset bulk mode after processing
+    setTimeout(() => {
+      bulkLoadMode = false
+    }, 5000)
+  }
+  
+  for (const id of idArray) {
     const last = lastFetchedAt.get(id)
     if (last && stamp - last < FETCH_TTL) continue
     pendingEventIds.add(id)
@@ -81,7 +105,7 @@ export function queueEngagementHydration(ids: Iterable<string | null | undefined
     return
   }
 
-  scheduleFlush()
+  scheduleFlush(immediate)
 }
 
 function getTargetEventId(event: NostrEvent | any): string | null {
@@ -134,7 +158,9 @@ async function hydrateEngagementCounts(ids: string[]): Promise<void> {
   // Ensure we have at least one relay connected before attempting to fetch
   const hasConnection = await ensureRelayConnection(2000)
   if (!hasConnection) {
-    logger.warn('No relays connected - cannot fetch engagement. Will retry on next queue.')
+    logger.warn('No relays connected - cannot fetch engagement. Re-queueing.')
+    ids.forEach(id => pendingEventIds.add(id))
+    scheduleFlush()
     return
   }
 
@@ -143,7 +169,9 @@ async function hydrateEngagementCounts(ids: string[]): Promise<void> {
   const connectedPoolRelays = poolRelays.filter(r => r.status === 5)
 
   if (connectedPoolRelays.length === 0) {
-    logger.warn('No relays connected in pool! Cannot fetch engagement.')
+    logger.warn('No relays connected in pool! Re-queueing engagement hydration.')
+    ids.forEach(id => pendingEventIds.add(id))
+    scheduleFlush()
     return
   }
 
@@ -153,9 +181,11 @@ async function hydrateEngagementCounts(ids: string[]): Promise<void> {
   const replyMap = new Map<string, number>()
   const reactionMap = new Map<string, Map<string, number>>()
 
+  // For bulk loads, process all events together; otherwise use chunks
+  const chunkSize = bulkLoadMode ? Math.min(ids.length, 20) : ENGAGEMENT_FETCH_CHUNK
   const chunks: string[][] = []
-  for (let i = 0; i < ids.length; i += ENGAGEMENT_FETCH_CHUNK) {
-    chunks.push(ids.slice(i, i + ENGAGEMENT_FETCH_CHUNK))
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    chunks.push(ids.slice(i, i + chunkSize))
   }
 
   for (const chunk of chunks) {
@@ -168,6 +198,8 @@ async function hydrateEngagementCounts(ids: string[]): Promise<void> {
       return new Promise((resolve) => {
         const events = new Set()
         let resolved = false
+        // Shorter timeout for bulk loads (they're more likely to have data)
+        const timeout = bulkLoadMode ? 3000 : 2000
 
         const sub = ndk.subscribe(
           { kinds: [kind], ...filter },
@@ -187,14 +219,14 @@ async function hydrateEngagementCounts(ids: string[]): Promise<void> {
           }
         })
 
-        // Timeout after 2 seconds
+        // Timeout after specified duration
         setTimeout(() => {
           if (!resolved) {
             resolved = true
             sub.stop()
             resolve(events)
           }
-        }, 2000)
+        }, timeout)
       })
     }
 
@@ -209,11 +241,18 @@ async function hydrateEngagementCounts(ids: string[]): Promise<void> {
       const raw = event.rawEvent ? event.rawEvent() : event
       const target = getTargetEventId(raw)
       if (!target) continue
-      likeMap.set(target, (likeMap.get(target) ?? 0) + 1)
       const emoji = (raw.content || '+').trim() || '+'
+      
+      // Track all reactions in the breakdown
       const bucket = reactionMap.get(target) ?? new Map<string, number>()
       bucket.set(emoji, (bucket.get(emoji) ?? 0) + 1)
       reactionMap.set(target, bucket)
+      
+      // Only count "+" reactions (or empty/default) as likes
+      // Other emoji reactions are tracked in reactionBreakdown but not in likeCount
+      if (emoji === '+') {
+        likeMap.set(target, (likeMap.get(target) ?? 0) + 1)
+      }
     }
 
     for (const event of replyEvents) {

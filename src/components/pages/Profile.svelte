@@ -2,24 +2,25 @@
   import { currentUser } from '$stores/auth'
   import { metadataCache, likedEvents } from '$stores/feed'
   import { feedFilters } from '$stores/feedFilters'
-  import { getDisplayName, getAvatarUrl, getNip05Display, fetchUserMetadata } from '$lib/metadata'
-  import { getNDK } from '$lib/ndk'
-  import { isReply, isRepostEvent, hasMedia } from '$lib/content'
-  import Post from '../Post.svelte'
-  import FollowButton from '../FollowButton.svelte'
-  import Skeleton from '../Skeleton.svelte'
-  import ProfileFilterBar from '../ProfileFilterBar.svelte'
-  import { logger } from '$lib/logger'
-  import { NDKRelaySet } from '@nostr-dev-kit/ndk'
-  import type { NostrEvent } from '$types/nostr'
-  import type { User } from '$types/user'
-  import type { UserMetadata } from '$types/user'
-  import { activeRoute, openPost, openProfile, goBack, navigateToPage } from '$stores/router'
-  import type { NavTab } from '$stores/nav'
-  import { activeConversation } from '$stores/messages'
-  import { loadConversation } from '$lib/messaging-simple'
-  import ChevronLeftIcon from 'lucide-svelte/icons/chevron-left'
+import { getDisplayName, getAvatarUrl, getNip05Display, fetchUserMetadata } from '$lib/metadata'
+import { getNDK } from '$lib/ndk'
+import { isReply, isRepostEvent, hasMedia } from '$lib/content'
+import Post from '../Post.svelte'
+import FollowButton from '../FollowButton.svelte'
+import Skeleton from '../Skeleton.svelte'
+import ProfileFilterBar from '../ProfileFilterBar.svelte'
+import { logger } from '$lib/logger'
+import { NDKRelaySet } from '@nostr-dev-kit/ndk'
+import type { NostrEvent } from '$types/nostr'
+import type { User } from '$types/user'
+import type { UserMetadata } from '$types/user'
+import { activeRoute, openPost, openProfile, goBack, navigateToPage } from '$stores/router'
+import type { NavTab } from '$stores/nav'
+import { activeConversation } from '$stores/messages'
+import { loadConversation } from '$lib/messaging-simple'
+import ChevronLeftIcon from 'lucide-svelte/icons/chevron-left'
 import MailIcon from 'lucide-svelte/icons/mail'
+import { queueEngagementHydration } from '$lib/engagement'
 
   export let pubkey: string | null = null
   export let originTab: NavTab | null = null
@@ -156,6 +157,13 @@ $: filteredPosts = posts.filter(event => {
           return true
         })
         .sort((a, b) => b.created_at - a.created_at)
+
+      // Hydrate engagement counts (likes, replies, reposts, zaps) for profile posts
+      // Use immediate mode for bulk loads to show metrics faster
+      const ids = posts.map(p => p.id)
+      if (ids.length > 0) {
+        queueEngagementHydration(ids, true)
+      }
     } catch (err) {
       logger.error('Failed to load profile posts', err)
       error = 'Unable to load posts right now.'

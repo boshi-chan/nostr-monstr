@@ -93,8 +93,9 @@ public class NotificationWorker extends Worker {
                 body = sender + " sent you a message";
                 break;
             case 7:
-                title = "Reaction received";
-                body = sender + " reacted with " + (event.content == null || event.content.isEmpty() ? "a like" : event.content);
+                title = "New reaction";
+                String emoji = (event.content == null || event.content.trim().isEmpty()) ? "+" : event.content.trim();
+                body = sender + " reacted " + emoji + " to your post.";
                 break;
             case 9734:
             case 9735:
@@ -103,10 +104,10 @@ public class NotificationWorker extends Worker {
                 break;
             case 6:
                 title = "Repost";
-                body = sender + " reposted you";
+                body = sender + " reposted your post.";
                 break;
             default:
-                title = "Mention";
+                title = "Mentioned you";
                 String trimmed = event.content != null ? event.content.trim() : "";
                 if (trimmed.isEmpty()) {
                     trimmed = "New mention in your feed";

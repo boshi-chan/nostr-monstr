@@ -22,6 +22,7 @@
   let success: string | null = null
   let loading = false
   let qrDataUrl: string | null = null
+  let copyMessage: string | null = null
 
   $: isOpen = $showEmberModal
   $: target = $emberTarget
@@ -198,6 +199,19 @@
     if (!paymentURI) return
     window.location.href = paymentURI
   }
+
+  async function copyAddress(): Promise<void> {
+    if (!target?.address) return
+    try {
+      await navigator.clipboard.writeText(target.address)
+      copyMessage = 'Address copied'
+      setTimeout(() => (copyMessage = null), 1500)
+    } catch (err) {
+      console.error('Failed to copy address', err)
+      copyMessage = 'Copy failed'
+      setTimeout(() => (copyMessage = null), 2000)
+    }
+  }
 </script>
 
 {#if isOpen}
@@ -209,7 +223,7 @@
       on:click={closeModal}
     ></button>
 
-    <div class="relative w-full max-w-md rounded-3xl border border-dark-border/60 bg-dark-light/95 p-6 shadow-2xl">
+    <div class="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-3xl border border-dark-border/60 bg-dark-light/95 p-6 pb-8 shadow-2xl">
       <header class="flex items-center justify-between gap-4">
         <div>
           <h2 id="ember-modal-title" class="text-lg font-semibold text-text-soft flex items-center gap-2">
@@ -391,6 +405,34 @@
                 <p class="text-xs text-text-muted text-center px-4">
                   Scan with your Monero wallet or use the button below to open your mobile wallet
                 </p>
+                <button
+                  type="button"
+                  class="rounded-full border border-dark-border/60 bg-dark/40 px-4 py-1.5 text-xs font-semibold text-text-soft transition hover:border-orange-400/60 hover:text-white"
+                  on:click={copyAddress}
+                >
+                  {copyMessage ?? 'Copy address'}
+                </button>
+                <div class="w-full rounded-2xl border border-dark-border/60 bg-dark/50 p-3 text-left">
+                  <div class="flex items-start gap-2">
+                    <div class="flex-1 min-w-0">
+                      <p class="text-[11px] uppercase tracking-[0.25em] text-text-muted">Address</p>
+                      <p class="mt-1 break-words text-xs text-text-soft/90">
+                        {target.address}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      class="flex-shrink-0 rounded-full border border-dark-border/60 p-2 text-text-soft transition hover:border-orange-400/60 hover:text-white"
+                      on:click={copyAddress}
+                      aria-label="Copy address"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-4 w-4">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <button

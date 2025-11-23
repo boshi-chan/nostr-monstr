@@ -19,7 +19,7 @@
       on:click={handleBackdropClick}
     />
     <div
-      class="relative bg-dark rounded-t-2xl md:rounded-2xl w-full md:w-96 max-h-[90vh] overflow-y-auto shadow-2xl animate-slide-up"
+    class="relative bg-dark rounded-t-2xl md:rounded-2xl w-full md:w-96 max-h-[90vh] overflow-y-auto shadow-2xl animate-slide-up"
       on:pointerdown|stopPropagation
     >
       <!-- Header -->

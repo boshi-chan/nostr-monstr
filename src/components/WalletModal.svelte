@@ -503,7 +503,7 @@ function formatTxTime(timestamp: number | null): string {
       aria-label="Close wallet modal"
       on:click={closeModal}
     ></button>
-    <div class="relative w-full max-w-xl max-h-[calc(100vh-2rem)] overflow-y-auto rounded-3xl border border-dark-border/60 bg-dark-light/95 p-4 md:p-6 shadow-2xl">
+    <div class="relative w-full max-w-xl max-h-[calc(100vh-2rem)] overflow-y-auto rounded-3xl border border-dark-border/60 bg-dark-light/95 p-4 pb-8 md:p-6 shadow-2xl">
       <header class="flex items-center justify-between gap-4">
         <div>
           <h2 id="wallet-modal-title" class="text-lg font-semibold text-text-soft">Ember Wallet</h2>
@@ -861,6 +861,15 @@ function formatTxTime(timestamp: number | null): string {
               <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Deposit via QR</p>
               {#if depositQr}
                 <img src={depositQr} alt="Monero deposit QR" class="mx-auto mt-4 h-48 w-48 rounded-xl border border-dark-border/40 bg-dark/80 p-3" />
+                <div class="mt-3 flex items-center justify-center">
+                  <button
+                    type="button"
+                    class="rounded-full border border-dark-border/60 px-4 py-1.5 text-xs font-semibold text-text-soft transition hover:border-primary/60 hover:text-white"
+                    on:click={() => copyToClipboard($walletState.address, 'address')}
+                  >
+                    Copy address
+                  </button>
+                </div>
               {:else}
                 <div class="mt-6 rounded-xl border border-dashed border-dark-border/60 bg-dark/40 p-6 text-sm text-text-muted">
                   {qrError ?? 'Generating QR code…'}

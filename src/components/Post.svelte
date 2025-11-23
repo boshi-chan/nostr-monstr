@@ -41,9 +41,10 @@ import { fade, slide } from 'svelte/transition'
 import MoreVerticalIcon from './icons/MoreVerticalIcon.svelte'
 import { nip19 } from 'nostr-tools'
 import { showEmberModal, emberTarget } from '$stores/wallet'
-import { emberTotals, ensureEmberTotal } from '$stores/ember'
-import { openZapModal } from '$stores/nwc'
-import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
+  import { emberTotals, ensureEmberTotal } from '$stores/ember'
+  import { openZapModal } from '$stores/nwc'
+  import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
+  import { queueEngagementHydration } from '$lib/engagement'
 
   export let event: NostrEvent
   export let onSelect: ((event: NostrEvent) => void) | undefined = undefined
@@ -144,6 +145,9 @@ import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
   }
   $: if (actionableEvent.id) {
     void ensureEmberTotal(actionableEvent.id)
+  }
+  $: if (actionableEvent.id) {
+    queueEngagementHydration([actionableEvent.id])
   }
 
   let metadata: UserMetadata | undefined
@@ -1041,7 +1045,6 @@ import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
     touch-action: none;
   }
 </style>
-
 
 
 

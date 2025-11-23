@@ -20,6 +20,7 @@ import { startNativeNotificationListener, stopNativeNotificationListener } from 
 import { hasSeenNotification, markNotificationSeen, purgeOldSeen } from '$lib/notification-seen'
 import { normalizeEvent } from '$lib/event-validation'
 import { logDebug } from '$stores/debug'
+import { incrementLikeCount, incrementReactionCount } from '$lib/engagement'
 
 let notificationSubscription: NDKSubscription | null = null
 const processedNotifications = new Set<string>()
@@ -327,25 +328,21 @@ async function handleReactionNotification(event: NostrEvent, userPubkey: string)
     return false
   }
 
+  // If we can confirm the target event belongs to the user, record it so future lookups succeed.
   if (targetEventId) {
     const userEvents = get(userEventIds)
     if (!userEvents.has(targetEventId)) {
       const target = await getTargetEvent(targetEventId)
-      if (!target) {
-        // If the reactor tagged us directly, accept even without the target event
-        if (!userTagged) return false
-      } else {
-        if (target.pubkey !== userPubkey) {
-          if (!userTagged) return false
-        } else {
-          ensureUserEventId(targetEventId)
-        }
+      if (target?.pubkey === userPubkey) {
+        ensureUserEventId(targetEventId)
       }
+      // Even if we can't fetch/confirm the target (common for older posts), continue so the user still sees the reaction.
     }
   }
 
   const targetEvent = targetEventId ? await getTargetEvent(targetEventId) : null
   const metadata = await getNotificationMetadata(event.pubkey)
+  const targetIdForCounts = targetEventId ?? event.id
 
   addNotificationSorted({
     id: event.id,
@@ -360,6 +357,11 @@ async function handleReactionNotification(event: NostrEvent, userPubkey: string)
     read: false,
   })
   markNotificationSeen(`${event.id}:${event.pubkey}`)
+  // Treat reactions as likes for engagement counts so the UI stays in sync with notifications/toasts.
+  if (targetIdForCounts) {
+    incrementLikeCount(targetIdForCounts, 1)
+    incrementReactionCount(targetIdForCounts, event.content?.trim() || '+')
+  }
 
   return true
 }
