@@ -16,6 +16,7 @@ import {
   circlesCache,
   userEventIds,
   likedEvents,
+  likedReactionEvents,
   repostedEvents,
   zappedEvents,
   commentedThreads,
@@ -1194,7 +1195,7 @@ export async function publishReaction(
   eventId: string,
   emoji: string = '+',
   options?: { incrementCounts?: boolean }
-): Promise<void> {
+): Promise<string> {
   const ndk = getNDK()
   const user = getCurrentNDKUser()
 
@@ -1215,6 +1216,35 @@ export async function publishReaction(
     incrementLikeCount(eventId, 1)
     incrementReactionCount(eventId, emoji)
   }
+
+  return ndkEvent.id || ''
+}
+
+/**
+ * Publish a delete event to undo a reaction (unlike)
+ */
+export async function publishUnlike(eventId: string, reactionEventId?: string | null): Promise<void> {
+  const ndk = getNDK()
+  const user = getCurrentNDKUser()
+
+  if (!user?.pubkey || !ndk.signer) {
+    throw new Error('Not authenticated')
+  }
+
+  const targetReactionId = reactionEventId ?? get(likedReactionEvents).get(eventId)
+  if (!targetReactionId) {
+    logger.warn('No reaction id found for unlike; skipping delete event')
+    return
+  }
+
+  const deleteEvent = new NDKEvent(ndk)
+  deleteEvent.kind = 5
+  deleteEvent.content = 'Unlike'
+  deleteEvent.tags = [['e', targetReactionId]]
+  deleteEvent.created_at = Math.floor(Date.now() / 1000)
+
+    await deleteEvent.sign()
+    await publishToConfiguredRelays(deleteEvent)
 }
 
 /**
@@ -1299,13 +1329,18 @@ export async function loadUserInteractions(): Promise<void> {
     )
 
     const likedEventIds = new Set<string>()
+    const reactionEventMap = new Map<string, string>()
     for (const reaction of reactions) {
       const eventTag = reaction.tags.find((t: string[]) => t[0] === 'e')
       if (eventTag && eventTag[1]) {
         likedEventIds.add(eventTag[1])
+        if (reaction.id) {
+          reactionEventMap.set(eventTag[1], reaction.id)
+        }
       }
     }
     likedEvents.set(likedEventIds)
+    likedReactionEvents.set(reactionEventMap)
     logger.info(`Loaded ${likedEventIds.size} likes`)
 
     // Load reposts (kind:6)

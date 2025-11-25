@@ -82,6 +82,8 @@ export const activeSubscriptions = writable<Set<string>>(new Set())
 
 // Liked events (for optimistic UI)
 export const likedEvents = writable<Set<string>>(new Set())
+// Reaction events authored by the user, keyed by target event id (for unliking)
+export const likedReactionEvents = writable<Map<string, string>>(new Map())
 
 // Reposted events
 export const repostedEvents = writable<Set<string>>(new Set())

@@ -1,5 +1,5 @@
 import { get } from 'svelte/store'
-import { likedEvents, repostedEvents, zappedEvents, commentedThreads } from '$stores/feed'
+import { likedEvents, likedReactionEvents, repostedEvents, zappedEvents, commentedThreads } from '$stores/feed'
 import { currentUser } from '$stores/auth'
 
 const STORAGE_PREFIX = 'monstr:interactions:'
@@ -11,6 +11,7 @@ let suppressPersistence = false
 
 interface InteractionSnapshot {
   likes: string[]
+  reactionEvents?: Array<[string, string]>
   reposts: string[]
   zaps: Array<[string, number]>
   comments: string[]
@@ -63,6 +64,10 @@ export function hydrateInteractionsFromCache(pubkey: string): void {
       likedEvents.set(new Set(parsed.likes))
     }
 
+    if (Array.isArray(parsed.reactionEvents)) {
+      likedReactionEvents.set(new Map(parsed.reactionEvents))
+    }
+
     if (Array.isArray(parsed.reposts)) {
       repostedEvents.set(new Set(parsed.reposts))
     }
@@ -90,6 +95,7 @@ export function persistInteractionsSnapshot(): void {
 
   const snapshot: InteractionSnapshot = {
     likes: clampList(get(likedEvents)),
+    reactionEvents: clampList(get(likedReactionEvents).entries()),
     reposts: clampList(get(repostedEvents)),
     zaps: clampList(get(zappedEvents).entries()),
     comments: clampList(get(commentedThreads)),
@@ -120,6 +126,7 @@ export function startInteractionPersistence(): void {
 
   const subscribers = [
     likedEvents.subscribe(schedulePersistence),
+    likedReactionEvents.subscribe(schedulePersistence),
     repostedEvents.subscribe(schedulePersistence),
     zappedEvents.subscribe(schedulePersistence),
     commentedThreads.subscribe(schedulePersistence),

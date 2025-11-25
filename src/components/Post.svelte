@@ -1,10 +1,11 @@
 <script lang="ts">
   import {
-    likedEvents,
-    repostedEvents,
-    zappedEvents,
-    metadataCache,
-    showCompose,
+  likedEvents,
+  likedReactionEvents,
+  repostedEvents,
+  zappedEvents,
+  metadataCache,
+  showCompose,
     composeReplyTo,
     composeQuoteOf,
     feedEvents,
@@ -17,6 +18,7 @@
   } from '$stores/feed'
   import {
     publishReaction,
+    publishUnlike,
     publishRepost,
     getEventById,
     fetchEventById,
@@ -43,8 +45,9 @@ import { nip19 } from 'nostr-tools'
 import { showEmberModal, emberTarget } from '$stores/wallet'
   import { emberTotals, ensureEmberTotal } from '$stores/ember'
   import { openZapModal } from '$stores/nwc'
-  import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
-  import { queueEngagementHydration } from '$lib/engagement'
+import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
+import { queueEngagementHydration } from '$lib/engagement'
+import { logger } from '$lib/logger'
 
   export let event: NostrEvent
   export let onSelect: ((event: NostrEvent) => void) | undefined = undefined
@@ -229,18 +232,59 @@ import { showEmberModal, emberTarget } from '$stores/wallet'
     if (likeLoading) return
     if (!actionableEvent?.id) return
     const alreadyLiked = isLiked
+    const reactionEventId = $likedReactionEvents.get(actionableEvent.id) ?? null
     try {
       likeLoading = true
-      if (!alreadyLiked) {
-        likedEvents.update(set => new Set(set).add(actionableEvent.id))
-        adjustLikeOptimistic(1, '+')
-      }
-      await publishReaction(actionableEvent.id, '+', { incrementCounts: false })
-    } catch (err) {
-      logger.error('Like failed:', err)
-      if (!alreadyLiked) {
+      if (alreadyLiked) {
+        let removed = false
         likedEvents.update(set => {
           const next = new Set(set)
+          if (next.delete(actionableEvent.id)) {
+            removed = true
+          }
+          return next
+        })
+        likedReactionEvents.update(map => {
+          const next = new Map(map)
+          next.delete(actionableEvent.id)
+          return next
+        })
+        if (removed) {
+          adjustLikeOptimistic(-1, '+')
+        }
+        await publishUnlike(actionableEvent.id, reactionEventId)
+      } else {
+        likedEvents.update(set => new Set(set).add(actionableEvent.id))
+        adjustLikeOptimistic(1, '+')
+        const reactionId = await publishReaction(actionableEvent.id, '+', { incrementCounts: false })
+        if (reactionId) {
+          likedReactionEvents.update(map => {
+            const next = new Map(map)
+            next.set(actionableEvent.id, reactionId)
+            return next
+          })
+        }
+      }
+    } catch (err) {
+      logger.error('Like failed:', err)
+      if (alreadyLiked) {
+        likedEvents.update(set => new Set(set).add(actionableEvent.id))
+        if (reactionEventId) {
+          likedReactionEvents.update(map => {
+            const next = new Map(map)
+            next.set(actionableEvent.id, reactionEventId)
+            return next
+          })
+        }
+        adjustLikeOptimistic(1, '+')
+      } else {
+        likedEvents.update(set => {
+          const next = new Set(set)
+          next.delete(actionableEvent.id)
+          return next
+        })
+        likedReactionEvents.update(map => {
+          const next = new Map(map)
           next.delete(actionableEvent.id)
           return next
         })
@@ -251,7 +295,9 @@ import { showEmberModal, emberTarget } from '$stores/wallet'
     }
   }
 
-  async function handleRepostAction() {
+  async function handleRepostAction(mouseEvent?: Event) {
+    mouseEvent?.stopPropagation()
+    logger.info('Repost menu: Repost clicked')
     if (repostActionLoading || !actionableEvent?.id) return
     const targetId = actionableEvent.id
     let optimisticAdded = false
@@ -293,28 +339,17 @@ import { showEmberModal, emberTarget } from '$stores/wallet'
   function toggleRepostMenu(mouseEvent: MouseEvent): void {
     mouseEvent.stopPropagation()
     repostMenuOpen = !repostMenuOpen
-    if (repostMenuOpen) {
-      // Focus the menu after it opens
-      setTimeout(() => {
-        repostMenuElement?.querySelector('button')?.focus()
-      }, 0)
-    }
   }
 
   function closeRepostMenu(): void {
     repostMenuOpen = false
   }
 
-  function handleBackdropClick(): void {
-    closeRepostMenu()
-    repostMenuButton?.focus()
-  }
-
-
-  function handleQuotePost(): void {
+  function handleQuotePost(mouseEvent: MouseEvent): void {
+    mouseEvent.stopPropagation()
     composeQuoteOf.set(actionableEvent)
     composeReplyTo.set(null)
-    repostMenuOpen = false
+    closeRepostMenu()
     showCompose.set(true)
   }
 
@@ -540,11 +575,17 @@ import { showEmberModal, emberTarget } from '$stores/wallet'
     logger.warn('Blocking users is not implemented yet.', actionableEvent.pubkey)
   }
 
-  function handleWindowClick(): void {
+  function handleWindowClick(mouseEvent: MouseEvent): void {
+    const target = mouseEvent.target as Node | null
+    if (target && (repostMenuElement?.contains(target) || repostMenuButton?.contains(target))) {
+      return
+    }
     if (menuOpen) {
       closeMenu()
     }
-    repostMenuOpen = false
+    if (repostMenuOpen) {
+      closeRepostMenu()
+    }
   }
 
   function handleWindowKeydown(keyboardEvent: KeyboardEvent): void {
@@ -851,10 +892,10 @@ import { showEmberModal, emberTarget } from '$stores/wallet'
               <!-- Dropdown menu positioned relative to button -->
               <div
                 bind:this={repostMenuElement}
-                class="absolute right-0 bottom-full mb-2 z-50 w-40 rounded-xl border border-dark-border/80 bg-dark shadow-xl"
+                class="absolute right-0 bottom-full mb-2 z-30 w-40 rounded-xl border border-dark-border/80 bg-dark shadow-xl"
                 role="menu"
                 aria-label="Repost options"
-                on:click|stopPropagation
+                tabindex="-1"
                 transition:slide={{ axis: 'y', duration: 200 }}
               >
                 <button
@@ -915,18 +956,6 @@ import { showEmberModal, emberTarget } from '$stores/wallet'
   </div>
 </div>
 
-<!-- Backdrop to block pointer events and prevent cursor detection of underlying elements -->
-{#if repostMenuOpen}
-  <div
-    class="repost-backdrop fixed inset-0 z-40 touch-none"
-    role="presentation"
-    aria-hidden="true"
-    on:click|stopPropagation={handleBackdropClick}
-    on:pointerdown|stopPropagation={handleBackdropClick}
-    on:touchstart|passive|stopPropagation={handleBackdropClick}
-    transition:fade={{ duration: 150 }}
-  />
-{/if}
 
 <style>
   /* Markdown styling for long-form posts */
@@ -1034,19 +1063,10 @@ import { showEmberModal, emberTarget } from '$stores/wallet'
     height: auto;
   }
 
-  /* Backdrop to block all pointer events and cursor detection */
+  /* Backdrop to block clicks behind modal */
   :global(.repost-backdrop) {
     pointer-events: auto;
-    cursor: pointer;
+    cursor: default;
     background: transparent;
-    -webkit-touch-callout: none;
-    -webkit-user-select: none;
-    user-select: none;
-    touch-action: none;
   }
 </style>
-
-
-
-
-

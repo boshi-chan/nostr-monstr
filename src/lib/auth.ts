@@ -6,6 +6,7 @@
 import { currentUser } from '$stores/auth'
 import {
   likedEvents,
+  likedReactionEvents,
   repostedEvents,
   zappedEvents,
   metadataCache,
@@ -444,6 +445,7 @@ export async function logout(): Promise<void> {
   // Clear all feed state stores
   logger.info('Clearing all feed state')
   likedEvents.set(new Set())
+  likedReactionEvents.set(new Map())
   repostedEvents.set(new Set())
   zappedEvents.set(new Map())
   metadataCache.set(new Map())
