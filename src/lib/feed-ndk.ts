@@ -1088,7 +1088,12 @@ function buildReplyTags(replyTo: NostrEvent): string[][] {
 /**
  * Publish a note with validation
  */
-export async function publishNote(content: string, replyTo?: NostrEvent, quote?: NostrEvent): Promise<NostrEvent> {
+export async function publishNote(
+  content: string,
+  replyTo?: NostrEvent,
+  quote?: NostrEvent,
+  mentionedPubkeys?: string[]
+): Promise<NostrEvent> {
   try {
     validatePostContent(content)
 
@@ -1121,6 +1126,16 @@ export async function publishNote(content: string, replyTo?: NostrEvent, quote?:
     for (const tag of tags) {
       if (tag[0] === 'p' && tag[1]) {
         pTagValues.add(tag[1])
+      }
+    }
+
+    // Add mentioned pubkeys as p-tags
+    if (mentionedPubkeys && mentionedPubkeys.length > 0) {
+      for (const pubkey of mentionedPubkeys) {
+        if (pubkey && !pTagValues.has(pubkey)) {
+          pTagValues.add(pubkey)
+          tags.push(['p', pubkey])
+        }
       }
     }
 

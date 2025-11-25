@@ -7,12 +7,25 @@
   import SendIcon from './icons/SendIcon.svelte'
   import { get } from 'svelte/store'
   import QuotedNote from './QuotedNote.svelte'
+  import MentionAutocomplete from './MentionAutocomplete.svelte'
+  import { logger } from '$lib/logger'
+  import { nip19 } from 'nostr-tools'
 
   let content = ''
   let loading = false
   let error = ''
   let charCount = 0
   const MAX_CHARS = 5000
+
+  // Mention autocomplete state
+  let textareaElement: HTMLTextAreaElement
+  let mentionSearchTerm = ''
+  let showMentionAutocomplete = false
+  let mentionAutocompletePosition = { top: 0, left: 0 }
+  let mentionStartIndex = -1
+  let mentionedPubkeys = new Set<string>()
+  let mentionedNames = new Map<string, string>() // displayName -> pubkey
+  let mentionAutocompleteRef: any
 
   $: replyTo = $composeReplyTo
   $: quoteTarget = $composeQuoteOf
@@ -31,10 +44,17 @@
       loading = true
       error = ''
 
-      await publishNote(content, replyTo || undefined, quoteTarget || undefined)
+      await publishNote(
+        content,
+        replyTo || undefined,
+        quoteTarget || undefined,
+        Array.from(mentionedPubkeys)
+      )
 
       // Reset and close
       content = ''
+      mentionedPubkeys.clear()
+      mentionedNames.clear()
       composeReplyTo.set(null)
       composeQuoteOf.set(null)
       showCompose.set(false)
@@ -48,12 +68,106 @@
 
   function handleCancel() {
     content = ''
+    mentionedPubkeys.clear()
+    mentionedNames.clear()
     composeReplyTo.set(null)
     composeQuoteOf.set(null)
     showCompose.set(false)
   }
 
+  function getHighlightedContent(): string {
+    let result = content
+    // Highlight mentioned names
+    for (const [displayName] of mentionedNames) {
+      const mentionText = `@${displayName}`
+      result = result.replace(
+        new RegExp(`@${displayName}\\b`, 'g'),
+        `<span class="mention-highlight">@${displayName}</span>`
+      )
+    }
+    return result
+  }
+
+  function handleTextareaInput(e: Event) {
+    const textarea = e.target as HTMLTextAreaElement
+    const cursorPosition = textarea.selectionStart
+    const textBeforeCursor = content.slice(0, cursorPosition)
+
+    // Check if we're typing a mention
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@')
+
+    if (lastAtIndex !== -1) {
+      // Check if there's a space between @ and cursor
+      const textAfterAt = textBeforeCursor.slice(lastAtIndex + 1)
+      const hasSpace = /\s/.test(textAfterAt)
+
+      if (!hasSpace) {
+        // Show autocomplete
+        mentionStartIndex = lastAtIndex
+        mentionSearchTerm = textAfterAt
+        showMentionAutocomplete = true
+
+        // Calculate position
+        updateAutocompletePosition(textarea, cursorPosition)
+      } else {
+        showMentionAutocomplete = false
+      }
+    } else {
+      showMentionAutocomplete = false
+    }
+  }
+
+  function updateAutocompletePosition(textarea: HTMLTextAreaElement, cursorPosition: number) {
+    // Get textarea position
+    const rect = textarea.getBoundingClientRect()
+
+    // Approximate cursor position (this is a simple approach)
+    const textBeforeCursor = content.slice(0, cursorPosition)
+    const lines = textBeforeCursor.split('\n')
+    const currentLine = lines.length
+    const lineHeight = 24 // approximate line height
+
+    mentionAutocompletePosition = {
+      top: rect.top + currentLine * lineHeight - textarea.scrollTop,
+      left: rect.left + 20
+    }
+  }
+
+  function handleMentionSelect(pubkey: string, displayName: string) {
+    // Encode pubkey as npub
+    const npub = nip19.npubEncode(pubkey)
+
+    // Replace @searchterm with nostr:npub (Nostr standard)
+    const before = content.slice(0, mentionStartIndex)
+    const after = content.slice(mentionStartIndex + 1 + mentionSearchTerm.length)
+
+    // Insert as nostr:npub format but show displayName in badge
+    content = `${before}nostr:${npub}${after}`
+
+    // Store the pubkey and name mapping (for badge display)
+    mentionedPubkeys.add(pubkey)
+    mentionedNames.set(displayName, pubkey)
+
+    // Close autocomplete
+    showMentionAutocomplete = false
+
+    // Focus back on textarea
+    setTimeout(() => {
+      if (textareaElement) {
+        textareaElement.focus()
+        const newCursorPos = mentionStartIndex + npub.length + 6 // "nostr:" + npub
+        textareaElement.setSelectionRange(newCursorPos, newCursorPos)
+      }
+    }, 0)
+  }
+
   function handleKeyDown(e: KeyboardEvent) {
+    // Let autocomplete handle keys if it's visible
+    if (showMentionAutocomplete && mentionAutocompleteRef) {
+      const handled = mentionAutocompleteRef.handleKeyDown(e)
+      if (handled) return
+    }
+
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       handleSubmit()
     }
@@ -61,7 +175,7 @@
 
   function handleOverlayKeyDown(e: KeyboardEvent) {
     if (!get(showCompose)) return
-    if (e.key === 'Escape') {
+    if (e.key === 'Escape' && !showMentionAutocomplete) {
       handleCancel()
     }
   }
@@ -147,14 +261,69 @@
           </div>
         </div>
 
-        <!-- Textarea -->
-        <textarea
-          bind:value={content}
-          on:keydown={handleKeyDown}
-          placeholder="What's happening!?"
-          class="w-full resize-none bg-transparent text-2xl text-text-soft placeholder-text-muted/50 outline-none"
-          rows="6"
-        />
+        <!-- Textarea with mention preview -->
+        <div class="relative">
+          <!-- Preview layer showing @names instead of nostr:npub -->
+          <div
+            class="absolute inset-0 pointer-events-none text-2xl whitespace-pre-wrap break-words text-text-soft/90"
+            style="padding: 0; margin: 0; line-height: 1.5; overflow: hidden;"
+          >
+            {#each content.split(/(nostr:npub1[a-z0-9]+)/g) as part, i}
+              {#if part.startsWith('nostr:npub1')}
+                {@const npub = part.slice(6)}
+                {@const displayName = Array.from(mentionedNames.entries()).find(([_, pk]) => {
+                  try {
+                    return nip19.npubEncode(pk) === npub
+                  } catch {
+                    return false
+                  }
+                })?.[0]}
+                {#if displayName}
+                  <span class="text-primary font-medium bg-primary/10 px-1 rounded">@{displayName}</span>
+                {:else}
+                  <span class="opacity-0">{part}</span>
+                {/if}
+              {:else}
+                <span class="opacity-0">{part}</span>
+              {/if}
+            {/each}
+          </div>
+
+          <!-- Actual textarea (text is partially transparent to show preview below) -->
+          <textarea
+            bind:this={textareaElement}
+            bind:value={content}
+            on:input={handleTextareaInput}
+            on:keydown={handleKeyDown}
+            placeholder="What's happening!?"
+            class="relative w-full resize-none bg-transparent text-2xl placeholder-text-muted/50 outline-none {mentionedNames.size > 0 ? 'text-transparent caret-text-soft' : 'text-text-soft'}"
+            style="line-height: 1.5;"
+            rows="6"
+          />
+        </div>
+
+        <!-- Mentioned users indicator -->
+        {#if mentionedNames.size > 0}
+          <div class="mt-2 flex flex-wrap gap-2">
+            {#each Array.from(mentionedNames.keys()) as displayName}
+              <span class="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
+                <span>@{displayName}</span>
+                <button
+                  type="button"
+                  class="hover:text-primary/80"
+                  on:click={() => {
+                    const pubkey = mentionedNames.get(displayName)
+                    mentionedNames.delete(displayName)
+                    mentionedNames = mentionedNames
+                    if (pubkey) mentionedPubkeys.delete(pubkey)
+                  }}
+                >
+                  ×
+                </button>
+              </span>
+            {/each}
+          </div>
+        {/if}
 
         <!-- Character counter -->
         <div class="mt-2 text-xs text-text-muted">
@@ -195,6 +364,15 @@
       </div>
     </div>
   </div>
+
+  <!-- Mention Autocomplete -->
+  <MentionAutocomplete
+    bind:this={mentionAutocompleteRef}
+    bind:visible={showMentionAutocomplete}
+    bind:searchTerm={mentionSearchTerm}
+    bind:position={mentionAutocompletePosition}
+    onSelect={handleMentionSelect}
+  />
 {/if}
 
 <style>
@@ -204,6 +382,14 @@
 
   textarea::placeholder {
     color: rgba(166, 166, 166, 0.5);
+  }
+
+  :global(.mention-highlight) {
+    color: #8b5cf6;
+    font-weight: 600;
+    background: rgba(139, 92, 246, 0.1);
+    padding: 2px 4px;
+    border-radius: 4px;
   }
 </style>
 

@@ -5,8 +5,9 @@ import Post from '../Post.svelte'
   import Skeleton from '../Skeleton.svelte'
   import type { NostrEvent } from '$types/nostr'
   import { getEventById, fetchEventById } from '$lib/feed-ndk'
-  import { buildCompleteThread, getThreadStats, findEventNode, flattenThread, type ThreadContext } from '$lib/thread'
+  import { subscribeToThread, type StreamingThreadContext } from '$lib/thread'
 import { queueEngagementHydration } from '$lib/engagement'
+  import { onDestroy } from 'svelte'
 
   export let eventId: string
   export let originTab: NavTab
@@ -16,20 +17,26 @@ import { queueEngagementHydration } from '$lib/engagement'
 
 let clickedEvent: NostrEvent | null = initialEvent ?? null
 let loadingMain = !initialEvent
-let loadingReplies = true
+let loadingReplies = false
 let error: string | null = null
 
-let threadContext: ThreadContext | null = null
-let threadStats: ReturnType<typeof getThreadStats> | null = null
 let ancestorChain: NostrEvent[] = []
 let directReplies: NostrEvent[] = []
 let visibleReplies = REPLIES_BATCH_SIZE
 let lastLoadedEventId: string | null = null
 let rootPost: NostrEvent | null = null
+let unsubscribe: (() => void) | null = null
 
 async function bootstrap(targetId: string): Promise<void> {
+  // Clean up previous subscription
+  if (unsubscribe) {
+    unsubscribe()
+    unsubscribe = null
+  }
+
   loadingMain = !clickedEvent
-  loadingReplies = true
+  loadingReplies = false // No longer block on replies
+
   try {
     let event: NostrEvent | null | undefined = clickedEvent
     if (!event) {
@@ -39,25 +46,45 @@ async function bootstrap(targetId: string): Promise<void> {
       }
     }
 
-      if (!event) {
-        error = 'Post is no longer available.'
-        return
+    if (!event) {
+      error = 'Post is no longer available.'
+      return
+    }
+
+    clickedEvent = event
+    loadingMain = false
+
+    // Start streaming thread updates
+    unsubscribe = subscribeToThread(event, (context: StreamingThreadContext) => {
+      // Update immediately as data arrives
+      ancestorChain = context.ancestors
+      directReplies = context.replies.sort((a, b) => a.created_at - b.created_at)
+      rootPost = context.rootPost
+      visibleReplies = Math.min(REPLIES_BATCH_SIZE, directReplies.length)
+
+      // Queue engagement hydration for new events
+      const allIds = [
+        event.id,
+        ...context.ancestors.map(e => e.id),
+        ...context.replies.map(e => e.id)
+      ]
+      if (context.rootPost) {
+        allIds.push(context.rootPost.id)
       }
-
-      clickedEvent = event
-      loadingMain = false
-      queueEngagementHydration([event.id], true)
-
-      threadContext = await buildCompleteThread(event)
-      hydrateThreadSlices(threadContext)
-    } catch (err) {
-      console.error('Failed to load thread view', err)
-      error = 'Unable to load this thread right now.'
-      hydrateThreadSlices(threadContext)
-    } finally {
-      loadingReplies = false
+      queueEngagementHydration(allIds, true)
+    })
+  } catch (err) {
+    console.error('Failed to load thread view', err)
+    error = 'Unable to load this thread right now.'
   }
 }
+
+// Cleanup on component destroy
+onDestroy(() => {
+  if (unsubscribe) {
+    unsubscribe()
+  }
+})
 
 $: if (eventId && eventId !== lastLoadedEventId) {
   const hadLoadedBefore = lastLoadedEventId !== null
@@ -65,8 +92,6 @@ $: if (eventId && eventId !== lastLoadedEventId) {
 
   if (hadLoadedBefore) {
     clickedEvent = null
-    threadContext = null
-    threadStats = null
     ancestorChain = []
     directReplies = []
     visibleReplies = REPLIES_BATCH_SIZE
@@ -87,46 +112,6 @@ $: if (eventId && eventId !== lastLoadedEventId) {
 
   function handleNavigateById(eventId: string) {
     openPostById(eventId, originTab)
-  }
-
-  function hydrateThreadSlices(context: ThreadContext | null): void {
-    if (!context) {
-    ancestorChain = []
-    directReplies = []
-    threadStats = null
-    visibleReplies = REPLIES_BATCH_SIZE
-    rootPost = null
-    return
-  }
-    threadStats = context.threadTree ? getThreadStats(context.threadTree) : null
-    rootPost = context.rootPost
-    ancestorChain = (context.pathToMain ?? []).slice(0, -1)
-    
-    // Get all events in the thread tree
-    const allThreadNodes = flattenThread(context.threadTree)
-    const mainEventId = context.mainEvent.id
-    const ancestorIds = new Set(ancestorChain.map(e => e.id))
-    
-    // Filter to get all replies in the thread (exclude main event and ancestors)
-    // This shows ALL replies in the thread, not just direct replies to the clicked event
-    directReplies = allThreadNodes
-      .map(node => node.event)
-      .filter(event => event.id !== mainEventId && !ancestorIds.has(event.id))
-      .sort((a, b) => a.created_at - b.created_at)
-    
-    visibleReplies = directReplies.length ? Math.min(REPLIES_BATCH_SIZE, directReplies.length) : 0
-
-    // Queue engagement hydration for all thread events
-    // Use immediate mode for bulk loads to show metrics faster
-    const allThreadEventIds = [
-      context.mainEvent.id,
-      ...ancestorChain.map(e => e.id),
-      ...directReplies.map(e => e.id)
-    ]
-    if (rootPost) {
-      allThreadEventIds.push(rootPost.id)
-    }
-    queueEngagementHydration(allThreadEventIds, true)
   }
   
   function handleViewRootPost(): void {
@@ -151,12 +136,9 @@ $: if (eventId && eventId !== lastLoadedEventId) {
     </button>
     <div class="flex flex-col items-center gap-1">
       <h1 class="text-base font-semibold text-white md:text-lg">Thread</h1>
-      {#if threadStats}
+      {#if ancestorChain.length > 0 || directReplies.length > 0}
         <p class="text-xs text-text-muted">
-          {threadStats.totalEvents} post{threadStats.totalEvents === 1 ? '' : 's'}
-          {#if threadStats.branchCount > 0}
-            - {threadStats.branchCount} branch{threadStats.branchCount === 1 ? '' : 'es'}
-          {/if}
+          {ancestorChain.length + 1 + directReplies.length} post{ancestorChain.length + directReplies.length === 0 ? '' : 's'}
         </p>
       {/if}
     </div>
@@ -247,7 +229,7 @@ $: if (eventId && eventId !== lastLoadedEventId) {
           <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-5">
             <Skeleton count={4} height="h-4" />
           </div>
-        {:else if !loadingReplies && threadContext}
+        {:else if !loadingReplies && clickedEvent && directReplies.length === 0}
           <div class="rounded-2xl border border-dark-border/60 bg-dark/40 p-4 text-center text-xs text-text-muted/80">
             No replies yet.
           </div>

@@ -9,6 +9,7 @@ import { following } from '$stores/feed'
 import { get } from 'svelte/store'
 import { NDKEvent } from '@nostr-dev-kit/ndk'
 import { publishToConfiguredRelays } from './relay-publisher'
+import { logger } from './logger'
 
 /**
  * Get current contacts (follows) from NIP-03 (kind 3)

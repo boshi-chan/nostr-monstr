@@ -9,6 +9,7 @@ import { getNDK } from './ndk'
 import { getEventById, fetchEventById } from './feed-ndk'
 import { normalizeEvent } from '$lib/event-validation'
 import { logger } from './logger'
+import { writable, get } from 'svelte/store'
 
 export interface ThreadNode {
   event: NostrEvent
@@ -31,12 +32,156 @@ export interface ThreadContext {
   totalPostsInThread: number
 }
 
+export interface StreamingThreadContext {
+  mainEvent: NostrEvent
+  ancestors: NostrEvent[]
+  replies: NostrEvent[]
+  rootPost: NostrEvent | null
+  isComplete: boolean
+}
+
 const MAX_ANCESTORS = 100
 const MAX_REPLIES = 500
 
 // Cache for reply fetches to avoid redundant network requests
 const repliesCache = new Map<string, { replies: NostrEvent[]; fetchedAt: number }>()
 const REPLIES_CACHE_TTL = 30000 // 30 seconds
+
+/**
+ * Subscribe to thread updates with instant streaming (like feeds)
+ * Returns immediately with initial event, then streams ancestors and replies
+ */
+export function subscribeToThread(
+  event: NostrEvent,
+  onUpdate: (context: StreamingThreadContext) => void
+): () => void {
+  const ndk = getNDK()
+  const subscriptions: Array<{ stop: () => void }> = []
+
+  const seenEvents = new Set<string>([event.id])
+  const ancestors: NostrEvent[] = []
+  const replies: NostrEvent[] = []
+  let rootPost: NostrEvent | null = null
+  let isComplete = false
+
+  // Emit initial state immediately
+  onUpdate({
+    mainEvent: event,
+    ancestors: [],
+    replies: [],
+    rootPost: null,
+    isComplete: false
+  })
+
+  // Helper to emit updates
+  const emitUpdate = () => {
+    onUpdate({
+      mainEvent: event,
+      ancestors: [...ancestors],
+      replies: [...replies],
+      rootPost,
+      isComplete
+    })
+  }
+
+  // 1. Start fetching ancestors (going up the chain)
+  void (async () => {
+    try {
+      let current: NostrEvent | null = event
+      let count = 0
+
+      while (current && count < MAX_ANCESTORS) {
+        const parsed = parseContent(current)
+        const parentId = parsed.replyToId ?? parsed.rootId ?? null
+
+        if (!parentId || seenEvents.has(parentId)) {
+          break
+        }
+
+        seenEvents.add(parentId)
+
+        let parent: NostrEvent | null = getEventById(parentId) ?? null
+        if (!parent) {
+          try {
+            parent = await fetchEventById(parentId)
+          } catch (err) {
+            logger.warn('Failed to fetch ancestor:', err)
+            break
+          }
+        }
+
+        if (!parent) break
+
+        // Add ancestor and emit update immediately
+        ancestors.unshift(parent)
+        if (!rootPost) {
+          rootPost = parent
+        }
+        emitUpdate()
+
+        current = parent
+        count++
+      }
+
+      // Final ancestor is the root
+      if (ancestors.length > 0) {
+        rootPost = ancestors[0]
+        emitUpdate()
+      } else {
+        rootPost = event
+      }
+    } catch (err) {
+      logger.error('Failed to fetch ancestors:', err)
+    }
+  })()
+
+  // 2. Subscribe to replies (streaming, like feed subscriptions)
+  // Start with just the main event, will update as ancestors come in
+  const startReplySubscription = () => {
+    const idsToWatch = [event.id]
+
+    // Add ancestors as they arrive
+    for (const ancestor of ancestors) {
+      idsToWatch.push(ancestor.id)
+    }
+
+    if (rootPost) {
+      idsToWatch.push(rootPost.id)
+    }
+
+    const replySub = ndk.subscribe(
+      {
+        kinds: [1], // Text notes only for now
+        '#e': idsToWatch,
+      },
+      { closeOnEose: false } // Keep subscription open!
+    )
+
+    replySub.on('event', (ndkEvent: any) => {
+      try {
+        const replyEvent = normalizeEvent(ndkEvent.rawEvent())
+
+        if (replyEvent && !seenEvents.has(replyEvent.id) && replyEvent.id !== event.id) {
+          seenEvents.add(replyEvent.id)
+          replies.push(replyEvent)
+          emitUpdate()
+        }
+      } catch (err) {
+        logger.warn('Failed to process reply event:', err)
+      }
+    })
+
+    subscriptions.push({ stop: () => replySub.stop() })
+  }
+
+  // Start reply subscription immediately
+  startReplySubscription()
+
+  // Return cleanup function
+  return () => {
+    subscriptions.forEach(sub => sub.stop())
+  }
+}
 
 /**
  * Find the root post in a thread by traversing up the reply chain

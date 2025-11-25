@@ -1,10 +1,13 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte'
   import { showSearch, searchQuery, searchResults, isSearching, searchError, searchFilter, filteredSearchResults } from '$stores/search'
   import { search } from '$lib/search'
   import { openPost, openProfile } from '$stores/router'
   import { get } from 'svelte/store'
+  import { logger } from '$lib/logger'
 
   let searchInput: HTMLInputElement
+  let searchAbortController: AbortController | null = null
 
   async function handleSearch(query: string) {
     if (!query.trim()) {
@@ -12,17 +15,37 @@
       return
     }
 
+    // Cancel previous search
+    if (searchAbortController) {
+      searchAbortController.abort()
+    }
+
+    // Create new abort controller for this search
+    searchAbortController = new AbortController()
+    const currentSearch = searchAbortController
+
     try {
       isSearching.set(true)
       searchError.set(null)
 
-      const results = await search(query)
-      searchResults.set(results)
+      const results = await search(query, currentSearch)
+
+      // Only update results if this search wasn't cancelled
+      if (!currentSearch.signal.aborted) {
+        searchResults.set(results)
+      }
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        // Search was cancelled, this is expected
+        return
+      }
       searchError.set(String(err))
       logger.error('Search failed:', err)
     } finally {
-      isSearching.set(false)
+      // Only clear loading if this is still the current search
+      if (currentSearch === searchAbortController) {
+        isSearching.set(false)
+      }
     }
   }
 
@@ -48,10 +71,29 @@
   }
 
   function closeSearch() {
+    // Cancel any in-flight search
+    if (searchAbortController) {
+      searchAbortController.abort()
+    }
+    // Clear timeout
+    if (searchTimeout) {
+      clearTimeout(searchTimeout)
+    }
+
     showSearch.set(false)
     searchQuery.set('')
     searchResults.set([])
   }
+
+  // Cleanup on component destroy
+  onDestroy(() => {
+    if (searchAbortController) {
+      searchAbortController.abort()
+    }
+    if (searchTimeout) {
+      clearTimeout(searchTimeout)
+    }
+  })
 
   function handleEscape(e: KeyboardEvent) {
     if (e.key === 'Escape') {

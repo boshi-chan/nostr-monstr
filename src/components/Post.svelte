@@ -38,6 +38,7 @@
   import EmberIcon from './icons/EmberIcon.svelte'
 import QuotedNote from './QuotedNote.svelte'
 import FollowButton from './FollowButton.svelte'
+import MentionRenderer from './MentionRenderer.svelte'
 import { get as getStore } from 'svelte/store'
 import { fade, slide } from 'svelte/transition'
 import MoreVerticalIcon from './icons/MoreVerticalIcon.svelte'
@@ -817,7 +818,11 @@ import { logger } from '$lib/logger'
             suppressEventIds={suppressedQuoteIds}
           />
         {:else}
-          {parsed.text}
+          <MentionRenderer
+            text={parsed.text}
+            event={actionableEvent}
+            onProfileClick={onProfileSelect}
+          />
         {/if}
       </div>
     {/if}

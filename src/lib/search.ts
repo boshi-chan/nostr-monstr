@@ -12,11 +12,16 @@ import type { SearchResult } from '$stores/search'
 import type { NDKSubscriptionOptions } from '@nostr-dev-kit/ndk'
 import { nip19 } from 'nostr-tools'
 import { normalizeEvent } from '$lib/event-validation'
+import { logger } from './logger'
 
 /**
  * Search for posts by content, hashtags, or note ID
  */
-export async function searchPosts(query: string, limit: number = 50): Promise<NostrEvent[]> {
+export async function searchPosts(
+  query: string,
+  limit: number = 50,
+  abortController?: AbortController
+): Promise<NostrEvent[]> {
   if (!query.trim()) {
     return []
   }
@@ -26,6 +31,11 @@ export async function searchPosts(query: string, limit: number = 50): Promise<No
     const results: NostrEvent[] = []
     const seen = new Set<string>()
     const queryLower = query.toLowerCase().trim()
+
+    // Check if search was cancelled
+    if (abortController?.signal.aborted) {
+      return []
+    }
 
     // 1. Check if it's a note ID (note1...)
     const decoded = decodeNostrEntity(query)
@@ -45,7 +55,16 @@ export async function searchPosts(query: string, limit: number = 50): Promise<No
       )
 
       await new Promise<void>(resolve => {
+        // Abort listener
+        if (abortController) {
+          abortController.signal.addEventListener('abort', () => {
+            sub.stop()
+            resolve()
+          })
+        }
+
         sub.on('event', (event: any) => {
+          if (abortController?.signal.aborted) return
           const raw = normalizeEvent(event as NostrEvent)
           if (!raw) return
           results.push(raw)
@@ -81,7 +100,16 @@ export async function searchPosts(query: string, limit: number = 50): Promise<No
       )
 
       await new Promise<void>(resolve => {
+        // Abort listener
+        if (abortController) {
+          abortController.signal.addEventListener('abort', () => {
+            sub.stop()
+            resolve()
+          })
+        }
+
         sub.on('event', (event: any) => {
+          if (abortController?.signal.aborted) return
           const raw = normalizeEvent(event as NostrEvent)
           if (!raw) return
           results.push(raw)
@@ -121,7 +149,16 @@ export async function searchPosts(query: string, limit: number = 50): Promise<No
       )
 
       await new Promise<void>(resolve => {
+        // Abort listener
+        if (abortController) {
+          abortController.signal.addEventListener('abort', () => {
+            sub.stop()
+            resolve()
+          })
+        }
+
         sub.on('event', (event: any) => {
+          if (abortController?.signal.aborted) return
           const raw = normalizeEvent(event as NostrEvent)
           if (!raw) return
           if (!seen.has(raw.id)) {
@@ -157,7 +194,16 @@ export async function searchPosts(query: string, limit: number = 50): Promise<No
     )
 
     await new Promise<void>(resolve => {
+      // Abort listener
+      if (abortController) {
+        abortController.signal.addEventListener('abort', () => {
+          subscription.stop()
+          resolve()
+        })
+      }
+
       subscription.on('event', (event: any) => {
+        if (abortController?.signal.aborted) return
         const raw = normalizeEvent(event as NostrEvent)
         if (!raw) return
         if (!seen.has(raw.id)) {
@@ -177,6 +223,11 @@ export async function searchPosts(query: string, limit: number = 50): Promise<No
         resolve()
       }, 3000)
     })
+
+    // Check if cancelled before filtering
+    if (abortController?.signal.aborted) {
+      return []
+    }
 
     // Filter by query content (client-side filtering for better accuracy)
     const filtered = results.filter(event => {
@@ -236,7 +287,8 @@ function decodeNostrEntity(query: string): { type: 'pubkey' | 'note'; hex: strin
  */
 export async function searchUsers(
   query: string,
-  limit: number = 20
+  limit: number = 20,
+  abortController?: AbortController
 ): Promise<Array<{ pubkey: string; name?: string; picture?: string; about?: string; nip05?: string }>> {
   if (!query.trim()) {
     return []
@@ -247,6 +299,11 @@ export async function searchUsers(
     const results: Array<{ pubkey: string; name?: string; picture?: string; about?: string; nip05?: string }> = []
     const seen = new Set<string>()
     const queryLower = query.toLowerCase().trim()
+
+    // Check if search was cancelled
+    if (abortController?.signal.aborted) {
+      return []
+    }
 
     // 1. Check if it's an npub or nprofile
     const decoded = decodeNostrEntity(query)
@@ -323,7 +380,16 @@ export async function searchUsers(
     )
 
     await new Promise<void>(resolve => {
+      // Abort listener
+      if (abortController) {
+        abortController.signal.addEventListener('abort', () => {
+          subscription.stop()
+          resolve()
+        })
+      }
+
       subscription.on('event', (event: any) => {
+        if (abortController?.signal.aborted) return
         const raw = normalizeEvent(event as NostrEvent)
         if (!raw) return
         if (!seen.has(raw.pubkey)) {
@@ -366,6 +432,11 @@ export async function searchUsers(
       }, 3000)
     })
 
+    // Check if cancelled before sorting
+    if (abortController?.signal.aborted) {
+      return []
+    }
+
     // Sort: prioritize name matches, then NIP-05 matches
     results.sort((a, b) => {
       const aName = a.name?.toLowerCase() || ''
@@ -398,13 +469,16 @@ export async function searchUsers(
 /**
  * Combined search for posts and users
  */
-export async function search(query: string): Promise<SearchResult[]> {
+export async function search(query: string, abortController?: AbortController): Promise<SearchResult[]> {
   if (!query.trim()) {
     return []
   }
 
   try {
-    const [posts, users] = await Promise.all([searchPosts(query, 30), searchUsers(query, 15)])
+    const [posts, users] = await Promise.all([
+      searchPosts(query, 30, abortController),
+      searchUsers(query, 15, abortController)
+    ])
 
     const results: SearchResult[] = []
 

@@ -168,6 +168,26 @@ export function parseContent(event: NostrEvent): ParsedContent {
     })
   }
 
+  // Find simple @name mentions (matched with p-tags from event)
+  // We'll match @word and try to link it to pubkeys from p-tags
+  const simpleMentionRegex = /@([a-zA-Z0-9_]+)/g
+  const pTags = event.tags?.filter(t => t[0] === 'p' && t[1]) || []
+
+  while ((match = simpleMentionRegex.exec(content)) !== null) {
+    const mentionName = match[1]
+    // Check if this matches an npub format (already handled above)
+    if (mentionName.startsWith('npub1') || mentionName.startsWith('nprofile1')) {
+      continue
+    }
+    // Add as a generic mention - will be linked if pubkey found in p-tags
+    // We'll store mentions with names and let the display component handle linking
+    mentions.push({
+      pubkey: '', // Will be resolved from p-tags in display
+      name: mentionName,
+      index: match.index,
+    })
+  }
+
   // Find nostr: URIs (NIP-21) and bare NIP-19 identifiers
   // Matches both "nostr:nevent1..." and bare "nevent1..." formats
   const nostrURIRegex = /(?:nostr:)?(note1|nevent1|npub1|nprofile1|naddr1)[a-z0-9]+/gi
