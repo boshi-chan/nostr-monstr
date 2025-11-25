@@ -6,10 +6,10 @@
     android:viewportHeight="108">
 
     <group
-        android:scaleX="0.45"
-        android:scaleY="0.45"
-        android:translateX="29.7"
-        android:translateY="29.7">
+        android:scaleX="0.65"
+        android:scaleY="0.65"
+        android:translateX="18.9"
+        android:translateY="18.9">
 
         <!-- Monster body (centered at 54,54 in 108x108 space) -->
         <path
