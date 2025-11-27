@@ -2,7 +2,7 @@
   import { currentUser } from '$stores/auth'
   import { walletState } from '$stores/wallet'
   import { metadataCache } from '$stores/feed'
-  import { getAvatarUrl, getNip05Display, fetchUserMetadata } from '$lib/metadata'
+  import { getAvatarUrl, getNip05Display, fetchUserMetadata, getDisplayName } from '$lib/metadata'
   import {
     setActiveNode,
     initWallet,
@@ -24,6 +24,8 @@
   import ServerIcon from '../icons/ServerIcon.svelte'
   import EmberIcon from '../icons/EmberIcon.svelte'
   import ZapIcon from '../icons/ZapIcon.svelte'
+  import VolumeXIcon from 'lucide-svelte/icons/volume-x'
+  import { mutedPubkeys, mutedWords, mutedHashtags, mutedEvents, unmuteUser, unmuteWord } from '$lib/mute'
   import { CUSTOM_NODE_ID, DEFAULT_NODES, type MoneroNode } from '$lib/wallet/nodes'
 import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC, ensureNwcUnlocked } from '$stores/nwc'
   import { getNWCBalance, getNWCInfo } from '$lib/nwc'
@@ -34,7 +36,7 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
   import ArrowDownIcon from 'lucide-svelte/icons/arrow-down'
   import ArrowUpIcon from 'lucide-svelte/icons/arrow-up'
 
-  type SettingsTab = 'profile' | 'relays' | 'wallet' | 'lightning'
+  type SettingsTab = 'profile' | 'relays' | 'wallet' | 'lightning' | 'mute'
   type WalletPanel = 'overview' | 'deposit' | 'withdraw' | 'history'
 
   let activeTab: SettingsTab = 'profile'
@@ -143,6 +145,15 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
   } else {
     depositQr = null
     lastQrAddress = null
+  }
+
+  // Fetch metadata for all muted users
+  $: if (activeTab === 'mute' && $mutedPubkeys.size > 0) {
+    for (const pubkey of $mutedPubkeys) {
+      if (!$metadataCache.has(pubkey)) {
+        void fetchUserMetadata(pubkey)
+      }
+    }
   }
 
   $: if (!customFormTouched) {
@@ -901,6 +912,7 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
     { id: 'relays', label: 'Relays', icon: ServerIcon },
     { id: 'wallet', label: 'Embers', icon: EmberIcon },
     { id: 'lightning', label: 'Lightning', icon: ZapIcon },
+    { id: 'mute', label: 'Muted', icon: VolumeXIcon },
   ]
 </script>
 
@@ -2086,6 +2098,144 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
             {/if}
           </div>
         {/if}
+      </div>
+    {:else if activeTab === 'mute'}
+      <div class="mx-auto max-w-2xl space-y-6">
+        <div class="space-y-2">
+          <h2 class="text-2xl font-bold text-text-soft">Muted Content</h2>
+          <p class="text-sm text-text-muted">
+            Manage users, words, hashtags, and threads you've muted. Muted content won't appear in your feed.
+          </p>
+        </div>
+
+        <div class="space-y-4">
+          <!-- Muted Users Section -->
+          <div class="rounded-xl border border-dark-border/60 bg-dark-light/40 p-6">
+            <h3 class="text-lg font-semibold text-text-soft mb-4">Muted Users ({$mutedPubkeys.size})</h3>
+            {#if $mutedPubkeys.size === 0}
+              <p class="text-sm text-text-muted">No muted users</p>
+            {:else}
+              <div class="space-y-2">
+                {#each Array.from($mutedPubkeys) as pubkey (pubkey)}
+                  {@const metadata = $metadataCache.get(pubkey)}
+                  {@const displayName = getDisplayName(pubkey, metadata)}
+                  {@const avatarUrl = getAvatarUrl(metadata)}
+                  {@const displayLabel = displayName || pubkey.slice(0, 8)}
+                  <div class="flex items-center gap-3 rounded-lg bg-dark/40 p-3">
+                    <!-- Avatar -->
+                    <div class="flex-shrink-0">
+                      {#if avatarUrl}
+                        <img src={avatarUrl} alt={displayLabel} class="h-10 w-10 rounded-full object-cover" />
+                      {:else}
+                        <div class="flex h-10 w-10 items-center justify-center rounded-full bg-primary/20 text-xs font-bold text-primary">
+                          {displayLabel.slice(0, 2).toUpperCase()}
+                        </div>
+                      {/if}
+                    </div>
+                    <!-- Name -->
+                    <div class="flex-1 min-w-0">
+                      <p class="font-semibold text-text-soft truncate">{displayLabel}</p>
+                      <p class="text-xs text-text-muted font-mono truncate">{pubkey.slice(0, 16)}...{pubkey.slice(-8)}</p>
+                    </div>
+                    <!-- Unmute button -->
+                    <button
+                      type="button"
+                      class="flex-shrink-0 rounded-lg bg-primary px-3 py-1 text-xs font-semibold text-dark hover:bg-primary/90 transition-colors"
+                      on:click={() => unmuteUser(pubkey)}
+                    >
+                      Unmute
+                    </button>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+
+          <!-- Muted Words Section -->
+          <div class="rounded-xl border border-dark-border/60 bg-dark-light/40 p-6">
+            <h3 class="text-lg font-semibold text-text-soft mb-4">Muted Words & Phrases ({$mutedWords.size})</h3>
+            {#if $mutedWords.size === 0}
+              <p class="text-sm text-text-muted">No muted words</p>
+            {:else}
+              <div class="space-y-2">
+                {#each Array.from($mutedWords) as word (word)}
+                  <div class="flex items-center justify-between rounded-lg bg-dark/40 p-3">
+                    <span class="text-sm text-text-soft">"{word}"</span>
+                    <button
+                      type="button"
+                      class="rounded-lg bg-primary px-3 py-1 text-xs font-semibold text-dark hover:bg-primary/90 transition-colors"
+                      on:click={() => unmuteWord(word)}
+                    >
+                      Unmute
+                    </button>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+
+          <!-- Muted Hashtags Section -->
+          <div class="rounded-xl border border-dark-border/60 bg-dark-light/40 p-6">
+            <h3 class="text-lg font-semibold text-text-soft mb-4">Muted Hashtags ({$mutedHashtags.size})</h3>
+            {#if $mutedHashtags.size === 0}
+              <p class="text-sm text-text-muted">No muted hashtags</p>
+            {:else}
+              <div class="space-y-2">
+                {#each Array.from($mutedHashtags) as hashtag (hashtag)}
+                  <div class="flex items-center justify-between rounded-lg bg-dark/40 p-3">
+                    <span class="text-sm text-text-soft">#{hashtag}</span>
+                    <button
+                      type="button"
+                      class="rounded-lg bg-primary px-3 py-1 text-xs font-semibold text-dark hover:bg-primary/90 transition-colors"
+                      on:click={async () => {
+                        try {
+                          const { unmuteWord } = await import('$lib/mute')
+                          await unmuteWord(hashtag)
+                        } catch (err) {
+                          console.error('Failed to unmute hashtag:', err)
+                        }
+                      }}
+                    >
+                      Unmute
+                    </button>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+
+          <!-- Muted Threads Section -->
+          <div class="rounded-xl border border-dark-border/60 bg-dark-light/40 p-6">
+            <h3 class="text-lg font-semibold text-text-soft mb-4">Muted Threads ({$mutedEvents.size})</h3>
+            {#if $mutedEvents.size === 0}
+              <p class="text-sm text-text-muted">No muted threads</p>
+            {:else}
+              <div class="space-y-2">
+                {#each Array.from($mutedEvents) as eventId (eventId)}
+                  <div class="flex items-center justify-between rounded-lg bg-dark/40 p-3">
+                    <span class="font-mono text-sm text-text-soft">{eventId.slice(0, 16)}...{eventId.slice(-8)}</span>
+                    <button
+                      type="button"
+                      class="rounded-lg bg-primary px-3 py-1 text-xs font-semibold text-dark hover:bg-primary/90 transition-colors"
+                      on:click={async () => {
+                        try {
+                          const { mutedEvents } = await import('$lib/mute')
+                          const current = new Set(Array.from(mutedEvents.subscribe(s => s)()))
+                          current.delete(eventId)
+                          mutedEvents.set(current)
+                        } catch (err) {
+                          console.error('Failed to unmute thread:', err)
+                        }
+                      }}
+                    >
+                      Unmute
+                    </button>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        </div>
       </div>
     {/if}
   </div>

@@ -372,6 +372,14 @@ export async function loadUserRelaysAndConnect(): Promise<void> {
     }
 
     logger.info('User relays loaded and connected')
+
+    // Load user's mute list after relays are connected
+    try {
+      const { loadMuteList } = await import('./mute')
+      await loadMuteList()
+    } catch (err) {
+      logger.warn('Failed to load mute list:', err)
+    }
   } catch (err) {
     logger.error('Failed to load user relays:', err)
   } finally {

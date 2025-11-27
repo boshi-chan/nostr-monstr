@@ -2,6 +2,7 @@
   import { following } from '$stores/feed'
   import { followUser, unfollowUser } from '$lib/follows'
   import { currentUser } from '$stores/auth'
+  import { logger } from '$lib/logger'
 
   export let pubkey: string
   export let size: 'sm' | 'md' = 'md'

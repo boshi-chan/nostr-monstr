@@ -190,6 +190,63 @@ export async function unfollowUser(pubkey: string): Promise<void> {
 }
 
 /**
+ * Follow multiple users at once (e.g., from a follow pack)
+ */
+export async function followMultipleUsers(pubkeys: string[]): Promise<void> {
+  try {
+    if (!pubkeys || pubkeys.length === 0) {
+      throw new Error('No pubkeys provided')
+    }
+
+    // Validate all pubkeys
+    const validPubkeys = pubkeys.filter(pk => pk && pk.length === 64)
+    if (validPubkeys.length === 0) {
+      throw new Error('No valid pubkeys provided')
+    }
+
+    logger.info(`Following ${validPubkeys.length} users...`)
+
+    // CRITICAL: Ensure following list is loaded from relays if empty
+    let currentFollowing = get(following)
+
+    if (currentFollowing.size === 0) {
+      logger.info('Following list empty, fetching from relays...')
+      currentFollowing = await getFollowingList()
+      following.set(currentFollowing)
+      logger.info(`✓ Loaded ${currentFollowing.size} existing follows from relays`)
+    }
+
+    // Create new set with all new follows
+    const newFollowing = new Set<string>(currentFollowing)
+    let addedCount = 0
+
+    for (const pubkey of validPubkeys) {
+      if (!newFollowing.has(pubkey)) {
+        newFollowing.add(pubkey)
+        addedCount++
+      }
+    }
+
+    if (addedCount === 0) {
+      logger.info('Already following all users in this pack')
+      return
+    }
+
+    // Publish the updated list
+    await publishContactsList(newFollowing)
+
+    // Update store
+    following.set(newFollowing)
+
+    logger.info(`✓ Followed ${addedCount} new users (total: ${newFollowing.size})`)
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err)
+    logger.error('Failed to follow multiple users:', errorMsg)
+    throw new Error(`Failed to follow users: ${errorMsg}`)
+  }
+}
+
+/**
  * Check if following a user
  */
 export function isFollowing(pubkey: string): boolean {

@@ -10,6 +10,7 @@
   } from '$stores/feed'
   import { feedSource, type FeedSource } from '$stores/feedSource'
   import { loadOlderPosts } from '$lib/feed-ndk'
+  import { shouldHideEvent, mutedPubkeys, mutedWords, mutedHashtags, mutedEvents } from '$lib/mute'
 
   import type { NostrEvent } from '$types/nostr'
   import Post from '../Post.svelte'
@@ -19,11 +20,13 @@
   import UsersIcon from '../icons/UsersIcon.svelte'
   import CircleIcon from '../icons/CircleIcon.svelte'
   import GlobeIcon from '../icons/GlobeIcon.svelte'
+  import TrendingUpIcon from '../icons/TrendingUpIcon.svelte'
   import { openPost, openProfile } from '$stores/router'
 
   const feedTabs: { id: FeedSource; label: string; icon: typeof UsersIcon }[] = [
     { id: 'following', label: 'Following', icon: UsersIcon },
     { id: 'circles', label: 'Circles', icon: CircleIcon },
+    { id: 'trending', label: 'Trending', icon: TrendingUpIcon },
     { id: 'global', label: 'Global', icon: GlobeIcon },
   ]
 
@@ -36,6 +39,21 @@
   let savedFirstVisiblePostId: string | null = null
 
   $: activeFeed = $feedSource
+
+  // Filter out muted content (reactive to mute store changes)
+  let visibleEvents: NostrEvent[] = []
+  let mutedCount = 0
+  $: {
+    // React to changes in mute stores
+    $mutedPubkeys
+    $mutedWords
+    $mutedHashtags
+    $mutedEvents
+
+    const filtered = $feedEvents.filter(event => !shouldHideEvent(event))
+    visibleEvents = filtered
+    mutedCount = $feedEvents.length - filtered.length
+  }
 
   // Track if we've loaded at least once to avoid showing "no posts" during initial load
   $: if ($feedEvents.length > 0) {
@@ -156,7 +174,12 @@
             aria-label={tab.label}
           >
             <svelte:component this={tab.icon} size={20} strokeWidth={2} />
-            <span class="hidden md:inline">{tab.label}</span>
+            <span class="hidden md:inline flex flex-col items-start">
+              <span>{tab.label}</span>
+              {#if tab.id === 'trending'}
+                <span class="text-[10px] font-normal opacity-70">Last 24h</span>
+              {/if}
+            </span>
           </button>
         {/each}
       </div>
@@ -204,8 +227,15 @@
           </p>
         </div>
       {:else}
+        <!-- Muted content indicator -->
+        {#if mutedCount > 0}
+          <div class="rounded-lg border border-dark-border/60 bg-dark-light/40 px-4 py-2 text-center text-sm text-text-muted">
+            {mutedCount} {mutedCount === 1 ? 'post' : 'posts'} hidden from muted users
+          </div>
+        {/if}
+
         <div bind:this={feedContainer} class="flex flex-col gap-3">
-          {#each $feedEvents as event (event.id)}
+          {#each visibleEvents as event (event.id)}
             {#if event.kind === 30023}
               <div data-event-id={event.id}>
                 <LongReadPreview

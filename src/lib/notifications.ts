@@ -211,15 +211,10 @@ export async function startNotificationListener(pubkey: string): Promise<void> {
   // Update the last check time now that we're starting the subscription
   updateLastCheckTime()
 
-  if (userEventList.length > 0) {
-    filter['#e'] = userEventList.slice(0, 500)
-  }
-
   logger.info('[NOTIF] Subscribing with filter:', {
     kinds: filter.kinds,
     pTag: pubkey.substring(0, 8),
     sinceDate: new Date(sinceTimestamp * 1000).toISOString(),
-    eTagCount: userEventList.length,
     isFirstRun: !lastCheck
   })
 
@@ -601,12 +596,14 @@ async function handleEmberNotification(event: NostrEvent, userPubkey: string): P
 
   const targetEventId = findFirstTagValue(event, 'e')
   const amountTag = event.tags.find(tag => tag[0] === EMBER_TAG)?.[1]
-  if (!amountTag) return false
-
   const payloadTag = event.tags.find(tag => tag[0] === 'payload')?.[1]
   const payload = decodeEmberPayload(payloadTag)
 
-  const amount = payload ? atomicToXmr(payload.amountAtomic) : atomicToXmr(amountTag)
+  // Some clients only include the amount in the payload (e.g., external wallet receipts)
+  if (!amountTag && !payload) return false
+
+  const amountAtomic = payload?.amountAtomic ?? amountTag
+  const amount = amountAtomic ? atomicToXmr(amountAtomic) : 0
   if (!amount) return false
 
   const targetEvent = targetEventId ? await getTargetEvent(targetEventId) : null

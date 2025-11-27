@@ -122,6 +122,7 @@
   }
 
   async function handleExternalSubmit(): Promise<void> {
+    const isLoggedIn = Boolean($currentUser)
     if (!target?.address) {
       error = 'Recipient has not published a Monero address.'
       return
@@ -149,8 +150,9 @@
     success = null
 
     try {
+      let proofPublished = false
       // If user is authenticated, publish receipt event
-      if ($currentUser) {
+      if (isLoggedIn) {
         const ndk = getNDK()
         if (ndk && ndk.signer) {
           const atomicAmount = (BigInt(Math.floor(amount * 1_000_000_000_000))).toString()
@@ -167,23 +169,28 @@
           const event = new NDKEvent(ndk)
           event.kind = EMBER_EVENT_KIND
           event.content = encodeEmberPayload(payload)
-          event.tags = [
-            ['emberxmr'],
-            ...(target.recipientPubkey ? [['p', target.recipientPubkey]] : []),
-            ...(target.noteId ? [['e', target.noteId]] : []),
-          ]
-          event.created_at = payload.createdAt
+            event.tags = [
+              ['emberxmr'],
+              ...(target.recipientPubkey ? [['p', target.recipientPubkey]] : []),
+              ...(target.noteId ? [['e', target.noteId]] : []),
+            ]
+            event.created_at = payload.createdAt
 
-          await event.sign()
-          await event.publish()
+            await event.sign()
+            await event.publish()
+            proofPublished = true
 
-          if (target.noteId) {
-            incrementEmberTotal(target.noteId, amount)
+            if (target.noteId) {
+              incrementEmberTotal(target.noteId, amount)
+            }
           }
-        }
       }
 
-      success = 'Thank you! Your Ember has been recorded.'
+      success = proofPublished
+        ? 'Thank you! Your Ember has been recorded.'
+        : isLoggedIn
+          ? 'We could not publish proof, so the recipient was not notified.'
+          : 'Cannot publish proof while logged out, so no notification was sent.'
       setTimeout(() => {
         closeModal()
       }, 2000)
@@ -449,17 +456,21 @@
                 Transaction Hash <span class="text-text-muted/60 normal-case tracking-normal">(optional)</span>
               </label>
               <input
-                id="tx-hash"
-                type="text"
-                class="mt-2 w-full rounded-2xl border border-dark-border/60 bg-dark/70 px-3 py-2 text-sm text-text-soft font-mono focus:border-orange-400/60 focus:outline-none"
-                bind:value={txHashInput}
-                placeholder="Paste TX hash to record your tip on Nostr"
-                maxlength="64"
-              />
-              <p class="mt-1 text-xs text-text-muted/60">
-                You can close without submitting proof. Your payment is complete once sent from your wallet.
-              </p>
-            </div>
+              id="tx-hash"
+              type="text"
+              class="mt-2 w-full rounded-2xl border border-dark-border/60 bg-dark/70 px-3 py-2 text-sm text-text-soft font-mono focus:border-orange-400/60 focus:outline-none"
+              bind:value={txHashInput}
+              placeholder="Paste TX hash to record your tip on Nostr"
+              maxlength="64"
+            />
+            <p class="mt-1 text-xs text-text-muted/60">
+              You can close without submitting proof. Your payment is complete once sent from your wallet.
+              {#if !$currentUser}
+                <br />
+                You need to log in for this hash to post a proof or trigger a notification.
+              {/if}
+            </p>
+          </div>
 
             {#if error}
               <p class="rounded-2xl border border-rose-500/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">{error}</p>

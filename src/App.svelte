@@ -17,6 +17,7 @@
     subscribeToGlobalFeed,
     subscribeToFollowingFeed,
     subscribeToCirclesFeed,
+    subscribeToTrendingFeed,
     subscribeToLongReadsFeed,
     subscribeToLongReadsFollowingFeed,
     subscribeToLongReadsCirclesFeed,
@@ -152,6 +153,8 @@
 
         if (targetFeed === 'global') {
           await subscribeToGlobalFeed()
+        } else if (targetFeed === 'trending') {
+          await subscribeToTrendingFeed()
         } else if (authedNow && authedPubkey) {
           feedError.set(null)
           if (targetFeed === 'following') {
@@ -279,9 +282,14 @@
         return
       }
 
+      if (targetFeed === 'trending') {
+        await subscribeToTrendingFeed()
+        return
+      }
+
       if (!authed || !pubkey) {
         // If unauthenticated, fall back to global instead of erroring on a gated feed
-        if (targetFeed !== 'global') {
+        if (targetFeed !== 'global' && targetFeed !== 'trending') {
           feedSource.set('global')
           await subscribeToGlobalFeed()
           return

@@ -248,3 +248,4 @@ $: if (eventId && eventId !== lastLoadedEventId) {
     scrollbar-width: thin;
   }
 </style>
+

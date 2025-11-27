@@ -2,7 +2,6 @@
   import packageInfo from '../../package.json'
   import { logger } from '$lib/logger'
   import { walletState } from '$stores/wallet'
-  import { showSearch } from '$stores/search'
   import { lockWallet, unlockWallet } from '$lib/wallet/lazy'
   import { showCanaryModal, showDonateModal } from '$stores/modals'
   import { navigateToPage } from '$stores/router'
@@ -130,7 +129,7 @@
       <button
         type="button"
         class="inline-flex w-full items-center justify-center gap-1 rounded-full border border-white/10 bg-dark/60 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-text-soft transition hover:border-emerald-400/60 hover:text-white"
-        on:click={() => showSearch.set(true)}
+        on:click={() => navigateToPage('discover')}
       >
         <SearchIcon size={16} />
         <span class="hidden sm:inline">Search</span>

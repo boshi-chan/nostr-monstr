@@ -15,7 +15,43 @@ export interface RelayConfig {
 }
 
 /**
- * Get all relays from NIP-65 (kind 10002)
+ * Get all relays from NIP-65 (kind 10002) for a specific pubkey
+ */
+export async function getRelaysForPubkey(pubkey: string): Promise<string[]> {
+  try {
+    const ndk = getNDK()
+    const event = await ndk.fetchEvent(
+      {
+        authors: [pubkey],
+        kinds: [10002],
+      },
+      { closeOnEose: true }
+    )
+
+    if (!event) {
+      return []
+    }
+
+    const relays: string[] = []
+
+    for (const tag of event.tags) {
+      if (tag[0] !== 'r' || !tag[1]) continue
+      // Only include read relays (where engagement would be stored)
+      const isReadRelay = tag[2] !== 'write'
+      if (isReadRelay) {
+        relays.push(tag[1])
+      }
+    }
+
+    return relays
+  } catch (err) {
+    logger.warn('Failed to fetch relays for pubkey:', pubkey.slice(0, 8), err)
+    return []
+  }
+}
+
+/**
+ * Get all relays from NIP-65 (kind 10002) for current user
  */
 export async function getRelaysFromNIP65(): Promise<RelayConfig[]> {
   try {

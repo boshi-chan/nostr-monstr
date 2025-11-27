@@ -11,6 +11,7 @@ import DonateModal from './DonateModal.svelte'
   import Home from './pages/Home.svelte'
   import Messages from './pages/Messages.svelte'
   import Profile from './pages/Profile.svelte'
+  import Discover from './pages/Discover.svelte'
 import ScrollToTopButton from './ScrollToTopButton.svelte'
 import DebugOverlay from './DebugOverlay.svelte'
 import DebugOverlayToggle from './DebugOverlayToggle.svelte'
@@ -92,6 +93,8 @@ import '$lib/native-notification-bridge'
           {:else}
             <div class="p-4 text-text-muted">Loading live streams…</div>
           {/if}
+        {:else if $activeRoute.tab === 'discover'}
+          <Discover />
         {:else if $activeRoute.tab === 'notifications'}
           {#if NotificationsPage}
             <svelte:component this={NotificationsPage} />

@@ -48,6 +48,7 @@ import { showEmberModal, emberTarget } from '$stores/wallet'
   import { openZapModal } from '$stores/nwc'
 import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
 import { queueEngagementHydration } from '$lib/engagement'
+import { getNestedMutedAuthor, isUserMuted } from '$lib/mute'
 import { logger } from '$lib/logger'
 
   export let event: NostrEvent
@@ -102,6 +103,11 @@ import { logger } from '$lib/logger'
   let renderedHtml = ''
   $: renderedHtml = isLongForm && parsed.text ? renderMarkdownSafe(parsed.text) : ''
 
+  // Check if nested content is from a muted user
+  let nestedMutedAuthor: string | null = null
+  let showMutedContent = false
+  $: nestedMutedAuthor = getNestedMutedAuthor(event)
+
   $: {
     if (!isRepostWrapper) {
       displayEvent = event
@@ -120,6 +126,10 @@ import { logger } from '$lib/logger'
 
   $: parsed = displayEvent === event ? wrapperParsed : parseContent(displayEvent)
   $: actionableEvent = displayEvent
+
+  // Check if the author is muted
+  let isAuthorMuted = false
+  $: isAuthorMuted = isUserMuted(actionableEvent.pubkey)
 
   $: isLiked = $likedEvents.has(actionableEvent.id)
   $: isReposted = $repostedEvents.has(actionableEvent.id)
@@ -570,10 +580,38 @@ import { logger } from '$lib/logger'
     }
   }
 
-  function handleBlockUser(mouseEvent: MouseEvent): void {
+  async function handleBlockUser(mouseEvent: MouseEvent): Promise<void> {
     mouseEvent.stopPropagation()
     closeMenu()
-    logger.warn('Blocking users is not implemented yet.', actionableEvent.pubkey)
+
+    try {
+      if (isAuthorMuted) {
+        const { unmuteUser } = await import('$lib/mute')
+        await unmuteUser(actionableEvent.pubkey)
+        logger.info(`✓ Unmuted user ${actionableEvent.pubkey.slice(0, 8)}...`)
+      } else {
+        const { muteUser } = await import('$lib/mute')
+        await muteUser(actionableEvent.pubkey)
+        logger.info(`✓ Muted user ${actionableEvent.pubkey.slice(0, 8)}...`)
+      }
+    } catch (err) {
+      logger.error('Failed to mute/unmute user:', err)
+    }
+  }
+
+  async function handleMuteThread(mouseEvent: MouseEvent): Promise<void> {
+    mouseEvent.stopPropagation()
+    closeMenu()
+
+    try {
+      const { muteThread } = await import('$lib/mute')
+      // Find the root event ID (if this is a reply, mute the root thread)
+      const rootEventId = actionableEvent.tags.find(tag => tag[0] === 'e' && tag[3] === 'root')?.[1] || actionableEvent.id
+      await muteThread(rootEventId)
+      logger.info(`✓ Muted thread ${rootEventId.slice(0, 8)}...`)
+    } catch (err) {
+      logger.error('Failed to mute thread:', err)
+    }
   }
 
   function handleWindowClick(mouseEvent: MouseEvent): void {
@@ -741,7 +779,14 @@ import { logger } from '$lib/logger'
                   class="mt-1 w-full rounded-lg px-3 py-2 text-left text-sm text-rose-300 transition-colors duration-200 hover:bg-rose-500/20 focus:outline-none focus:ring-2 focus:ring-rose-400/40"
                   on:click={handleBlockUser}
                 >
-                  Block user
+                  {isAuthorMuted ? 'Unmute user' : 'Mute user'}
+                </button>
+                <button
+                  type="button"
+                  class="mt-1 w-full rounded-lg px-3 py-2 text-left text-sm text-rose-300 transition-colors duration-200 hover:bg-rose-500/20 focus:outline-none focus:ring-2 focus:ring-rose-400/40"
+                  on:click={handleMuteThread}
+                >
+                  Mute thread
                 </button>
               </div>
             {/if}
@@ -802,7 +847,19 @@ import { logger } from '$lib/logger'
       </div>
     {/if}
 
-    {#if isLongForm}
+    {#if nestedMutedAuthor && !showMutedContent}
+      <!-- Muted content placeholder -->
+      <div class="mt-2 rounded-lg border border-dark-border/60 bg-dark-light/40 px-4 py-3">
+        <p class="text-sm text-text-muted mb-2">Content from muted user</p>
+        <button
+          type="button"
+          class="text-xs text-primary hover:underline focus:outline-none"
+          on:click|stopPropagation={() => showMutedContent = true}
+        >
+          Click to view
+        </button>
+      </div>
+    {:else if isLongForm}
       <!-- Render markdown for long-form content -->
       <div class="mt-2 prose prose-invert prose-sm max-w-none text-text-soft">
         {@html renderedHtml}
@@ -827,7 +884,7 @@ import { logger } from '$lib/logger'
       </div>
     {/if}
 
-    {#if parsed.images.length > 0 || parsed.videos.length > 0 || parsed.embeds.length > 0}
+    {#if (!nestedMutedAuthor || showMutedContent) && (parsed.images.length > 0 || parsed.videos.length > 0 || parsed.embeds.length > 0)}
       <div class="mt-3">
         <MediaRenderer images={parsed.images} videos={parsed.videos} embeds={parsed.embeds} event={actionableEvent} />
       </div>

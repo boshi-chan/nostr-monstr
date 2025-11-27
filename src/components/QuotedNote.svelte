@@ -8,6 +8,8 @@
   import CommentIcon from './icons/CommentIcon.svelte'
   import RepostIcon from './icons/RepostIcon.svelte'
   import LikeIcon from './icons/LikeIcon.svelte'
+  import { isUserMuted } from '$lib/mute'
+  import { logger } from '$lib/logger'
 
   export let eventId: string | null = null
   export let eventData: NostrEvent | null = null
@@ -17,6 +19,7 @@
   const ndk = getNDK()
   let remoteEvent: NostrEvent | null = null
   let loading = false
+  let showMutedContent = false
 
   $: storeEvent = eventId ? $feedEvents.find(e => e.id === eventId) ?? null : null
   $: quotedEvent = eventData ?? storeEvent ?? remoteEvent
@@ -33,6 +36,7 @@
   $: displayLabel = displayName || quotedEvent?.pubkey.slice(0, 8) || ''
   $: initials = displayLabel.slice(0, 2).toUpperCase()
   $: formattedTime = quotedEvent ? formatDate(quotedEvent.created_at) : ''
+  $: isMuted = quotedEvent ? isUserMuted(quotedEvent.pubkey) : false
 
   async function fetchQuotedEvent(id: string): Promise<void> {
     try {
@@ -66,7 +70,18 @@
   }
 </script>
 
-{#if quotedEvent}
+{#if quotedEvent && isMuted && !showMutedContent}
+  <div class="mt-3 rounded-xl border border-dark-border/60 bg-dark-light/40 p-4">
+    <p class="text-sm text-text-muted mb-2">Quoted content from muted user</p>
+    <button
+      type="button"
+      class="text-xs text-primary hover:underline focus:outline-none"
+      on:click|stopPropagation={() => showMutedContent = true}
+    >
+      Click to view
+    </button>
+  </div>
+{:else if quotedEvent}
   <div
     role="button"
     tabindex="0"

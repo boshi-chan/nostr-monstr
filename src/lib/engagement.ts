@@ -195,15 +195,37 @@ async function hydrateEngagementCounts(ids: string[]): Promise<void> {
 
     // Use subscriptions instead of fetchEvents to avoid waiting for EOSE from all relays
     const fetchViaSubscription = async (kind: number): Promise<Set<any>> => {
-      return new Promise((resolve) => {
+      return new Promise(async (resolve) => {
         const events = new Set()
         let resolved = false
-        // Shorter timeout for bulk loads (they're more likely to have data)
-        const timeout = bulkLoadMode ? 3000 : 2000
+        // Longer timeout for bulk loads to ensure we get data from all 5 relays
+        // This is important for trending posts where we need comprehensive engagement
+        const timeout = bulkLoadMode ? 8000 : 2000
+
+        // For bulk loads, use a wider relay set to get engagement from popular relays
+        // This helps with trending content from unfollowed users
+        let subscriptionOptions: any = { closeOnEose: true }
+
+        if (bulkLoadMode) {
+          try {
+            const { NDKRelaySet } = await import('@nostr-dev-kit/ndk')
+            const engagementRelays = [
+              'wss://relay.primal.net', // Primal caching relay - excellent coverage
+              'wss://relay.nostr.band', // Nostr.band aggregator - indexes everything
+              'wss://relay.damus.io', // Popular general relay
+              'wss://nos.lol', // Popular relay with good engagement coverage
+              'wss://relay.snort.social', // Snort caching relay
+            ]
+            subscriptionOptions.relaySet = NDKRelaySet.fromRelayUrls(engagementRelays, ndk)
+          } catch (err) {
+            // Fall back to default relay pool if import fails
+            logger.warn('Failed to create engagement relay set, using default pool')
+          }
+        }
 
         const sub = ndk.subscribe(
           { kinds: [kind], ...filter },
-          { closeOnEose: true }
+          subscriptionOptions
         )
 
         sub.on('event', (event: any) => {

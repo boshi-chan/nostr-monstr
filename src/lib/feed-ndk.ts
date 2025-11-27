@@ -908,6 +908,137 @@ export async function subscribeToGlobalFeed(retryCount = 0): Promise<void> {
 }
 
 /**
+ * Subscribe to trending feed using Nostr Wine API
+ * Fetches trending event IDs with engagement metrics, then subscribes to events
+ * and immediately queues engagement hydration
+ */
+export async function subscribeToTrendingFeed(retryCount = 0): Promise<void> {
+  try {
+    feedLoading.set(true)
+    feedError.set(null)
+
+    // Fetch trending event IDs with engagement metrics from Nostr Wine API
+    // Use 24-hour window for a better balance of fresh and high-quality content
+    // Sorted by replies (most engaging discussions)
+    logger.info('Fetching trending events from Nostr Wine API (last 24 hours)...')
+    const response = await fetch('https://api.nostr.wine/trending?hours=24&order=replies&limit=50')
+    if (!response.ok) {
+      throw new Error(`Trending API returned ${response.status}`)
+    }
+
+    const trendingData = await response.json()
+    logger.info(`Received ${trendingData.length} trending events from API`)
+
+    // Extract event IDs and collect engagement metrics
+    const eventIds: string[] = []
+    const engagementPreload: string[] = []
+
+    for (const item of trendingData.slice(0, 50)) {
+      if (item.event_id) {
+        eventIds.push(item.event_id)
+        // Immediately queue this event for engagement hydration
+        // This way engagement counts start loading right away
+        engagementPreload.push(item.event_id)
+      }
+    }
+
+    if (eventIds.length === 0) {
+      throw new Error('No trending events found')
+    }
+
+    logger.info(`Subscribing to ${eventIds.length} trending event IDs`)
+
+    // Start loading engagement metrics immediately, even before events arrive
+    // Use immediate=true to skip debounce and load engagement ASAP
+    queueEngagementHydration(engagementPreload, true)
+
+    const ndk = getNDK()
+
+    // Create a timeout promise
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error('Trending feed subscription timeout')),
+        SUBSCRIPTION_TIMEOUT * 2 // Longer timeout since we're querying multiple relays
+      )
+    )
+
+    // Create subscription promise to fetch the trending events
+    // Use popular relays to maximize event coverage
+    const subscriptionPromise = new Promise<void>((resolve) => {
+      try {
+        // Import NDKRelaySet dynamically
+        import('@nostr-dev-kit/ndk').then(({ NDKRelaySet }) => {
+          // Use trending relay plus popular public relays
+          // Trending relays aggregate content so they have better coverage
+          const trendingRelays = [
+            'wss://trending.relays.land/', // Curated trending relay
+            'wss://relay.primal.net', // Primal's caching relay
+            'wss://relay.nostr.band', // Nostr.band aggregator
+            'wss://relay.damus.io', // Popular general relay
+          ]
+          const relaySet = NDKRelaySet.fromRelayUrls(trendingRelays, ndk)
+
+          const subscription = ndk.subscribe(
+            {
+              ids: eventIds,
+            },
+            {
+              closeOnEose: false,
+              relaySet: relaySet
+            },
+            undefined,
+            false
+          )
+
+          registerSubscription('trending', subscription)
+
+          subscription.on('event', (event: any) => {
+            addEventToFeed(event, 'trending')
+          })
+
+          subscription.on('eose', () => {
+            logger.info('✓ Trending feed loaded')
+            feedLoading.set(false)
+          })
+
+          // NDK subscriptions don't emit 'error' events in the type definition
+          // but relays can fail, so we handle it with type assertion
+          ;(subscription as any).on?.('error', (err: unknown) => {
+            logger.error('Trending feed error:', err)
+            feedError.set(`Feed error: ${String(err)}`)
+            feedLoading.set(false)
+          })
+
+          resolve()
+        })
+      } catch (err) {
+        throw err
+      }
+    })
+
+    // Race timeout vs subscription
+    await Promise.race([subscriptionPromise, timeoutPromise])
+
+  } catch (err) {
+    const errorMsg = String(err)
+    logger.error(`✗ Trending feed error (attempt ${retryCount + 1}):`, errorMsg)
+
+    // Retry logic
+    if (retryCount < MAX_RETRIES) {
+      logger.info(`↻ Retrying trending feed in ${RETRY_DELAY}ms...`)
+      feedError.set(`Retrying... (${retryCount + 1}/${MAX_RETRIES})`)
+
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY))
+      return subscribeToTrendingFeed(retryCount + 1)
+    }
+
+    // Final error
+    feedError.set(`Failed to load trending feed: ${errorMsg}`)
+    feedLoading.set(false)
+  }
+}
+
+/**
  * Stop specific subscription
  */
 export function stopSubscription(subId: string): void {

@@ -10,6 +10,7 @@ import { get } from 'svelte/store'
 import type { NostrEvent } from '$types/nostr'
 import type { SearchResult } from '$stores/search'
 import type { NDKSubscriptionOptions } from '@nostr-dev-kit/ndk'
+import { NDKRelaySet } from '@nostr-dev-kit/ndk'
 import { nip19 } from 'nostr-tools'
 import { normalizeEvent } from '$lib/event-validation'
 import { logger } from './logger'
@@ -462,6 +463,166 @@ export async function searchUsers(
     return results.slice(0, limit)
   } catch (err) {
     logger.error('User search error:', err)
+    return []
+  }
+}
+
+/**
+ * Load all follow packs (NIP-51 starter packs - kind 39089)
+ */
+export async function loadFollowPacks(
+  limit: number = 50,
+  abortController?: AbortController
+): Promise<Array<{
+  id: string
+  pubkey: string
+  title: string
+  description?: string
+  users: string[]
+  created_at: number
+}>> {
+  console.log('[loadFollowPacks] Function called with limit:', limit)
+  logger.info(`[loadFollowPacks] Function called with limit: ${limit}`)
+
+  try {
+    console.log('[loadFollowPacks] Getting NDK...')
+    const ndk = getNDK()
+    console.log('[loadFollowPacks] NDK obtained:', ndk ? 'yes' : 'no')
+
+    const results: Array<{
+      id: string
+      pubkey: string
+      title: string
+      description?: string
+      users: string[]
+      created_at: number
+    }> = []
+    const seen = new Set<string>()
+
+    // Check if search was cancelled
+    if (abortController?.signal.aborted) {
+      console.log('[loadFollowPacks] Aborted before starting')
+      return []
+    }
+
+    console.log('[loadFollowPacks] Starting follow pack search...')
+    logger.info('Loading follow packs (kind 39089)...')
+
+    // Load all kind 39089 (NIP-51 starter packs)
+    // Use popular relays that are likely to have starter packs
+    const packRelays = [
+      'wss://relay.primal.net',
+      'wss://relay.nostr.band',
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.snort.social'
+    ]
+    console.log('[loadFollowPacks] Using relays:', packRelays)
+
+    const relaySet = NDKRelaySet.fromRelayUrls(packRelays, ndk)
+    console.log('[loadFollowPacks] RelaySet created:', relaySet ? 'yes' : 'no')
+
+    console.log('[loadFollowPacks] Creating subscription for kind 39089...')
+    const subscription = ndk.subscribe(
+      {
+        kinds: [39089],
+        limit: limit * 2,
+      },
+      { closeOnEose: true, relaySet } as NDKSubscriptionOptions,
+      undefined,
+      false
+    )
+    console.log('[loadFollowPacks] Subscription created:', subscription ? 'yes' : 'no')
+
+    await new Promise<void>(resolve => {
+      console.log('[loadFollowPacks] Setting up event listeners...')
+
+      // Abort listener
+      if (abortController) {
+        abortController.signal.addEventListener('abort', () => {
+          console.log('[loadFollowPacks] Aborted during execution')
+          subscription.stop()
+          resolve()
+        })
+      }
+
+      subscription.on('event', (event: any) => {
+        console.log('[loadFollowPacks] Received event:', event?.id?.slice(0, 8))
+        if (abortController?.signal.aborted) return
+        const raw = normalizeEvent(event as NostrEvent)
+        if (!raw) {
+          console.log('[loadFollowPacks] Event failed normalization')
+          return
+        }
+        if (seen.has(raw.id)) {
+          console.log('[loadFollowPacks] Duplicate event, skipping')
+          return
+        }
+
+        try {
+          // Parse the follow pack
+          let title = ''
+          let description = ''
+          const users: string[] = []
+
+          // Get title and description from tags
+          for (const tag of raw.tags) {
+            if (tag[0] === 'title' && tag[1]) {
+              title = tag[1]
+            } else if (tag[0] === 'd' && tag[1] && !title) {
+              title = tag[1]
+            } else if (tag[0] === 'description' && tag[1]) {
+              description = tag[1]
+            } else if (tag[0] === 'p' && tag[1]) {
+              users.push(tag[1])
+            }
+          }
+
+          // Add all packs (no filtering by query)
+          seen.add(raw.id)
+          results.push({
+            id: raw.id,
+            pubkey: raw.pubkey,
+            title: title || 'Untitled Pack',
+            description: description,
+            users: users,
+            created_at: raw.created_at,
+          })
+
+          console.log(`[loadFollowPacks] Found follow pack: "${title}" with ${users.length} users`)
+          logger.info(`Found follow pack: "${title}" with ${users.length} users`)
+        } catch (e) {
+          // Invalid follow pack, skip
+          console.error('[loadFollowPacks] Failed to parse follow pack:', e)
+          logger.error('Failed to parse follow pack:', e)
+        }
+      })
+
+      subscription.on('eose', () => {
+        console.log(`[loadFollowPacks] EOSE received. Found ${results.length} packs`)
+        logger.info(`Follow pack search complete. Found ${results.length} packs`)
+        subscription.stop()
+        resolve()
+      })
+
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        subscription.stop()
+        resolve()
+      }, 5000)
+    })
+
+    // Check if cancelled before sorting
+    if (abortController?.signal.aborted) {
+      return []
+    }
+
+    // Sort by created_at (newest first)
+    results.sort((a, b) => b.created_at - a.created_at)
+
+    return results.slice(0, limit)
+  } catch (err) {
+    logger.error('Follow pack load error:', err)
     return []
   }
 }

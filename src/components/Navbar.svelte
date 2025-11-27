@@ -11,7 +11,6 @@ import TvMinimalPlayIcon from './icons/TvMinimalPlayIcon.svelte'
 import MailIcon from 'lucide-svelte/icons/mail'
 import LogInIcon from 'lucide-svelte/icons/log-in'
 import { unreadCount } from '$stores/notifications'
-import { showSearch } from '$stores/search'
 import { unreadCounts } from '$stores/messages'
 
   let showLoginModal = false
@@ -82,10 +81,6 @@ import { unreadCounts } from '$stores/messages'
     }
   }
 
-  function handleSearch() {
-    showSearch.set(true)
-    closeMenus()
-  }
 </script>
 
 <nav
@@ -224,12 +219,6 @@ import { unreadCounts } from '$stores/messages'
     on:keydown={handleOverlayKey}
   ></div>
   <div class="fixed right-4 z-50 w-48 rounded-2xl border border-dark-border/70 bg-dark-light/95 p-2 shadow-xl md:hidden" style="bottom: calc(5.5rem + env(safe-area-inset-bottom))">
-    <button
-      class="w-full rounded-xl px-3 py-2 text-left text-sm text-text-soft hover:bg-dark-lighter/60"
-      on:click={handleSearch}
-    >
-      Search
-    </button>
     {#if $isAuthenticated}
       <button
         class="w-full rounded-xl px-3 py-2 text-left text-sm text-text-soft hover:bg-dark-lighter/60"
