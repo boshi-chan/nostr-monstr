@@ -8,7 +8,7 @@
   import LiveStreamCard from '../LiveStreamCard.svelte'
   import LiveStreamPlayer from '../LiveStreamPlayer.svelte'
 
-  let activeFeed: LivestreamFeed = 'livestreams-global'
+  let activeFeed: LivestreamFeed = 'livestreams-following'
   let livestreams: NDKEvent[] = []
   let loading = true
   let error: string | null = null
@@ -159,7 +159,7 @@
         <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-8 text-center">
           <div class="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
           <p class="text-lg font-semibold text-text-soft">Finding livestreams...</p>
-          <p class="mt-2 text-sm text-text-muted">Loading livestreams from the global feed</p>
+          <p class="mt-2 text-sm text-text-muted">Scanning relays for live streams</p>
         </div>
       {:else if error}
         <div class="rounded-2xl border border-rose-500/40 bg-rose-500/10 p-6 text-center">

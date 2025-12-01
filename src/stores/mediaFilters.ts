@@ -11,7 +11,7 @@ export type MediaFilterSettings = {
 export type MediaFilters = {
   following: MediaFilterSettings
   circles: MediaFilterSettings
-  global: MediaFilterSettings
+  trending: MediaFilterSettings
   profile: MediaFilterSettings
 }
 
@@ -28,9 +28,9 @@ const DEFAULT_FILTERS: MediaFilters = {
     respectCW: true,
     blurAll: false,
   },
-  global: {
+  trending: {
     autoShow: false,
-    blurUnknown: true,  // Safe default for global
+    blurUnknown: true,  // Safe default for public feeds
     respectCW: true,
     blurAll: false,
   },
@@ -50,11 +50,12 @@ function loadMediaFilters(): MediaFilters {
     const stored = localStorage.getItem('mediaFilters')
     if (stored) {
       const parsed = JSON.parse(stored)
+      const legacyTrending = parsed.trending ?? parsed.global
       // Merge with defaults to ensure all properties exist
       return {
         following: { ...DEFAULT_FILTERS.following, ...parsed.following },
         circles: { ...DEFAULT_FILTERS.circles, ...parsed.circles },
-        global: { ...DEFAULT_FILTERS.global, ...parsed.global },
+        trending: { ...DEFAULT_FILTERS.trending, ...legacyTrending },
         profile: { ...DEFAULT_FILTERS.profile, ...parsed.profile },
       }
     }
@@ -101,11 +102,11 @@ export function getMediaFilterForFeed(feedSource: FeedSource): MediaFilterSettin
     case 'circles':
       context = 'circles'
       break
-    case 'global':
-      context = 'global'
+    case 'trending':
+      context = 'trending'
       break
     default:
-      context = 'global'
+      context = 'trending'
   }
 
   // This function is meant to be called within a derived store or component

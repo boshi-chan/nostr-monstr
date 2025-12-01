@@ -19,6 +19,7 @@ import { activeRoute } from '$stores/router'
 import { showEmberModal } from '$stores/wallet'
 import { debugOverlayEnabled } from '$stores/debugOverlay'
 import { setupDeepLinkListener } from '$lib/deep-link'
+import { isHistoryNavigation, savedScrollPosition } from '$lib/navigation'
 import '$lib/native-notification-bridge'
 
   let NotificationsPage: ComponentType | null = null
@@ -58,12 +59,35 @@ import '$lib/native-notification-bridge'
   }
 
   $: isMessagesTab = $activeRoute.type === 'page' && $activeRoute.tab === 'messages'
+  $: isHomeTab = $activeRoute.type === 'page' && $activeRoute.tab === 'home'
 
   let mainEl: HTMLElement | null = null
+  let lastRoute: string | null = null
 
-  // Reset scroll position to top when route changes
+  // Handle scroll position: restore for home feed on back navigation, reset otherwise
   $: if ($activeRoute && mainEl) {
-    mainEl.scrollTop = 0
+    const currentRouteKey = $activeRoute.type === 'page' ? $activeRoute.tab : `${$activeRoute.type}-${($activeRoute as any).eventId || ($activeRoute as any).pubkey}`
+    const previousRouteKey = lastRoute
+
+    // If navigating back to home feed, restore saved scroll position
+    if ($isHistoryNavigation && isHomeTab) {
+      setTimeout(() => {
+        if (mainEl) {
+          mainEl.scrollTop = $savedScrollPosition
+        }
+      }, 0)
+    }
+    // If leaving home feed, save the scroll position
+    else if (previousRouteKey === 'home' && currentRouteKey !== 'home' && mainEl) {
+      savedScrollPosition.set(mainEl.scrollTop)
+      mainEl.scrollTop = 0
+    }
+    // For all other navigation (not back to home), reset to top
+    else if (currentRouteKey !== previousRouteKey && !($isHistoryNavigation && isHomeTab)) {
+      mainEl.scrollTop = 0
+    }
+
+    lastRoute = currentRouteKey
   }
 </script>
 

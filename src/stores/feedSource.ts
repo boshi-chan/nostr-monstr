@@ -1,8 +1,17 @@
 import { writable } from 'svelte/store'
 
 // FeedSource includes legacy long-read labels used by subscription helpers
-export type FeedSource = 'global' | 'following' | 'circles' | 'trending' | 'long-reads' | 'long-reads-following' | 'long-reads-circles' | 'livestreams-global' | 'livestreams-following' | 'livestreams-circles'
-export type TimelineFeed = 'global' | 'following' | 'circles' | 'trending'
+export type FeedSource =
+  | 'following'
+  | 'circles'
+  | 'trending'
+  | 'long-reads'
+  | 'long-reads-following'
+  | 'long-reads-circles'
+  | 'livestreams-global'
+  | 'livestreams-following'
+  | 'livestreams-circles'
+export type TimelineFeed = 'following' | 'circles' | 'trending'
 export type LivestreamFeed = 'livestreams-global' | 'livestreams-following' | 'livestreams-circles'
 
 export const feedSource = writable<FeedSource>('following')
@@ -19,7 +28,7 @@ if (typeof window !== 'undefined') {
 }
 
 feedSource.subscribe(value => {
-  if (value === 'global' || value === 'following' || value === 'circles' || value === 'trending') {
+  if (value === 'following' || value === 'circles' || value === 'trending') {
     lastTimelineFeed.set(value)
   }
   if (value === 'livestreams-global' || value === 'livestreams-following' || value === 'livestreams-circles') {

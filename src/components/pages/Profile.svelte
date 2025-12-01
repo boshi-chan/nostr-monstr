@@ -246,13 +246,13 @@ $: filteredPosts = posts.filter(event => {
               <div class="pb-2">
                 <div class="flex flex-wrap items-center gap-3">
                   <h1
-                    class="text-xl font-semibold text-white md:text-3xl"
+                    class="text-xl font-semibold text-white md:text-3xl break-words"
                     style="text-shadow: 0 2px 6px rgba(0,0,0,0.6)"
                   >
                     {displayName}
                   </h1>
                 </div>
-                <p class="mt-2 text-sm text-text-muted/80">{nip05 || targetPubkey.slice(0, 12)}</p>
+                <p class="mt-2 text-sm text-text-muted/80 break-words">{nip05 || targetPubkey.slice(0, 12)}</p>
               </div>
             </div>
 
@@ -346,6 +346,5 @@ $: filteredPosts = posts.filter(event => {
     </div>
   </div>
 {/if}
-
 
 

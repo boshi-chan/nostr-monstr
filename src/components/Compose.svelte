@@ -187,6 +187,10 @@
 {#if $showCompose}
   <div
     class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-3 py-6 sm:px-4 sm:py-8"
+    style="
+      padding-top: calc(env(safe-area-inset-top, 0px) + 1rem);
+      padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem);
+    "
     role="dialog"
     aria-modal="true"
   >
@@ -198,7 +202,8 @@
     />
     <!-- Modal content -->
     <div
-      class="relative mx-auto w-full max-w-xl sm:max-w-2xl max-h-[calc(100vh-4rem)] overflow-y-auto rounded-3xl border border-dark-border bg-dark-light"
+      class="relative mx-auto w-full max-w-xl sm:max-w-2xl overflow-y-auto rounded-3xl border border-dark-border bg-dark-light"
+      style="max-height: calc(100vh - 4rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));"
       on:click|stopPropagation
       role="presentation"
     >
@@ -392,4 +397,3 @@
     border-radius: 4px;
   }
 </style>
-

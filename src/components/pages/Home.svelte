@@ -19,26 +19,47 @@
   import FilterBar from '../FilterBar.svelte'
   import UsersIcon from '../icons/UsersIcon.svelte'
   import CircleIcon from '../icons/CircleIcon.svelte'
-  import GlobeIcon from '../icons/GlobeIcon.svelte'
   import TrendingUpIcon from '../icons/TrendingUpIcon.svelte'
-  import { openPost, openProfile } from '$stores/router'
+  import { openPost, openProfile, activeRoute } from '$stores/router'
+  import { navigateTo } from '$lib/navigation'
 
   const feedTabs: { id: FeedSource; label: string; icon: typeof UsersIcon }[] = [
     { id: 'following', label: 'Following', icon: UsersIcon },
     { id: 'circles', label: 'Circles', icon: CircleIcon },
     { id: 'trending', label: 'Trending', icon: TrendingUpIcon },
-    { id: 'global', label: 'Global', icon: GlobeIcon },
   ]
 
   let activeFeed: FeedSource = get(feedSource)
+  let lastActiveFeed: FeedSource = activeFeed
   let hasLoadedOnce = false
   let loadMoreTrigger: HTMLDivElement | null = null
   let observer: IntersectionObserver | null = null
   let feedContainer: HTMLDivElement | null = null
   let savedScrollPosition = 0
   let savedFirstVisiblePostId: string | null = null
+  let hasRenderedFeedOnce = false
+  let pendingNewCount = 0
+  let latestFilteredEvents: NostrEvent[] = []
+  let renderedIds = new Set<string>()
+  let isHomePage = false
+  let lastSeenTimestamp = 0
 
   $: activeFeed = $feedSource
+
+  // Track when we're on the home page
+  $: isHomePage = $activeRoute.type === 'page' && $activeRoute.tab === 'home'
+
+  // When returning to home page, sync rendered IDs with what's visible
+  $: if (isHomePage && hasRenderedFeedOnce && visibleEvents.length > 0) {
+    // This runs when user returns to home - ensure rendered IDs match visible events
+    const currentVisibleIds = new Set(visibleEvents.map(e => e.id))
+    const shouldResync = visibleEvents.some(e => !renderedIds.has(e.id))
+
+    if (shouldResync) {
+      renderedIds = currentVisibleIds
+      pendingNewCount = 0
+    }
+  }
 
   // Filter out muted content (reactive to mute store changes)
   let visibleEvents: NostrEvent[] = []
@@ -50,8 +71,34 @@
     $mutedHashtags
     $mutedEvents
 
+    // Check if feed source changed - reset everything
+    if (activeFeed !== lastActiveFeed) {
+      hasRenderedFeedOnce = false
+      pendingNewCount = 0
+      renderedIds = new Set()
+      visibleEvents = []
+      lastSeenTimestamp = 0
+      lastActiveFeed = activeFeed
+    }
+
     const filtered = $feedEvents.filter(event => !shouldHideEvent(event))
-    visibleEvents = filtered
+    latestFilteredEvents = filtered
+
+    if (!hasRenderedFeedOnce) {
+      visibleEvents = filtered
+      renderedIds = new Set(filtered.map(event => event.id))
+      hasRenderedFeedOnce = filtered.length > 0
+      pendingNewCount = 0
+      if (filtered.length) {
+        lastSeenTimestamp = Math.max(...filtered.map(e => e.created_at))
+      }
+    } else {
+      const newEvents = filtered.filter(
+        event => event.created_at > lastSeenTimestamp && !renderedIds.has(event.id)
+      )
+      pendingNewCount = Math.max(0, newEvents.length)
+    }
+
     mutedCount = $feedEvents.length - filtered.length
   }
 
@@ -116,6 +163,13 @@
     saveScrollPosition()
   }
 
+  // Only reset if feed is truly empty AND we're not just switching feeds
+  $: if ($feedEvents.length === 0 && hasRenderedFeedOnce) {
+    // Don't reset hasRenderedFeedOnce here - it's handled by feed source change
+    visibleEvents = []
+    pendingNewCount = 0
+  }
+
   // Set up IntersectionObserver for infinite scroll
   onMount(() => {
     if (typeof IntersectionObserver !== 'undefined') {
@@ -144,7 +198,7 @@
   })
 
   function setActiveFeed(tab: FeedSource) {
-    feedSource.set(tab)
+    navigateTo(`/home/${tab}`)
   }
 
   function handleEventSelect(event: NostrEvent) {
@@ -153,6 +207,15 @@
 
   function handleProfileSelect(pubkey: string) {
     openProfile(pubkey, 'home')
+  }
+
+  function showPendingEvents() {
+    visibleEvents = latestFilteredEvents
+    renderedIds = new Set(visibleEvents.map(event => event.id))
+    pendingNewCount = 0
+    if (visibleEvents.length) {
+      lastSeenTimestamp = Math.max(...visibleEvents.map(e => e.created_at))
+    }
   }
 </script>
 
@@ -192,6 +255,19 @@
 
   <div class="mx-auto w-full max-w-3xl px-3 md:px-6">
     <div class="flex flex-col gap-3 pt-3">
+      {#if pendingNewCount > 0}
+        <div class="sticky top-16 z-10 w-full">
+          <button
+            type="button"
+            class="flex w-full items-center justify-center gap-2 rounded-full border border-primary/50 bg-primary/10 px-4 py-2 text-sm font-semibold text-primary transition hover:bg-primary/15 focus:outline-none focus:ring-2 focus:ring-primary/60"
+            on:click={showPendingEvents}
+            aria-live="polite"
+          >
+            Show {pendingNewCount} new {pendingNewCount === 1 ? 'post' : 'posts'}
+          </button>
+        </div>
+      {/if}
+
       {#if $feedLoading && !hasLoadedOnce}
         <!-- Show friendly loading state on first load -->
         <div class="rounded-2xl border border-dark-border/80 bg-dark/60 p-8 text-center">
@@ -202,7 +278,7 @@
               ? 'Loading posts from people you follow'
               : activeFeed === 'circles'
               ? 'Loading posts from your circles'
-              : 'Loading posts from the global feed'}
+              : 'Finding what is trending right now'}
           </p>
         </div>
       {:else if $feedLoading && $feedEvents.length === 0}
@@ -223,7 +299,9 @@
           <p class="mt-2 text-sm text-text-muted">
             {activeFeed === 'following'
               ? 'Follow someone to see their posts'
-              : 'Check back in a moment'}
+              : activeFeed === 'circles'
+              ? 'Check back after we map your circles'
+              : 'Trending feed is warming up'}
           </p>
         </div>
       {:else}

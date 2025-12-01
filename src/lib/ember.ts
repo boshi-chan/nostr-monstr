@@ -1,5 +1,6 @@
 export const EMBER_EVENT_KIND = 7375
 export const EMBER_TAG = 'emberxmr'
+// Presets expressed in XMR
 export const EMBER_PRESET_AMOUNTS = [0.0001, 0.001, 0.01]
 
 const AU_PER_XMR = 1_000_000_000_000n

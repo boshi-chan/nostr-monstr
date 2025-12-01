@@ -1,5 +1,6 @@
 <script lang="ts">
   import { fade } from 'svelte/transition'
+  import { onMount } from 'svelte'
   import { walletState, showWallet } from '$stores/wallet'
   import {
     initWallet,
@@ -14,6 +15,7 @@
     getCachedMnemonic,
     loadCachedMnemonic,
   } from '$lib/wallet/lazy'
+  import { getDefaultRestoreHeight } from '$lib/wallet'
   import type { WalletInfo } from '$types/wallet'
   import { toDataURL as qrToDataURL } from 'qrcode'
   import { CUSTOM_NODE_ID, DEFAULT_NODES, type MoneroNode } from '$lib/wallet/nodes'
@@ -59,6 +61,7 @@
   let customNodeUri = ''
   let customNodeError: string | null = null
   let customNodeBusy = false
+  let estimatedRestoreHeight: number | null = null
   let customFormTouched = false
 
   $: isOpen = $showWallet
@@ -119,6 +122,16 @@
     customNodeLabel = $walletState.customNodeLabel ?? ''
     customNodeUri = $walletState.customNodeUri ?? ''
   }
+
+  onMount(() => {
+    void getDefaultRestoreHeight()
+      .then(height => {
+        estimatedRestoreHeight = height
+      })
+      .catch(() => {
+        estimatedRestoreHeight = null
+      })
+  })
 
   function resetForm(): void {
     importSeed = ''
@@ -573,6 +586,9 @@ function formatTxTime(timestamp: number | null): string {
               />
               <p class="mt-1 text-xs text-text-muted">
                 Use the block height from your previous wallet (or a slightly earlier block) for faster sync.
+              </p>
+              <p class="mt-1 text-xs text-text-muted">
+                Default if left blank: {estimatedRestoreHeight ?? 'calculating...'}
               </p>
             </div>
           {/if}

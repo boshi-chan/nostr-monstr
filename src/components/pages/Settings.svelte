@@ -1048,13 +1048,13 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
                     <input
                       id="profile-display-name"
                       type="text"
-                      maxlength="80"
-                      autocomplete="name"
-                      bind:value={profileDisplayNameInput}
-                      class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
-                      placeholder="Jane Doe"
-                      disabled={profileSaving}
-                    />
+                    maxlength="80"
+                    autocomplete="name"
+                    bind:value={profileDisplayNameInput}
+                    class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70 break-words"
+                    placeholder="Jane Doe"
+                    disabled={profileSaving}
+                  />
                     <p class="mt-1 text-xs text-text-muted">Shown prominently across feeds.</p>
                   </div>
                   <div>
@@ -1062,13 +1062,13 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
                     <input
                       id="profile-username"
                       type="text"
-                      maxlength="64"
-                      autocomplete="username"
-                      bind:value={profileUsernameInput}
-                      class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
-                      placeholder="janedoe"
-                      disabled={profileSaving}
-                    />
+                    maxlength="64"
+                    autocomplete="username"
+                    bind:value={profileUsernameInput}
+                    class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70 break-words"
+                    placeholder="janedoe"
+                    disabled={profileSaving}
+                  />
                     <p class="mt-1 text-xs text-text-muted">Lowercase handle stored in metadata.</p>
                   </div>
                 </div>
@@ -1080,7 +1080,7 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
                     rows="4"
                     maxlength="1024"
                     bind:value={profileAboutInput}
-                    class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
+                    class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70 break-words"
                     placeholder="Share what you do, what you care about, or how to reach you."
                     disabled={profileSaving}
                   />
@@ -1091,24 +1091,24 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
                     <label for="profile-website" class="mb-1 block text-sm font-medium text-text-soft">Website</label>
                     <input
                       id="profile-website"
-                      type="url"
-                      autocomplete="url"
-                      bind:value={profileWebsiteInput}
-                      class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
-                      placeholder="https://example.com"
-                      disabled={profileSaving}
-                    />
+                    type="url"
+                    autocomplete="url"
+                    bind:value={profileWebsiteInput}
+                    class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70 break-words"
+                    placeholder="https://example.com"
+                    disabled={profileSaving}
+                  />
                   </div>
                   <div>
                     <label for="profile-nip05" class="mb-1 block text-sm font-medium text-text-soft">NIP-05 Identifier</label>
                     <input
-                      id="profile-nip05"
-                      type="text"
-                      bind:value={profileNip05Input}
-                      class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70"
-                      placeholder="you@example.com"
-                      disabled={profileSaving}
-                    />
+                    id="profile-nip05"
+                    type="text"
+                    bind:value={profileNip05Input}
+                    class="w-full rounded-lg border border-dark-border bg-dark/50 px-4 py-2.5 text-sm text-text-soft outline-none focus:border-primary/70 break-words"
+                    placeholder="you@example.com"
+                    disabled={profileSaving}
+                  />
                     <p class="mt-1 text-xs text-text-muted">Requires DNS TXT record on your domain.</p>
                   </div>
                 </div>

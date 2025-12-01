@@ -38,11 +38,6 @@ import { unreadCounts } from '$stores/messages'
 
   function handleTabClick(tab: NavTab) {
     navigateToPage(tab)
-
-    if (tab === 'home') {
-      const targetFeed = $lastTimelineFeed ?? 'following'
-      feedSource.set(targetFeed)
-    }
   }
 
   function navigate(tab: NavTab) {
@@ -244,14 +239,20 @@ import { unreadCounts } from '$stores/messages'
 
 {#if showLoginModal}
   {#await import('./pages/Login.svelte') then LoginModule}
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div class="relative w-full max-w-md">
+    <div
+      class="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-4 md:items-center"
+      style="
+        padding-top: calc(env(safe-area-inset-top, 0px) + 1rem);
+        padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 4.5rem);
+      "
+    >
+      <div class="relative w-full max-w-md max-h-[calc(100vh_-_6rem_-_env(safe-area-inset-top,_0px)_-_env(safe-area-inset-bottom,_0px))] overflow-auto rounded-2xl">
         <button
-          class="absolute -top-10 right-0 text-text-muted hover:text-text-soft transition-colors"
+          class="absolute -right-1 -top-1 rounded-full bg-dark/80 p-2 text-text-muted shadow-lg transition-colors hover:text-text-soft"
           on:click={closeLoginModal}
           aria-label="Close"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
           </svg>

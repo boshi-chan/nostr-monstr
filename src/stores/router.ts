@@ -1,7 +1,8 @@
-import { get, writable } from 'svelte/store'
 import type { NostrEvent } from '$types/nostr'
 import type { NavTab } from './nav'
 import { activeTab } from './nav'
+import { writable } from 'svelte/store'
+import { navigateTo } from '$lib/navigation'
 
 type PageRoute = {
   type: 'page'
@@ -27,12 +28,12 @@ const initialRoute: Route = { type: 'page', tab: 'home' }
 
 export const activeRoute = writable<Route>(initialRoute)
 
-const routeHistory = writable<Route[]>([])
-
 export function navigateToPage(tab: NavTab): void {
+  const path = tab === 'home' ? '/home' : `/${tab}`
+  const route: PageRoute = { type: 'page', tab }
+  navigateTo(path, route)
   activeTab.set(tab)
-  activeRoute.set({ type: 'page', tab })
-  routeHistory.set([])
+  activeRoute.set(route)
 }
 
 export function openPost(event: NostrEvent, originTab: NavTab): void {
@@ -44,73 +45,38 @@ export function openPostById(
   originTab: NavTab,
   initialEvent?: NostrEvent
 ): void {
-  const current = get(activeRoute)
-
-  // Don't push to history if we're already viewing this post
-  if (current.type === 'post' && current.eventId === eventId) {
-    return
-  }
-
-  routeHistory.update(history => [...history, current])
-  activeRoute.set({
+  const route: PostRoute = {
     type: 'post',
     eventId,
     originTab,
     initialEvent,
-  })
+  }
+  navigateTo(`/post/${eventId}`, route)
   activeTab.set(originTab)
+  activeRoute.set(route)
 }
 
 export function openProfile(pubkey: string, originTab: NavTab): void {
-  const current = get(activeRoute)
-
-  // Don't push to history if we're already viewing this profile
-  if (current.type === 'profile' && current.pubkey === pubkey) {
-    return
-  }
-
-  routeHistory.update(history => [...history, current])
-  activeRoute.set({
+  const route: ProfileRoute = {
     type: 'profile',
     pubkey,
     originTab,
-  })
+  }
+  navigateTo(`/profile/${pubkey}`, route)
   activeTab.set(originTab)
+  activeRoute.set(route)
 }
 
-export function goBack(): void {
-  const current = get(activeRoute)
-  const activeTabValue = get(activeTab)
-  const fallbackTab: NavTab = (() => {
-    if (current.type === 'profile') {
-      return current.originTab === 'profile' ? 'home' : current.originTab
-    }
-    if (current.type === 'page') {
-      return current.tab === 'profile' ? 'home' : current.tab
-    }
-    if (current.type === 'post') {
-      return current.originTab === 'profile' ? 'home' : current.originTab
-    }
-    return activeTabValue
-  })()
+export function goBack(): boolean {
+  if (typeof window === 'undefined') return false
 
-  routeHistory.update(history => {
-    if (history.length === 0) {
-      activeRoute.set({ type: 'page', tab: fallbackTab })
-      activeTab.set(fallbackTab)
-      return []
-    }
+  // Check if we can go back (history length > 1 means there's somewhere to go back to)
+  // The seeded history in App.svelte ensures we always have at least 2 entries
+  if (history.length > 2) {
+    history.back()
+    return true
+  }
 
-    const next = [...history]
-    const previous = next.pop()!
-    activeRoute.set(previous)
-
-    if (previous.type === 'page') {
-      activeTab.set(previous.tab)
-    } else {
-      activeTab.set(previous.originTab)
-    }
-
-    return next
-  })
+  // If we're at the root, can't go back further
+  return false
 }

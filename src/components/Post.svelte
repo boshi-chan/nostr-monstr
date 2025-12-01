@@ -22,6 +22,7 @@
     publishRepost,
     getEventById,
     fetchEventById,
+    publishDelete,
   } from '$lib/feed-ndk'
   import { getDisplayName, getAvatarUrl, getNip05Display, fetchUserMetadata } from '$lib/metadata'
   import { formatDate } from '$lib/utils'
@@ -50,6 +51,7 @@ import { parseNostrURI, getEventIdFromURI } from '$lib/nostr-uri'
 import { queueEngagementHydration } from '$lib/engagement'
 import { getNestedMutedAuthor, isUserMuted } from '$lib/mute'
 import { logger } from '$lib/logger'
+import { currentUser, isAuthenticated } from '$stores/auth'
 
   export let event: NostrEvent
   export let onSelect: ((event: NostrEvent) => void) | undefined = undefined
@@ -78,6 +80,8 @@ import { logger } from '$lib/logger'
   let displayZapAmount = 0
   let displayReplyCount = 0
   let hasCommented = false
+  let isOwnPost = false
+  let deleted = false
 
   let wrapperParsed = parseContent(event)
   $: wrapperParsed = parseContent(event)
@@ -153,6 +157,7 @@ import { logger } from '$lib/logger'
   $: displayZapAmount = Math.max(aggregateZapTotal, zapAmount)
   $: displayReplyCount = Math.max(aggregateReplyCount, replyCount ?? 0)
   $: hasCommented = $commentedThreads.has(actionableEvent.id)
+  $: isOwnPost = $isAuthenticated && $currentUser?.pubkey === actionableEvent.pubkey
   $: {
     const totals = $emberTotals
     emberAmount = totals.get(actionableEvent.id) ?? 0
@@ -454,6 +459,29 @@ import { logger } from '$lib/logger'
     void navigateToEventId(targetEventId)
   }
 
+  async function handleDeletePost(): Promise<void> {
+    if (!isOwnPost) return
+    const confirmed =
+      typeof window === 'undefined'
+        ? true
+        : window.confirm(
+            'Delete this post? It will be hidden here immediately, but Nostr deletes are best-effort and rely on relays honoring the delete request.'
+          )
+    if (!confirmed) return
+    try {
+      await publishDelete(actionableEvent)
+      deleted = true
+    } catch (err) {
+      logger.error('Delete failed:', err)
+      alert(err instanceof Error ? err.message : 'Failed to delete post')
+    }
+  }
+
+  function handleRequestDelete(): void {
+    composeQuoteOf.set(actionableEvent)
+    showCompose.set(true)
+  }
+
   function handleQuotedSelect(targetEvent: NostrEvent): void {
     void navigateToEventId(targetEvent.id, targetEvent)
   }
@@ -639,13 +667,14 @@ import { logger } from '$lib/logger'
 
   const baseActionClass =
     'group flex items-center gap-2 rounded-md px-2 py-1 transition-colors duration-200 disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none'
+  const srOnly = 'sr-only'
 </script>
 
 <svelte:window on:click={handleWindowClick} on:keydown={handleWindowKeydown} />
 
 <div
   role="button"
-  class="relative cursor-pointer rounded-2xl border border-dark-border/80 bg-dark/60 px-5 py-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-dark/50 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary/40"
+  class="relative cursor-pointer rounded-2xl border border-dark-border/80 bg-dark/60 px-5 py-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-dark/50 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary/40 overflow-visible"
   tabindex="0"
   on:click={() => onSelect?.(actionableEvent)}
   on:keydown={(e) => {
@@ -655,6 +684,9 @@ import { logger } from '$lib/logger'
     }
   }}
 >
+  {#if deleted}
+    <p class="text-sm text-text-muted">Delete request sent. Relays may take time to honor deletes.</p>
+  {:else}
   {#if isRepostWrapper}
     <div class="mb-3 flex items-center gap-2 text-sm text-text-muted/80">
       <span class="text-emerald-400/70">
@@ -759,6 +791,7 @@ import { logger } from '$lib/logger'
                 aria-label="Post options"
                 tabindex="-1"
                 class="absolute right-0 z-30 mt-2 w-48 rounded-xl border border-dark-border/70 bg-dark-lighter/90 p-2 shadow-xl"
+                on:click|stopPropagation
               >
                 <button
                   type="button"
@@ -788,6 +821,15 @@ import { logger } from '$lib/logger'
                 >
                   Mute thread
                 </button>
+                {#if isOwnPost}
+                  <button
+                    type="button"
+                    class="mt-1 w-full rounded-lg px-3 py-2 text-left text-sm text-rose-300 transition-colors duration-200 hover:bg-rose-500/20 focus:outline-none focus:ring-2 focus:ring-rose-400/40"
+                    on:click={handleDeletePost}
+                  >
+                    Delete post
+                  </button>
+                {/if}
               </div>
             {/if}
           </div>
@@ -905,7 +947,7 @@ import { logger } from '$lib/logger'
     <!-- Action buttons -->
     {#if showActions}
       <div class="mt-4 flex items-center justify-between text-text-muted border-t border-dark-border/40 pt-3">
-          <!-- Like -->
+        <!-- Like -->
           <button
             on:click|stopPropagation={handleLike}
             disabled={likeLoading}
@@ -913,8 +955,16 @@ import { logger } from '$lib/logger'
               isLiked ? 'text-rose-400/80' : 'text-text-muted'
             }`}
             title={reactionTooltip || 'Like'}
+            aria-label={`Like${displayLikeCount > 0 ? ` (${displayLikeCount})` : ''}`}
+            aria-pressed={isLiked}
           >
-            <LikeIcon size={18} color="currentColor" strokeWidth={1.75} filled={isLiked} />
+            <LikeIcon size={18} color="currentColor" strokeWidth={1.75} filled={isLiked} aria-hidden="true" />
+            <span class={srOnly}>
+              {isLiked ? 'Liked' : 'Like'}
+              {#if displayLikeCount > 0}
+                {` ${displayLikeCount}`}
+              {/if}
+            </span>
             {#if displayLikeCount > 0}
               <span class="text-xs font-medium">{displayLikeCount}</span>
             {/if}
@@ -927,8 +977,15 @@ import { logger } from '$lib/logger'
               hasCommented ? 'text-sky-300' : 'text-text-muted'
             }`}
             title="Comment"
+            aria-label={`Comment${displayReplyCount > 0 ? ` (${displayReplyCount})` : ''}`}
           >
-            <CommentIcon size={18} color="currentColor" strokeWidth={1.75} />
+            <CommentIcon size={18} color="currentColor" strokeWidth={1.75} aria-hidden="true" />
+            <span class={srOnly}>
+              Reply
+              {#if displayReplyCount > 0}
+                {` ${displayReplyCount}`}
+              {/if}
+            </span>
             {#if displayReplyCount > 0}
               <span class="text-xs font-medium">{displayReplyCount}</span>
             {/if}
@@ -944,8 +1001,17 @@ import { logger } from '$lib/logger'
                 isReposted ? 'text-emerald-400/80' : 'text-text-muted'
               }`}
               title="Repost options"
+              aria-haspopup="menu"
+              aria-expanded={repostMenuOpen}
+              aria-label={`Repost${displayRepostCount > 0 ? ` (${displayRepostCount})` : ''}`}
             >
-              <RepostIcon size={18} color="currentColor" strokeWidth={1.75} />
+              <RepostIcon size={18} color="currentColor" strokeWidth={1.75} aria-hidden="true" />
+              <span class={srOnly}>
+                Repost options
+                {#if displayRepostCount > 0}
+                  {` ${displayRepostCount}`}
+                {/if}
+              </span>
               {#if displayRepostCount > 0}
                 <span class="text-xs font-medium">{displayRepostCount}</span>
               {/if}
@@ -986,36 +1052,51 @@ import { logger } from '$lib/logger'
           </div>
 
           <!-- Zap -->
-          <button
-            on:click|stopPropagation={handleZap}
-            disabled={zapLoading}
-            class={`${baseActionClass} hover:text-yellow-400 hover:bg-yellow-400/5 ${
-              isZapped ? 'text-yellow-400/80' : 'text-text-muted'
-            }`}
-            title="Zap {displayZapAmount > 0 ? displayZapAmount + ' sats' : ''}"
-          >
-            <ZapIcon size={18} color="currentColor" strokeWidth={1.75} />
+        <button
+          on:click|stopPropagation={handleZap}
+          disabled={zapLoading}
+          class={`${baseActionClass} hover:text-yellow-400 hover:bg-yellow-400/5 ${
+            isZapped ? 'text-yellow-400/80' : 'text-text-muted'
+          }`}
+          title="Zap {displayZapAmount > 0 ? displayZapAmount + ' sats' : ''}"
+          aria-label={`Zap${displayZapAmount > 0 ? ` (${Math.round(displayZapAmount)} sats)` : ''}`}
+        >
+          <ZapIcon size={18} color="currentColor" strokeWidth={1.75} aria-hidden="true" />
+          <span class={srOnly}>
+            Zap
             {#if displayZapAmount > 0}
-              <span class="text-xs font-medium">{Math.round(displayZapAmount)}</span>
+              {` ${Math.round(displayZapAmount)} sats`}
             {/if}
-          </button>
+          </span>
+          {#if displayZapAmount > 0}
+            <span class="text-xs font-medium">{Math.round(displayZapAmount)}</span>
+          {/if}
+        </button>
 
-          <!-- Ember -->
-          <button
-            on:click|stopPropagation={handleEmber}
-            class={`${baseActionClass} hover:text-orange-400 hover:bg-orange-400/5 ${
-              emberAmount > 0 ? 'text-orange-400' : ''
-            }`}
-            title="Ember {emberAmount > 0 ? emberAmount.toFixed(4) + ' XMR' : ''}"
-          >
-            <EmberIcon size={18} color="currentColor" strokeWidth={1.75} />
+        <!-- Ember -->
+        <button
+          on:click|stopPropagation={handleEmber}
+          class={`${baseActionClass} hover:text-orange-400 hover:bg-orange-400/5 ${
+            emberAmount > 0 ? 'text-orange-400' : ''
+          }`}
+          title={`Ember ${emberAmount > 0 ? `${emberAmount.toFixed(4)} XMR` : ''}`}
+          aria-label={`Ember${emberAmount > 0 ? ` (${emberAmount.toFixed(4)} XMR)` : ''}`}
+        >
+          <EmberIcon size={18} color="currentColor" strokeWidth={1.75} aria-hidden="true" />
+          <span class={srOnly}>
+            Ember
             {#if emberAmount > 0}
-              <span class="text-xs font-medium">{emberAmount.toFixed(4)}</span>
+              {` ${emberAmount.toFixed(4)} XMR`}
             {/if}
-          </button>
+          </span>
+          {#if emberAmount > 0}
+            <span class="text-xs font-medium">{emberAmount.toFixed(4)}</span>
+          {/if}
+        </button>
       </div>
     {/if}
   </div>
+{/if}
 </div>
 
 

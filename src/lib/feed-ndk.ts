@@ -1,6 +1,6 @@
 /**
  * Feed management with NDK
- * Handles following feed, global feed, and event subscriptions
+ * Handles timeline feeds and event subscriptions
  */
 
 import { get } from 'svelte/store'
@@ -119,7 +119,7 @@ function collectEngagementTargets(event: NostrEvent): string[] {
 /**
  * Queue event for debounced feed update
  */
-export function addEventToFeed(input: NostrEvent | NDKEvent, origin: FeedOrigin = 'global'): void {
+export function addEventToFeed(input: NostrEvent | NDKEvent, origin: FeedOrigin = 'following'): void {
   const event = normalizeEvent(input)
   if (!event) return
 
@@ -151,6 +151,11 @@ export function addEventToFeed(input: NostrEvent | NDKEvent, origin: FeedOrigin 
   if (!debounceTimeout) {
     debounceTimeout = setTimeout(flushPendingEvents, FEED_DEBOUNCE_MS)
   }
+}
+
+export function removeEventFromFeed(eventId: string): void {
+  eventCache.delete(eventId)
+  unfilteredFeedEvents.update(existing => existing.filter(ev => ev.id !== eventId))
 }
 
 function shouldIncludeEvent(origin: FeedOrigin, currentFeed: FeedSource): boolean {
@@ -851,63 +856,6 @@ export async function subscribeToLongReadsFeed(): Promise<void> {
 }
 
 /**
- * Subscribe to global feed with timeout and retry
- */
-export async function subscribeToGlobalFeed(retryCount = 0): Promise<void> {
-  try {
-    feedLoading.set(true)
-    feedError.set(null)
-
-    // Create a timeout promise
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error('Global feed subscription timeout')),
-        SUBSCRIPTION_TIMEOUT
-      )
-    )
-
-    // Create subscription promise
-    const subscriptionPromise = new Promise<void>((resolve) => {
-      try {
-        // Optimized for global feed: recent posts from all users
-        subscribeWithFilter(
-          {
-            kinds: [1], // Text notes only
-            limit: 150, // Increased from 100 for better coverage
-            since: Math.floor(Date.now() / 1000) - 7200, // 2 hours for fresh content
-          },
-          'global'
-        )
-        // Resolve after subscription is set up (not waiting for events)
-        resolve()
-      } catch (err) {
-        throw err
-      }
-    })
-
-    // Race timeout vs subscription
-    await Promise.race([subscriptionPromise, timeoutPromise])
-
-  } catch (err) {
-    const errorMsg = String(err)
-    logger.error(`✗ Global feed error (attempt ${retryCount + 1}):`, errorMsg)
-
-    // Retry logic
-    if (retryCount < MAX_RETRIES) {
-      logger.info(`↻ Retrying global feed in ${RETRY_DELAY}ms...`)
-      feedError.set(`Retrying... (${retryCount + 1}/${MAX_RETRIES})`)
-      
-      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY))
-      return subscribeToGlobalFeed(retryCount + 1)
-    }
-
-    // Final error
-    feedError.set(`Failed to load global feed: ${errorMsg}`)
-    feedLoading.set(false)
-  }
-}
-
-/**
  * Subscribe to trending feed using Nostr Wine API
  * Fetches trending event IDs with engagement metrics, then subscribes to events
  * and immediately queues engagement hydration
@@ -1419,6 +1367,33 @@ export async function publishRepost(event: NostrEvent): Promise<void> {
   incrementRepostCount(event.id, 1)
 }
 
+export async function publishDelete(event: NostrEvent): Promise<void> {
+  const ndk = getNDK()
+  const user = getCurrentNDKUser()
+
+  if (!user?.pubkey || !ndk.signer) {
+    throw new Error('Not authenticated')
+  }
+
+  if (event.pubkey !== user.pubkey) {
+    throw new Error('You can only delete your own post')
+  }
+
+  const ndkEvent = new NDKEvent(ndk)
+  ndkEvent.kind = 5
+  ndkEvent.content = ''
+  ndkEvent.tags = [
+    ['e', event.id],
+    ['p', event.pubkey],
+  ]
+  ndkEvent.created_at = Math.floor(Date.now() / 1000)
+
+    await ndkEvent.sign()
+    await publishToConfiguredRelays(ndkEvent)
+
+  removeEventFromFeed(event.id)
+}
+
 /**
  * Publish a zap request (NIP-57)
  */
@@ -1646,13 +1621,10 @@ export async function loadOlderPosts(): Promise<void> {
         break
       }
 
-      case 'global': {
-        filter = {
-          kinds: [1],
-          until,
-          limit: LOAD_MORE_LIMIT,
-        }
-        break
+      case 'trending': {
+        canLoadMore.set(false)
+        isLoadingMore.set(false)
+        return
       }
 
       default:
@@ -1713,4 +1685,5 @@ export async function loadOlderPosts(): Promise<void> {
     isLoadingMore.set(false)
   }
 }
+
 

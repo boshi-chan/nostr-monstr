@@ -12,11 +12,11 @@
   export let event: NostrEvent
 
   // Following AI_Guidelines: Component reads from stores
-  $: filterKey = ((): 'following' | 'circles' | 'global' | 'profile' => {
-    if ($feedSource === 'following' || $feedSource === 'circles' || $feedSource === 'global' || $feedSource === 'profile') {
+  $: filterKey = ((): 'following' | 'circles' | 'trending' | 'profile' => {
+    if ($feedSource === 'following' || $feedSource === 'circles' || $feedSource === 'trending' || $feedSource === 'profile') {
       return $feedSource
     }
-    return 'global'
+    return 'trending'
   })()
   $: currentFilters = $mediaFilters[filterKey]
   $: hasCW = event ? hasContentWarning(event) : false

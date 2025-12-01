@@ -14,7 +14,6 @@
   import {
     stopAllSubscriptions,
     clearFeed,
-    subscribeToGlobalFeed,
     subscribeToFollowingFeed,
     subscribeToCirclesFeed,
     subscribeToTrendingFeed,
@@ -39,6 +38,9 @@
   import { ensureNotificationChannel } from '$lib/native-notifications'
   import { logger } from '$lib/logger'
   import { loadConversations } from '$lib/messaging-simple'
+  import { goBack, activeRoute } from '$stores/router'
+  import { currentRoute, seedHistory, isHistoryNavigation } from '$lib/navigation'
+  import { activeTab } from '$stores/nav'
 
   let sessionReady = false
 
@@ -61,9 +63,9 @@
 
       // After initialization, subscribe to appropriate feed based on auth status
       // If authenticated, the reactive statement will handle switching to following
-      // If not authenticated, subscribe to global
+      // If not authenticated, default to trending
       if (!$isAuthenticated) {
-        feedSource.set('global')
+        feedSource.set('trending')
       }
       sessionReady = true
     } catch (err) {
@@ -81,13 +83,62 @@
     }
   })
 
+  // Android back gesture: navigate back in-app before exiting
+  onMount(() => {
+    registerBackHandler()
+    return () => {
+      backButtonUnsub?.()
+      backButtonUnsub = null
+    }
+  })
+
+  // Seed browser history to keep Android back from exiting immediately
+  onMount(() => {
+    if (typeof window === 'undefined') return
+    seedHistory()
+
+    const handlePop = (event: PopStateEvent) => {
+      // Get the path from the state or fallback to current pathname
+      const path = event.state?.path || window.location.pathname || '/'
+
+      // Mark this as a history navigation (back/forward button press)
+      isHistoryNavigation.set(true)
+
+      // If we have a stored route state, restore it directly
+      if (event.state?.route) {
+        const route = event.state.route
+        activeRoute.set(route)
+        if (route.type === 'page') {
+          activeTab.set(route.tab)
+        } else if (route.type === 'post') {
+          activeTab.set(route.originTab)
+        } else if (route.type === 'profile') {
+          activeTab.set(route.originTab)
+        }
+      }
+
+      // Update the current route which will trigger applyRoute reactively
+      currentRoute.set(path)
+
+      // Reset the flag after a short delay
+      setTimeout(() => isHistoryNavigation.set(false), 100)
+    }
+
+    window.addEventListener('popstate', handlePop)
+    currentRoute.set(window.location.pathname || '/')
+
+    return () => {
+      window.removeEventListener('popstate', handlePop)
+    }
+  })
+
   // Track last feed source to avoid duplicate subscriptions
   let lastFeedSource: string | null = null
   let interactionsLoadedFor: string | null = null
   let interactionCacheHydratedFor: string | null = null
   let lastAuthKey: string | null = null
   let wasAuthenticated = false
-  let currentFeed: FeedSource = 'global'
+  let currentFeed: FeedSource = 'following'
   $: currentFeed = $feedSource
   let authedPubkey: string | null = null
   $: authedPubkey = $currentUser?.pubkey ?? null
@@ -96,13 +147,78 @@
   let authedNow = false
   $: authedNow = $isAuthenticated && Boolean(authedPubkey)
   let appStateUnsub: (() => void) | null = null
+  let backButtonUnsub: (() => void) | null = null
+  let currentPath = typeof window !== 'undefined' ? window.location.pathname || '/' : '/'
+  $: currentPath = $currentRoute
 
-  // When a user logs in, restore their last timeline feed instead of staying on global
+  function applyRoute(path: string): void {
+    const segments = path.split('/').filter(Boolean)
+    const primary = segments[0] ?? 'home'
+
+    switch (primary) {
+      case 'messages':
+        activeRoute.set({ type: 'page', tab: 'messages' })
+        activeTab.set('messages')
+        return
+      case 'notifications':
+        activeRoute.set({ type: 'page', tab: 'notifications' })
+        activeTab.set('notifications')
+        return
+      case 'settings':
+        activeRoute.set({ type: 'page', tab: 'settings' })
+        activeTab.set('settings')
+        return
+      case 'livestreams':
+        activeRoute.set({ type: 'page', tab: 'livestreams' })
+        activeTab.set('livestreams')
+        return
+      case 'discover':
+        activeRoute.set({ type: 'page', tab: 'discover' })
+        activeTab.set('discover')
+        return
+      case 'profile': {
+        const pubkey = segments[1] ?? get(currentUser)?.pubkey ?? ''
+        activeRoute.set({ type: 'profile', pubkey, originTab: 'profile' })
+        activeTab.set('profile')
+        return
+      }
+      case 'post': {
+        const eventId = segments[1]
+        if (eventId) {
+          activeRoute.set({ type: 'post', eventId, originTab: 'home' })
+          activeTab.set('home')
+        } else {
+          activeRoute.set({ type: 'page', tab: 'home' })
+          activeTab.set('home')
+        }
+        return
+      }
+      case 'home':
+      default: {
+        const feedSegment = segments[1]
+        const targetFeed: FeedSource =
+          feedSegment === 'circles' || feedSegment === 'trending' || feedSegment === 'following'
+            ? (feedSegment as FeedSource)
+            : 'following'
+        feedSource.set(targetFeed)
+        activeRoute.set({ type: 'page', tab: 'home' })
+        activeTab.set('home')
+        return
+      }
+    }
+  }
+
+  // Apply route when path changes
+  $: if (currentPath) {
+    applyRoute(currentPath)
+  }
+
+  // When a user logs in, restore their last timeline feed instead of staying on the guest feed
   $: {
     const authedNow = $isAuthenticated && Boolean($currentUser?.pubkey)
     if (authedNow && !wasAuthenticated) {
       const defaultFeed = $lastTimelineFeed ?? 'following'
-      if ($feedSource === 'global') {
+      if ($feedSource === 'trending') {
         feedSource.set(defaultFeed)
       }
     }
@@ -117,6 +233,43 @@
   let resumeInProgress = false
   let lastVisibilityCheck = 0
   const VISIBILITY_DEBOUNCE_MS = 2000 // Only check every 2 seconds max
+
+  function registerBackHandler(): void {
+    if (Capacitor.getPlatform?.() !== 'android') return
+
+    try {
+      const appPlugin =
+        (Capacitor as any)?.Plugins?.App ??
+        (globalThis as any)?.Capacitor?.App ??
+        (globalThis as any)?.Capacitor?.Plugins?.App
+
+      if (appPlugin?.addListener) {
+        const sub = appPlugin.addListener('backButton', () => {
+          const handled = goBack()
+          if (!handled) {
+            appPlugin.exitApp?.()
+          }
+        })
+        backButtonUnsub = () => {
+          void sub?.remove?.()
+        }
+        return
+      }
+
+      // Fallback for environments exposing a Cordova-style backbutton event
+      const handler = (event: Event) => {
+        event.preventDefault()
+        const handled = goBack()
+        if (!handled) {
+          document.removeEventListener('backbutton', handler)
+        }
+      }
+      document.addEventListener('backbutton', handler, false)
+      backButtonUnsub = () => document.removeEventListener('backbutton', handler, false)
+    } catch (err) {
+      logger.warn('Back button handler registration failed', err)
+    }
+  }
 
   async function refreshSessionFromForeground(): Promise<void> {
     if (!hasAppInitialized || resumeInProgress) return
@@ -151,9 +304,7 @@
         stopAllSubscriptions()
         const targetFeed = currentFeed
 
-        if (targetFeed === 'global') {
-          await subscribeToGlobalFeed()
-        } else if (targetFeed === 'trending') {
+        if (targetFeed === 'trending') {
           await subscribeToTrendingFeed()
         } else if (authedNow && authedPubkey) {
           feedError.set(null)
@@ -171,7 +322,8 @@
         } else {
           feedError.set('Log in to view this feed')
           feedLoading.set(false)
-          feedSource.set('global')
+          feedSource.set('trending')
+          await subscribeToTrendingFeed()
         }
       }
 
@@ -277,21 +429,16 @@
       // Give subscriptions time to actually stop before starting new ones
       await new Promise(resolve => setTimeout(resolve, 100))
 
-      if (targetFeed === 'global') {
-        await subscribeToGlobalFeed()
-        return
-      }
-
       if (targetFeed === 'trending') {
         await subscribeToTrendingFeed()
         return
       }
 
       if (!authed || !pubkey) {
-        // If unauthenticated, fall back to global instead of erroring on a gated feed
-        if (targetFeed !== 'global' && targetFeed !== 'trending') {
-          feedSource.set('global')
-          await subscribeToGlobalFeed()
+        // If unauthenticated, fall back to trending instead of erroring on a gated feed
+        if (targetFeed !== 'trending') {
+          feedSource.set('trending')
+          await subscribeToTrendingFeed()
           return
         }
         feedError.set('Log in to view this feed')
@@ -333,9 +480,9 @@
       startNotificationListener($currentUser.pubkey)
     } else {
       stopNotificationListener()
-      // Don't clear feed if we're on global - anonymous users can browse global feed
-      if ($feedSource !== 'global') {
-        feedSource.set('global')
+      // Keep guests on the public trending feed
+      if ($feedSource !== 'trending') {
+        feedSource.set('trending')
       }
       following.set(new Set())
       circles.set(new Set())
@@ -411,4 +558,3 @@
     animation: spin 1s linear infinite;
   }
 </style>
-

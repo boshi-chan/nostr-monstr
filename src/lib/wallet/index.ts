@@ -46,9 +46,10 @@ const WALLET_MASTER_KEY = 'walletMasterKey'
 const HOT_WALLET_WARNING_KEY = 'walletHotWalletWarning'
 const PIN_CANCELLED_ERROR = 'WALLET_PIN_CANCELLED'
 const BLOCK_TIME_SECONDS = 120
-const REFERENCE_HEIGHT = 3350000 // Fallback reference: December 2024
-const REFERENCE_TIMESTAMP = Date.UTC(2024, 11, 15) // Fallback reference: December 15, 2024
-const RESTORE_LOOKBACK_SECONDS = 7 * 24 * 60 * 60 // Lookback period: 7 days for fast sync (enough for new wallets)
+// Reference: Blockchair shows ~3555923 at 10:41 AM GMT Dec 1, 2025
+// Minus ~320 blocks (10.67 hours) to get midnight height
+const REFERENCE_HEIGHT = 3555600 // Height at midnight UTC December 1, 2025 (rounded down for safety)
+const REFERENCE_TIMESTAMP = Date.UTC(2025, 11, 1, 0, 0, 0) // Midnight UTC December 1, 2025
 
 let monero: MoneroLib | null = null
 let walletInstance: MoneroWalletFullInstance | null = null
@@ -489,6 +490,18 @@ async function fetchCurrentHeight(): Promise<number> {
 
     // Type assertion needed because getHeight exists at runtime but not in type definitions
     const daemonHeight = await (connection as any).getHeight()
+
+    // Validate the height is reasonable
+    const fallbackHeight = estimateRestoreHeightFallback(Date.now())
+
+    // If daemon height is significantly higher than estimated height, use fallback
+    // This handles cases where daemon returns incorrect future heights
+    if (daemonHeight > fallbackHeight + 1000) {
+      logger.warn(`Daemon reported suspicious height ${daemonHeight}, using fallback ${fallbackHeight}`)
+      return fallbackHeight
+    }
+
+    logger.info(`Using daemon height: ${daemonHeight}`)
     return daemonHeight
   } catch (err) {
     logger.warn('Failed to fetch daemon height, using fallback estimation:', err)
@@ -501,17 +514,19 @@ async function fetchCurrentHeight(): Promise<number> {
  * Fallback: estimate restore height based on time (used if daemon is unreachable)
  */
 function estimateRestoreHeightFallback(createdAt: number): number {
-  const lookbackMillis = RESTORE_LOOKBACK_SECONDS * 1000
-  const adjustedTimestamp = Math.max(REFERENCE_TIMESTAMP, createdAt - lookbackMillis)
+  const adjustedTimestamp = Math.max(REFERENCE_TIMESTAMP, createdAt)
   const deltaSeconds = Math.max(0, Math.floor((adjustedTimestamp - REFERENCE_TIMESTAMP) / 1000))
   const deltaBlocks = Math.floor(deltaSeconds / BLOCK_TIME_SECONDS)
   const estimatedHeight = Math.max(0, REFERENCE_HEIGHT + deltaBlocks)
 
-  // Safety cap: Don't go more than 90 days ahead of reference to prevent sync failures
-  const maxSafeBlocks = Math.floor((90 * 24 * 60 * 60) / BLOCK_TIME_SECONDS)
-  const cappedHeight = Math.min(estimatedHeight, REFERENCE_HEIGHT + maxSafeBlocks)
+  logger.info(`Restore height calculation:
+    Reference: ${REFERENCE_HEIGHT} @ ${new Date(REFERENCE_TIMESTAMP).toISOString()}
+    Created at: ${new Date(createdAt).toISOString()}
+    Delta seconds: ${deltaSeconds}
+    Delta blocks: ${deltaBlocks}
+    Estimated height: ${estimatedHeight}`)
 
-  return cappedHeight
+  return estimatedHeight
 }
 
 function getNodeCandidates(): MoneroNode[] {
@@ -533,16 +548,16 @@ function getNodeCandidates(): MoneroNode[] {
 /**
  * Calculate restore height with lookback period
  */
-async function calculateRestoreHeight(): Promise<number> {
+export async function calculateRestoreHeight(): Promise<number> {
   const currentHeight = await fetchCurrentHeight()
 
-  // Calculate lookback blocks (30 days)
-  const lookbackBlocks = Math.floor(RESTORE_LOOKBACK_SECONDS / BLOCK_TIME_SECONDS)
+  // Subtract 10 blocks as a safety margin to ensure we don't start ahead of the actual chain
+  // This prevents sync issues from clock drift or network delays
+  return Math.max(0, currentHeight - 10)
+}
 
-  // Restore from current height minus lookback, ensuring we don't go negative
-  const restoreHeight = Math.max(0, currentHeight - lookbackBlocks)
-
-  return restoreHeight
+export async function getDefaultRestoreHeight(): Promise<number> {
+  return calculateRestoreHeight()
 }
 
 function resolveNetworkType(lib: MoneroLib, network: WalletMetaInfo['network']) {
@@ -623,8 +638,13 @@ async function ensureWalletInstance(): Promise<MoneroWalletFullInstance> {
 
 async function disposeWalletInstance(save = true): Promise<void> {
   if (!walletInstance) return
+  const instance = walletInstance
+  const CLOSE_TIMEOUT_MS = 5000
   try {
-    await walletInstance.close(save)
+    await Promise.race([
+      instance.close(save),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Wallet close timeout')), CLOSE_TIMEOUT_MS)),
+    ])
   } catch (err) {
     logger.warn('Failed to close wallet instance', err)
   } finally {

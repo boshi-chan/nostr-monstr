@@ -4,7 +4,7 @@ import type { UserMetadata } from '$types/user'
 import { feedFilters } from './feedFilters'
 import { isReply, isRepostEvent, hasMedia, isBot } from '$lib/content'
 
-export type FeedTab = 'following' | 'circles' | 'global'
+export type FeedTab = 'following' | 'circles' | 'trending'
 
 // Unfiltered feed events (single timeline for the currently active feed)
 export const unfilteredFeedEvents = writable<NostrEvent[]>([])

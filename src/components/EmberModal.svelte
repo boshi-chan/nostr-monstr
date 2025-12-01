@@ -83,8 +83,8 @@
       return
     }
 
-    const amount = Number(amountInput)
-    if (!Number.isFinite(amount) || amount <= 0) {
+    const amountXmr = Number(amountInput)
+    if (!Number.isFinite(amountXmr) || amountXmr <= 0) {
       error = 'Enter a valid amount of XMR.'
       return
     }
@@ -99,16 +99,16 @@
     success = null
 
     try {
-      await sendMonero({
-        address: target.address,
-        amount,
-        note: noteInput.trim() || undefined,
-        recipientPubkey: target.recipientPubkey ?? undefined,
-        noteId: target.noteId ?? undefined,
-      })
-      if (target.noteId) {
-        incrementEmberTotal(target.noteId, amount)
-      }
+        await sendMonero({
+          address: target.address,
+          amount: amountXmr,
+          note: noteInput.trim() || undefined,
+          recipientPubkey: target.recipientPubkey ?? undefined,
+          noteId: target.noteId ?? undefined,
+        })
+        if (target.noteId) {
+          incrementEmberTotal(target.noteId, amountXmr)
+        }
       success = 'Ember sent!'
       setTimeout(() => {
         closeModal()
