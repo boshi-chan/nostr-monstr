@@ -1207,7 +1207,7 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
                 </div>
                 <div class="md:col-span-2">
                   <dt class="text-xs uppercase tracking-[0.25em] text-text-muted">Bio</dt>
-                  <dd class="mt-2 whitespace-pre-line rounded-lg border border-dark-border/60 bg-dark/40 p-3 text-sm text-text-soft/90">
+                  <dd class="mt-2 whitespace-pre-line break-words rounded-lg border border-dark-border/60 bg-dark/40 p-3 text-sm text-text-soft/90">
                     {metadata?.about || 'Not set'}
                   </dd>
                 </div>
@@ -1502,11 +1502,19 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
               </p>
             </div>
 
-            <div class="flex gap-2 rounded-2xl border border-dark-border/60 bg-dark/60 p-1 text-sm font-semibold text-text-muted">
+            <div
+              class="flex gap-2 rounded-2xl border border-dark-border/60 bg-dark/60 p-1 text-sm font-semibold text-text-muted"
+              role="tablist"
+              aria-label="Ember wallet sections"
+            >
               <button
                 type="button"
                 class={`flex-1 rounded-xl px-3 py-2 transition flex items-center justify-center gap-2 ${activeWalletPanel === 'overview' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
                 on:click={() => (activeWalletPanel = 'overview')}
+                role="tab"
+                aria-selected={activeWalletPanel === 'overview'}
+                aria-controls="wallet-panel-overview"
+                aria-label="Overview"
               >
                 <LayoutGridIcon size={16} />
                 <span class="hidden sm:inline">Overview</span>
@@ -1515,6 +1523,10 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
                 type="button"
                 class={`flex-1 rounded-xl px-3 py-2 transition flex items-center justify-center gap-2 ${activeWalletPanel === 'history' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
                 on:click={handleHistoryClick}
+                role="tab"
+                aria-selected={activeWalletPanel === 'history'}
+                aria-controls="wallet-panel-history"
+                aria-label="History"
               >
                 <ClockIcon size={16} />
                 <span class="hidden sm:inline">History</span>
@@ -1523,6 +1535,10 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
                 type="button"
                 class={`flex-1 rounded-xl px-3 py-2 transition flex items-center justify-center gap-2 ${activeWalletPanel === 'deposit' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
                 on:click={() => (activeWalletPanel = 'deposit')}
+                role="tab"
+                aria-selected={activeWalletPanel === 'deposit'}
+                aria-controls="wallet-panel-deposit"
+                aria-label="Deposit"
               >
                 <ArrowDownIcon size={16} />
                 <span class="hidden sm:inline">Deposit</span>
@@ -1531,6 +1547,10 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
                 type="button"
                 class={`flex-1 rounded-xl px-3 py-2 transition flex items-center justify-center gap-2 ${activeWalletPanel === 'withdraw' ? 'bg-primary text-dark shadow-sm shadow-primary/30' : 'hover:text-text-soft'}`}
                 on:click={() => (activeWalletPanel = 'withdraw')}
+                role="tab"
+                aria-selected={activeWalletPanel === 'withdraw'}
+                aria-controls="wallet-panel-withdraw"
+                aria-label="Withdraw"
               >
                 <ArrowUpIcon size={16} />
                 <span class="hidden sm:inline">Withdraw</span>
@@ -1542,7 +1562,7 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
             </p>
 
 {#if activeWalletPanel === 'overview'}
-              <div class="space-y-4">
+              <div id="wallet-panel-overview" class="space-y-4" role="tabpanel" aria-label="Ember wallet overview">
                 <div class="rounded-2xl border border-dark-border/60 bg-dark/50 p-4">
                   <div class="flex items-center justify-between gap-4">
                     <div>
@@ -1728,7 +1748,12 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
                 </div>
               </div>
             {:else if activeWalletPanel === 'deposit'}
-              <div class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4 text-center">
+              <div
+                id="wallet-panel-deposit"
+                class="rounded-2xl border border-dark-border/60 bg-dark/60 p-4 text-center"
+                role="tabpanel"
+                aria-label="Ember wallet deposit"
+              >
                 <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Deposit via QR</p>
                 {#if depositQr}
                   <img src={depositQr} alt="Monero deposit QR" class="mx-auto mt-4 h-48 w-48 rounded-xl border border-dark-border/40 bg-dark/80 p-3" />
@@ -1757,7 +1782,13 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
                 </div>
               </div>
             {:else if activeWalletPanel === 'withdraw'}
-              <form class="space-y-4" on:submit|preventDefault={handleSend}>
+              <form
+                id="wallet-panel-withdraw"
+                class="space-y-4"
+                on:submit|preventDefault={handleSend}
+                role="tabpanel"
+                aria-label="Ember wallet withdraw"
+              >
                 <div>
                   <label for="withdraw-amount" class="text-xs uppercase tracking-[0.25em] text-text-muted">Amount to withdraw (XMR)</label>
                   <div class="mt-2 flex gap-2">
@@ -1829,7 +1860,12 @@ import { nwcConnection, nwcConnected, nwcSnapshot, setNWCFromURI, disconnectNWC,
                 </p>
               </form>
             {:else if activeWalletPanel === 'history'}
-              <div class="space-y-3">
+              <div
+                id="wallet-panel-history"
+                class="space-y-3"
+                role="tabpanel"
+                aria-label="Ember wallet history"
+              >
                 <div class="flex items-center justify-between">
                   <p class="text-xs uppercase tracking-[0.25em] text-text-muted">Transaction History</p>
                   <button

@@ -97,6 +97,12 @@
         event => event.created_at > lastSeenTimestamp && !renderedIds.has(event.id)
       )
       pendingNewCount = Math.max(0, newEvents.length)
+      // Always show older/same-timestamp events immediately, gate only the newer ones
+      const allowedEvents = filtered.filter(
+        event => event.created_at <= lastSeenTimestamp || renderedIds.has(event.id)
+      )
+      visibleEvents = allowedEvents
+      renderedIds = new Set(allowedEvents.map(event => event.id))
     }
 
     mutedCount = $feedEvents.length - filtered.length
@@ -181,15 +187,20 @@
           }
         },
         {
-          rootMargin: '200px', // Trigger 200px before reaching the bottom
+          rootMargin: '500px', // Trigger 500px before reaching the bottom for seamless experience
+          threshold: 0
         }
       )
-
-      if (loadMoreTrigger) {
-        observer.observe(loadMoreTrigger)
-      }
     }
   })
+
+  // Re-observe whenever the trigger element changes (e.g., after feed reset)
+  $: if (observer) {
+    observer.disconnect()
+    if (loadMoreTrigger) {
+      observer.observe(loadMoreTrigger)
+    }
+  }
 
   onDestroy(() => {
     if (observer) {
@@ -337,6 +348,20 @@
 
         <!-- Infinite scroll trigger -->
         <div bind:this={loadMoreTrigger} class="h-1"></div>
+
+        <!-- Manual load-more fallback -->
+        {#if $canLoadMore && !$isLoadingMore}
+          <div class="flex justify-center py-3">
+            <button
+              type="button"
+              class="rounded-full border border-dark-border/70 px-4 py-2 text-sm font-semibold text-text-soft transition hover:border-primary/60 hover:text-white"
+              on:click={() => loadOlderPosts()}
+              aria-live="polite"
+            >
+              Load older posts
+            </button>
+          </div>
+        {/if}
 
         <!-- Loading more indicator -->
         {#if $isLoadingMore}

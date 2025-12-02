@@ -48,7 +48,8 @@ type FeedOrigin = FeedSource | 'local'
 
 // Debounce settings to prevent firehose
 const FEED_DEBOUNCE_MS = 100
-const MAX_FEED_SIZE = 120
+// Allow a deeper backlog so filtered views still have content to scroll
+const MAX_FEED_SIZE = 400
 const BATCH_SIZE = 30
 let debounceTimeout: ReturnType<typeof setTimeout> | null = null
 let pendingEvents: Array<{ event: NostrEvent; origin: FeedOrigin }> = []
@@ -264,6 +265,10 @@ export function clearFeed(): void {
   pendingEvents = []
   unfilteredFeedEvents.set([])
   eventCache.clear()
+  // Reset pagination so new feeds can load more results
+  canLoadMore.set(true)
+  isLoadingMore.set(false)
+  oldestTimestamp.set(null)
 }
 
 function recordUserEvent(event: NostrEvent): void {
@@ -1571,7 +1576,8 @@ export async function loadOlderPosts(): Promise<void> {
 
   try {
     const ndk = getNDK()
-    const LOAD_MORE_LIMIT = 50
+    // Load a generous batch to ensure we have enough content after filtering
+    const LOAD_MORE_LIMIT = 100
 
     let filter: any
     let closeOnEose = true
@@ -1622,6 +1628,7 @@ export async function loadOlderPosts(): Promise<void> {
       }
 
       case 'trending': {
+        // Trending feed doesn't support pagination
         canLoadMore.set(false)
         isLoadingMore.set(false)
         return
@@ -1639,48 +1646,84 @@ export async function loadOlderPosts(): Promise<void> {
       .map(e => normalizeEvent(e.rawEvent()))
       .filter(Boolean) as NostrEvent[]
 
-    logger.info(`Loaded ${olderEvents.length} older posts`)
+    logger.info(`Fetched ${olderEvents.length} older events`)
 
     if (olderEvents.length === 0) {
       // No more posts available
+      logger.info('No more posts available')
       canLoadMore.set(false)
       isLoadingMore.set(false)
       return
     }
 
+    // Filter out events we already have
+    const existingIds = new Set(currentEvents.map(e => e.id))
+    const newEvents = olderEvents.filter(e => !existingIds.has(e.id) && !eventCache.has(e.id))
+
+    if (newEvents.length === 0) {
+      // All fetched events are duplicates
+      logger.info('All fetched events are duplicates, checking if we should stop pagination')
+
+      // If we got back fewer than requested, we've likely hit the end
+      if (olderEvents.length < LOAD_MORE_LIMIT) {
+        canLoadMore.set(false)
+      } else {
+        // Move the timestamp back to try again
+        oldestTimestamp.set(until - 1)
+      }
+
+      isLoadingMore.set(false)
+      return
+    }
+
+    logger.info(`Adding ${newEvents.length} new older posts to feed`)
+
     // Update oldest timestamp
-    const newOldest = Math.min(...olderEvents.map(e => e.created_at))
+    const newOldest = Math.min(...newEvents.map(e => e.created_at))
     oldestTimestamp.set(newOldest)
 
-    // Append to feed (don't replace)
+    // Add events properly through the feed pipeline
+    // This ensures proper caching, metadata fetching, and engagement hydration
+    for (const event of newEvents) {
+      // Cache the event
+      eventCache.set(event.id, event)
+
+      // Fetch metadata for the author
+      if (event.kind === 0) {
+        parseMetadataEvent(event)
+      } else {
+        void fetchUserMetadata(event.pubkey)
+      }
+    }
+
+    // Append to feed immediately (bypass debounce for pagination)
     unfilteredFeedEvents.update(existing => {
-      const combined = [...existing, ...olderEvents]
-      // Deduplicate by ID
-      const seen = new Set<string>()
-      const deduped = combined.filter(e => {
-        if (seen.has(e.id)) return false
-        seen.add(e.id)
-        return true
-      })
+      const combined = [...existing, ...newEvents]
+
       // Sort by created_at descending
-      deduped.sort((a, b) => b.created_at - a.created_at)
-      return deduped
+      combined.sort((a, b) => b.created_at - a.created_at)
+
+      // Limit total feed size
+      return combined.slice(0, MAX_FEED_SIZE)
     })
 
     // Queue engagement hydration for new events
     const engagementIds: string[] = []
-    for (const event of olderEvents) {
+    for (const event of newEvents) {
       engagementIds.push(...collectEngagementTargets(event))
     }
+    logger.info(`Queueing engagement hydration for ${engagementIds.length} IDs`)
     queueEngagementHydration(engagementIds)
 
-    // If we got fewer events than requested, we've likely hit the end
+    // If we got back fewer results than requested, we're probably at the end
     if (olderEvents.length < LOAD_MORE_LIMIT) {
+      logger.info('Received fewer results than requested, disabling further pagination')
       canLoadMore.set(false)
     }
 
   } catch (err) {
     logger.error('Failed to load older posts:', err)
+    feedError.set('Failed to load older posts')
   } finally {
     isLoadingMore.set(false)
   }

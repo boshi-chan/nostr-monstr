@@ -673,16 +673,9 @@ import { currentUser, isAuthenticated } from '$stores/auth'
 <svelte:window on:click={handleWindowClick} on:keydown={handleWindowKeydown} />
 
 <div
-  role="button"
+  role="article"
   class="relative cursor-pointer rounded-2xl border border-dark-border/80 bg-dark/60 px-5 py-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-dark/50 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary/40 overflow-visible"
-  tabindex="0"
   on:click={() => onSelect?.(actionableEvent)}
-  on:keydown={(e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault()
-      onSelect?.(actionableEvent)
-    }
-  }}
 >
   {#if deleted}
     <p class="text-sm text-text-muted">Delete request sent. Relays may take time to honor deletes.</p>

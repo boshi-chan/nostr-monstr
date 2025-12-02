@@ -126,19 +126,6 @@
         <p class="mt-2 line-clamp-3 break-words text-sm text-text-soft/90">
           {quotedEvent.content}
         </p>
-
-        <!-- Muted engagement bar -->
-        <div class="mt-3 flex items-center gap-4 text-xs text-text-muted/60">
-          <span class="flex items-center gap-1.5">
-            <CommentIcon size={14} color="currentColor" strokeWidth={1.5} />
-          </span>
-          <span class="flex items-center gap-1.5">
-            <RepostIcon size={14} color="currentColor" strokeWidth={1.5} />
-          </span>
-          <span class="flex items-center gap-1.5">
-            <LikeIcon size={14} color="currentColor" strokeWidth={1.5} />
-          </span>
-        </div>
       </div>
     </div>
   </div>
