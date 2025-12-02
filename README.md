@@ -1,9 +1,9 @@
 # Monstr
 
-Monstr is a Svelte + Vite Nostr client with first-class Android (Capacitor) support, built around:
+Monstr is a Svelte + Vite Nostr client alchemically vibe-coded by an insane person who doesn't know what hes doing (me, boseph) with Android (Capacitor) support, built around:
 
 - Timeline feeds: following, circles, trending
-- Posting, replies, reposts, zaps, and Monero “Ember” tipping
+- Posting, replies, reposts, bitcoin lightning zaps, and Monero “Ember” tipping
 - Wallet support (create/import, send, sync) with restore height control
 - Accessibility focus: labeled actions for screen readers, reduced feed auto-refresh churn
 - Android-native niceties: back button navigation, safe-area aware layout, deep links
@@ -47,3 +47,8 @@ Deleting your own post emits a NIP-09 delete event and hides it locally. Relay c
 
 ## License
 BSD 3-Clause License © 2025 boshi-chan (boseph). See `LICENSE`.
+
+## Support
+If you are someone that does know what they're doing and you want to help me out, please reach out via nostr npub1zwphufj02nwm9fy0hr8879l74ky7kqz50lz8wdyeu79gsa7zz3esu2s3t5
+
+XMR: 86XNW3VzrCj4QhFbTAJ6mDDtvj9iJBjpM8CYweYvrBe74pEDkXbcdpJhWw4urgSzuJjHSb19x6okdVHgcgZz6WPdHzgGRS3
