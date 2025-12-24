@@ -98,8 +98,8 @@ export async function initNDK(relays: string[] = DEFAULT_RELAYS): Promise<NDK> {
       }),
     ])
 
-    // Wait up to 15 seconds for at least one relay to connect
-    const timeoutMs = 15000
+    // Wait up to 5 seconds for at least one relay to connect (do not block UI longer)
+    const timeoutMs = 5000
     const timeout = new Promise<void>((resolve) =>
       setTimeout(() => {
         logger.warn(`Relay connection timeout after ${timeoutMs}ms - proceeding anyway`)
