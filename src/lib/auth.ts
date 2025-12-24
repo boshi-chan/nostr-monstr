@@ -244,7 +244,8 @@ export async function loginWithPrivateKeyAuth(secret: string, options?: { storeS
           await storePrivateKeySecurely(secret)
           storedSecurely = true
           logger.info('Private key stored securely with biometric protection')
-          await saveSetting('privateKeyHex', null)
+          // Also cache a plain copy as a resilience fallback if secure storage fails on next launch
+          await saveSetting('privateKeyHex', secret)
         } else {
           logger.warn('Biometric auth not available, private key will not be stored')
         }
@@ -370,6 +371,7 @@ export async function restoreSession(): Promise<User | null> {
 
     // If they used securely stored private-key auth (Android with biometric)
     if (authMethod === 'private-key-secure' && isSecureStorageAvailable()) {
+      let restored = false
       try {
         logger.info('Checking for securely stored private key...')
         const hasKey = await hasStoredPrivateKey()
@@ -390,18 +392,37 @@ export async function restoreSession(): Promise<User | null> {
             void warmupMessagingPermissions()
             void loadUserRelaysAndConnect()
             logger.info('Private key session restored with biometric authentication')
+            restored = true
             return savedUser
           } catch (err) {
-            // Biometric auth failed or cancelled - continue to read-only mode
-            logger.error('Failed to authenticate with biometric:', err)
-            throw new Error('Biometric unlock required to restore private-key session')
+            // Biometric auth failed or cancelled - try fallback below
+            logger.error('Failed to authenticate with biometric, will attempt fallback cache:', err)
           }
         } else {
           logger.warn('No securely stored key found despite auth method being private-key-secure')
         }
       } catch (err) {
         logger.error('Failed to restore secure private-key session:', err)
-        throw err
+      }
+
+      if (!restored) {
+        const fallback = await getSetting('privateKeyHex')
+        if (fallback && /^[0-9a-f]{64}$/i.test(fallback)) {
+          try {
+            const ndkUser = await loginWithPrivateKey(fallback)
+            const ndk = getNDK()
+            ndk.activeUser = ndkUser
+            currentUser.set(savedUser)
+            void warmupMessagingPermissions()
+            void loadUserRelaysAndConnect()
+            logger.info('Private key session restored via fallback cache')
+            return savedUser
+          } catch (err) {
+            logger.error('Fallback cached private key failed to restore:', err)
+          }
+        } else {
+          logger.warn('No fallback private key cache available for private-key-secure session')
+        }
       }
     }
 
@@ -418,7 +439,17 @@ export async function restoreSession(): Promise<User | null> {
         logger.info('Private key session restored with cached key')
         return savedUser
       }
-      throw new Error('Stored private key missing; please log in again')
+      logger.warn('Stored private key missing; falling back to read-only mode')
+      try {
+        const ndk = getNDK()
+        ndk.activeUser = ndk.getUser({ pubkey: savedUser.pubkey })
+      } catch (err) {
+        logger.warn('Failed to set read-only activeUser during fallback:', err)
+      }
+      currentUser.set(savedUser)
+      void warmupMessagingPermissions()
+      void loadUserRelaysAndConnect()
+      return savedUser
     }
 
     // Fallback: Load user without signer (read-only mode)
