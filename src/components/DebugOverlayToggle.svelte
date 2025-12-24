@@ -9,6 +9,13 @@
     debugOverlayEnabled.toggle()
   }
 
+  function handleToggleKey(event: KeyboardEvent) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      handleToggle()
+    }
+  }
+
   function handleTapZoneClick() {
     tapCount += 1
     if (tapCount >= 5) {
@@ -22,10 +29,31 @@
       tapCount = 0
     }, 2000)
   }
+
+  function handleTapZoneKey(event: KeyboardEvent) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      handleTapZoneClick()
+    }
+  }
 </script>
 
-<div class="debug-toggle" on:click={handleToggle}>
-  <div class="tap-zone" on:click|stopPropagation={handleTapZoneClick}></div>
+<div
+  class="debug-toggle"
+  role="button"
+  tabindex="0"
+  aria-label="Toggle debug overlay"
+  on:click={handleToggle}
+  on:keydown={handleToggleKey}
+>
+  <div
+    class="tap-zone"
+    role="button"
+    tabindex="0"
+    aria-label="Hidden debug tap zone"
+    on:click|stopPropagation={handleTapZoneClick}
+    on:keydown|stopPropagation={handleTapZoneKey}
+  ></div>
 </div>
 
 <style>

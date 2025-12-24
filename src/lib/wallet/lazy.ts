@@ -1,9 +1,10 @@
-﻿/**
+/**
  * Lazy loading wrapper for wallet functionality
  * This ensures the large monero-ts library is only loaded when actually needed
  */
 
 import { getSetting } from '$lib/db'
+import { logger } from '$lib/logger'
 
 let walletModulePromise: Promise<typeof import('./index')> | null = null
 let walletModule: typeof import('./index') | null = null
@@ -14,7 +15,7 @@ let walletExistsCache: boolean | null = null
  */
 function loadWalletModule() {
   if (!walletModulePromise) {
-    logger.info('📦 Lazy loading wallet module (monero-ts)...')
+    logger.info('?? Lazy loading wallet module (monero-ts)...')
     walletModulePromise = import('./index').then(mod => {
       walletModule = mod
       return mod
@@ -34,7 +35,7 @@ export async function checkWalletExists(): Promise<boolean> {
 
   const [hasWalletSecrets, hasWalletMeta] = await Promise.all([
     getSetting('walletEncrypted'),
-    getSetting('walletMetaInfo')
+    getSetting('walletMetaInfo'),
   ])
 
   walletExistsCache = Boolean(hasWalletSecrets && hasWalletMeta)
@@ -48,12 +49,22 @@ export async function checkWalletExists(): Promise<boolean> {
 export async function hydrateWalletStateLazy(): Promise<void> {
   const walletExists = await checkWalletExists()
 
-  const wallet = await loadWalletModule()
-  await wallet.hydrateWalletState()
-  walletExistsCache = walletExists
-  logger.info(walletExists ? '🔥 Wallet hydrated and ready for auto-sync' : '🚫 No wallet found - wallet state reset')
-}
+  if (!walletExists) {
+    walletExistsCache = false
+    logger.info('?? No wallet found - skipping monero-ts load during init')
+    return
+  }
 
+  try {
+    const wallet = await loadWalletModule()
+    await wallet.hydrateWalletState()
+    walletExistsCache = walletExists
+    logger.info('?? Wallet hydrated and ready for auto-sync')
+  } catch (err) {
+    walletExistsCache = walletExists
+    logger.warn('?? Wallet hydration failed; continuing without wallet', err)
+  }
+}
 
 /**
  * Invalidate wallet exists cache (call when creating/deleting wallet)

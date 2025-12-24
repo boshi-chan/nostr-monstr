@@ -83,6 +83,22 @@
 
   const repoUrl = 'https://github.com/boshi-chan/nostr-monstr'
   const appVersion = packageInfo.version ?? '0.0.0'
+
+  function handleOverlayKey(event: KeyboardEvent): void {
+    if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      showAboutMenu = false
+    }
+  }
+
+  function handleDialogKey(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      showAboutMenu = false
+    } else {
+      event.stopPropagation()
+    }
+  }
 </script>
 
 <div
@@ -159,10 +175,18 @@
   <div
     class="fixed inset-0 z-40 flex items-center justify-center bg-black/70 px-4"
     on:click={() => (showAboutMenu = false)}
+    role="button"
+    tabindex="0"
+    aria-label="Close about modal"
+    on:keydown={handleOverlayKey}
   >
     <div
       class="w-full max-w-sm rounded-2xl border border-white/10 bg-dark/95 p-6 text-sm text-text-soft shadow-2xl"
       on:click|stopPropagation
+      role="dialog"
+      aria-modal="true"
+      tabindex="-1"
+      on:keydown|stopPropagation={handleDialogKey}
     >
       <div class="mb-4 flex items-center justify-between">
         <div>

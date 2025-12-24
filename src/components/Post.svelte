@@ -676,6 +676,13 @@ import { currentUser, isAuthenticated } from '$stores/auth'
   role="article"
   class="relative cursor-pointer rounded-2xl border border-dark-border/80 bg-dark/60 px-5 py-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-dark/50 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary/40 overflow-visible"
   on:click={() => onSelect?.(actionableEvent)}
+  tabindex="0"
+  on:keydown={(event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      onSelect?.(actionableEvent)
+    }
+  }}
 >
   {#if deleted}
     <p class="text-sm text-text-muted">Delete request sent. Relays may take time to honor deletes.</p>
@@ -785,6 +792,7 @@ import { currentUser, isAuthenticated } from '$stores/auth'
                 tabindex="-1"
                 class="absolute right-0 z-30 mt-2 w-48 rounded-xl border border-dark-border/70 bg-dark-lighter/90 p-2 shadow-xl"
                 on:click|stopPropagation
+                on:keydown|stopPropagation
               >
                 <button
                   type="button"

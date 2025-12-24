@@ -244,6 +244,7 @@ export async function loginWithPrivateKeyAuth(secret: string, options?: { storeS
           await storePrivateKeySecurely(secret)
           storedSecurely = true
           logger.info('Private key stored securely with biometric protection')
+          await saveSetting('privateKeyHex', null)
         } else {
           logger.warn('Biometric auth not available, private key will not be stored')
         }
@@ -253,6 +254,12 @@ export async function loginWithPrivateKeyAuth(secret: string, options?: { storeS
       }
     } else {
       logger.info('Secure storage not available or disabled')
+      try {
+        await saveSetting('privateKeyHex', secret)
+        logger.info('Private key cached locally for session restore (not biometric-protected)')
+      } catch (err) {
+        logger.warn('Failed to cache private key for restore:', err)
+      }
     }
 
     // Save to store and persistence
@@ -387,31 +394,31 @@ export async function restoreSession(): Promise<User | null> {
           } catch (err) {
             // Biometric auth failed or cancelled - continue to read-only mode
             logger.error('Failed to authenticate with biometric:', err)
-            logger.warn('Using read-only mode')
+            throw new Error('Biometric unlock required to restore private-key session')
           }
         } else {
           logger.warn('No securely stored key found despite auth method being private-key-secure')
         }
       } catch (err) {
         logger.error('Failed to restore secure private-key session:', err)
+        throw err
       }
     }
 
     // If they used direct private-key auth without secure storage
-    // We cannot restore the signer (don't store unencrypted private keys)
-    if (authMethod === 'private-key' || authMethod === 'private-key-secure') {
-      try {
+    if (authMethod === 'private-key') {
+      const storedKey = await getSetting('privateKeyHex')
+      if (storedKey && /^[0-9a-f]{64}$/i.test(storedKey)) {
+        const ndkUser = await loginWithPrivateKey(storedKey)
         const ndk = getNDK()
-        // Set activeUser for read-only mode (can view feed but not post)
-        ndk.activeUser = ndk.getUser({ pubkey: savedUser.pubkey })
-        logger.info('Private key session restored in read-only mode (cannot sign without authentication)')
-      } catch (err) {
-        logger.warn('Failed to set activeUser for private-key restore:', err)
+        ndk.activeUser = ndkUser
+        currentUser.set(savedUser)
+        void warmupMessagingPermissions()
+        void loadUserRelaysAndConnect()
+        logger.info('Private key session restored with cached key')
+        return savedUser
       }
-      currentUser.set(savedUser)
-      void warmupMessagingPermissions()
-      void loadUserRelaysAndConnect()
-      return savedUser
+      throw new Error('Stored private key missing; please log in again')
     }
 
     // Fallback: Load user without signer (read-only mode)
@@ -471,6 +478,7 @@ export async function logout(): Promise<void> {
   const authMethod = await getSetting('authMethod')
   await saveSetting('authMethod', null)
   await saveSetting('nostrConnectSigner', null)
+  await saveSetting('privateKeyHex', null)
 
   // Clear securely stored private key if present
   if (authMethod === 'private-key-secure' && isSecureStorageAvailable()) {

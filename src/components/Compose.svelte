@@ -32,6 +32,11 @@
   $: metadata = $metadataCache.get($currentUser?.pubkey || '')
   $: displayName = getDisplayName($currentUser?.pubkey || '', metadata)
   $: avatarUrl = getAvatarUrl(metadata)
+  $: userAvatar = avatarUrl || $currentUser?.picture || null
+  $: userName =
+    displayName ||
+    $currentUser?.name ||
+    ($currentUser?.pubkey ? `${$currentUser.pubkey.slice(0, 8)}…` : 'Nostr user')
   $: charCount = content.length
   $: isOverLimit = charCount > MAX_CHARS
   $: isNearLimit = charCount > MAX_CHARS * 0.9
@@ -186,10 +191,10 @@
 <!-- Modal overlay -->
 {#if $showCompose}
   <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-3 py-6 sm:px-4 sm:py-8"
+    class="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/50 px-3 py-4 sm:px-4 sm:py-8"
     style="
-      padding-top: calc(env(safe-area-inset-top, 0px) + 1rem);
-      padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem);
+      padding-top: calc(env(safe-area-inset-top, 0px) + 72px);
+      padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 24px);
     "
     role="dialog"
     aria-modal="true"
@@ -202,8 +207,8 @@
     />
     <!-- Modal content -->
     <div
-      class="relative mx-auto w-full max-w-xl sm:max-w-2xl overflow-y-auto rounded-3xl border border-dark-border bg-dark-light"
-      style="max-height: calc(100vh - 4rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));"
+      class="relative mx-auto mt-3 w-full max-w-lg sm:max-w-xl md:max-w-2xl overflow-y-auto rounded-3xl border border-dark-border bg-dark-light shadow-2xl"
+      style="max-height: calc(82vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));"
       on:click|stopPropagation
       role="presentation"
     >
@@ -253,15 +258,15 @@
       <div class="px-4 py-4 md:px-6 md:py-6">
         <!-- User info -->
         <div class="mb-4 flex gap-3">
-          {#if avatarUrl}
-            <img src={avatarUrl} alt={displayName} class="h-12 w-12 rounded-full object-cover flex-shrink-0" />
+          {#if userAvatar}
+            <img src={userAvatar} alt={userName} class="h-12 w-12 rounded-full object-cover flex-shrink-0" />
           {:else}
             <div class="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-primary/20 text-sm font-bold text-primary">
-              {displayName.slice(0, 2).toUpperCase()}
+              {userName.slice(0, 2).toUpperCase()}
             </div>
           {/if}
           <div class="flex-1">
-            <p class="font-semibold text-text-soft">{displayName}</p>
+            <p class="font-semibold text-text-soft">{userName}</p>
             <p class="text-sm text-text-muted">Public</p>
           </div>
         </div>
@@ -301,9 +306,9 @@
             on:input={handleTextareaInput}
             on:keydown={handleKeyDown}
             placeholder="What's happening!?"
-            class="relative w-full resize-none bg-transparent text-2xl placeholder-text-muted/50 outline-none {mentionedNames.size > 0 ? 'text-transparent caret-text-soft' : 'text-text-soft'}"
+            class="relative w-full resize-none bg-transparent text-xl sm:text-2xl placeholder-text-muted/50 outline-none {mentionedNames.size > 0 ? 'text-transparent caret-text-soft' : 'text-text-soft'}"
             style="line-height: 1.5;"
-            rows="6"
+            rows="4"
           />
         </div>
 

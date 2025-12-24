@@ -47,7 +47,7 @@ export async function initNDK(relays: string[] = DEFAULT_RELAYS): Promise<NDK> {
     })
 
     // Create promise to wait for first relay connection
-    let resolveFirstConnection: () => void
+    let resolveFirstConnection: (() => void) | null = null
     const firstConnectionPromise = new Promise<void>((resolve) => {
       resolveFirstConnection = resolve
     })
@@ -63,7 +63,7 @@ export async function initNDK(relays: string[] = DEFAULT_RELAYS): Promise<NDK> {
       // Resolve on first connection
       if (!hasConnected) {
         hasConnected = true
-        resolveFirstConnection()
+        resolveFirstConnection?.()
       }
     })
 
@@ -83,8 +83,20 @@ export async function initNDK(relays: string[] = DEFAULT_RELAYS): Promise<NDK> {
       })
     }
 
-    // Also call ndk.connect() for any additional setup
-    await ndkInstance.connect()
+    // Also call ndk.connect() for any additional setup, but guard against hanging forever
+    const connectTimeoutMs = 8000
+    const connectPromise = ndkInstance.connect().catch(err => {
+      logger.warn('ndk.connect() failed, continuing with partial connectivity', err)
+    })
+    await Promise.race([
+      connectPromise,
+      new Promise<void>(resolve => {
+        setTimeout(() => {
+          logger.warn(`ndk.connect() timed out after ${connectTimeoutMs}ms - proceeding with initialization`)
+          resolve()
+        }, connectTimeoutMs)
+      }),
+    ])
 
     // Wait up to 15 seconds for at least one relay to connect
     const timeoutMs = 15000
@@ -96,6 +108,9 @@ export async function initNDK(relays: string[] = DEFAULT_RELAYS): Promise<NDK> {
     )
 
     await Promise.race([firstConnectionPromise, timeout])
+    if (!hasConnected) {
+      ndkConnecting.set(false)
+    }
 
     // Check which relays actually connected
     const allRelays = Array.from(ndkInstance.pool.relays.values())
